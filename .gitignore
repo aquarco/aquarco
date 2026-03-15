@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Build output
+.next/
+dist/
+build/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+pgdata/
+
+# Logs
+*.log
+.claude/logs/
+
+# Test coverage
+coverage/
+
+# Vagrant
+.vagrant/
+
+# Terraform state (if any)
+*.tfstate
+*.tfstate.backup
+
+# Temporary files
+/tmp/
+logs/
+.claude/settings.local.json

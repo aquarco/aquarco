@@ -1,0 +1,201 @@
+'use client'
+
+import { useState } from 'react'
+import { useQuery } from '@apollo/client'
+import { useRouter } from 'next/navigation'
+import Box from '@mui/material/Box'
+import Typography from '@mui/material/Typography'
+import Table from '@mui/material/Table'
+import TableBody from '@mui/material/TableBody'
+import TableCell from '@mui/material/TableCell'
+import TableContainer from '@mui/material/TableContainer'
+import TableHead from '@mui/material/TableHead'
+import TableRow from '@mui/material/TableRow'
+import TablePagination from '@mui/material/TablePagination'
+import Paper from '@mui/material/Paper'
+import Skeleton from '@mui/material/Skeleton'
+import Alert from '@mui/material/Alert'
+import Stack from '@mui/material/Stack'
+import Select from '@mui/material/Select'
+import MenuItem from '@mui/material/MenuItem'
+import FormControl from '@mui/material/FormControl'
+import InputLabel from '@mui/material/InputLabel'
+import Chip from '@mui/material/Chip'
+import { GET_TASKS, GET_REPOSITORIES } from '@/lib/graphql/queries'
+import { StatusChip } from '@/components/ui/StatusChip'
+import { monoStyle } from '@/lib/theme'
+import { formatDate } from '@/lib/format'
+
+const TASK_STATUSES = ['PENDING', 'QUEUED', 'EXECUTING', 'COMPLETED', 'FAILED', 'TIMEOUT', 'BLOCKED']
+const TASK_CATEGORIES = ['REVIEW', 'IMPLEMENTATION', 'TEST', 'DESIGN', 'DOCS', 'ANALYZE']
+
+interface Task {
+  id: string
+  title: string
+  category: string
+  status: string
+  repository: { name: string }
+  createdAt: string
+  pipeline?: string | null
+  assignedAgent?: string | null
+}
+
+interface Repository {
+  name: string
+}
+
+export default function TasksPage() {
+  const router = useRouter()
+  const [statusFilter, setStatusFilter] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [repoFilter, setRepoFilter] = useState('')
+  const [page, setPage] = useState(0)
+  const [rowsPerPage, setRowsPerPage] = useState(25)
+
+  const { data: reposData } = useQuery(GET_REPOSITORIES)
+
+  const { data, loading, error } = useQuery(GET_TASKS, {
+    variables: {
+      limit: rowsPerPage,
+      offset: page * rowsPerPage,
+      status: statusFilter || undefined,
+      category: categoryFilter || undefined,
+      repository: repoFilter || undefined,
+    },
+  })
+
+  const tasks: Task[] = data?.tasks?.nodes ?? []
+  const totalCount: number = data?.tasks?.totalCount ?? -1
+  const repositories: Repository[] = reposData?.repositories ?? []
+
+  return (
+    <Box>
+      <Typography variant="h5" fontWeight={700} gutterBottom>
+        Tasks
+      </Typography>
+
+      {/* Filters */}
+      <Stack direction="row" spacing={2} sx={{ mb: 2 }} flexWrap="wrap">
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel>Status</InputLabel>
+          <Select
+            value={statusFilter}
+            label="Status"
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(0) }}
+            data-testid="filter-status"
+          >
+            <MenuItem value="">All</MenuItem>
+            {TASK_STATUSES.map((s) => (
+              <MenuItem key={s} value={s}>{s}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel>Category</InputLabel>
+          <Select
+            value={categoryFilter}
+            label="Category"
+            onChange={(e) => { setCategoryFilter(e.target.value); setPage(0) }}
+            data-testid="filter-category"
+          >
+            <MenuItem value="">All</MenuItem>
+            {TASK_CATEGORIES.map((c) => (
+              <MenuItem key={c} value={c}>{c}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel>Repository</InputLabel>
+          <Select
+            value={repoFilter}
+            label="Repository"
+            onChange={(e) => { setRepoFilter(e.target.value); setPage(0) }}
+            data-testid="filter-repository"
+          >
+            <MenuItem value="">All</MenuItem>
+            {repositories.map((r) => (
+              <MenuItem key={r.name} value={r.name}>{r.name}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Stack>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          Failed to load tasks: {error.message}
+        </Alert>
+      )}
+
+      <TableContainer component={Paper} variant="outlined">
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>ID</TableCell>
+              <TableCell>Title</TableCell>
+              <TableCell>Category</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Repository</TableCell>
+              <TableCell>Pipeline</TableCell>
+              <TableCell>Created</TableCell>
+              <TableCell>Agent</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {loading
+              ? [...Array(rowsPerPage > 10 ? 10 : rowsPerPage)].map((_, i) => (
+                  <TableRow key={i}>
+                    {[...Array(8)].map((_, j) => (
+                      <TableCell key={j}>
+                        <Skeleton variant="text" />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              : tasks.map((task) => (
+                  <TableRow
+                    key={task.id}
+                    hover
+                    sx={{ cursor: 'pointer' }}
+                    onClick={() => router.push(`/tasks/${task.id}`)}
+                    data-testid={`task-row-${task.id}`}
+                  >
+                    <TableCell>
+                      <Typography sx={monoStyle} component="span">
+                        {task.id.slice(0, 8)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>{task.title}</TableCell>
+                    <TableCell>
+                      <Chip label={task.category} variant="outlined" size="small" />
+                    </TableCell>
+                    <TableCell>
+                      <StatusChip status={task.status} />
+                    </TableCell>
+                    <TableCell>{task.repository.name}</TableCell>
+                    <TableCell>{task.pipeline ?? '—'}</TableCell>
+                    <TableCell>{formatDate(task.createdAt)}</TableCell>
+                    <TableCell>{task.assignedAgent ?? '—'}</TableCell>
+                  </TableRow>
+                ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      <TablePagination
+        component="div"
+        count={totalCount}
+        rowsPerPage={rowsPerPage}
+        page={page}
+        onPageChange={(_, newPage) => setPage(newPage)}
+        onRowsPerPageChange={(e) => {
+          setRowsPerPage(parseInt(e.target.value, 10))
+          setPage(0)
+        }}
+        rowsPerPageOptions={[10, 25, 50]}
+        labelDisplayedRows={({ from, to }) => `${from}–${to}`}
+      />
+    </Box>
+  )
+}

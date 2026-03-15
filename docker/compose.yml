@@ -1,0 +1,83 @@
+name: ai-fishtank
+
+networks:
+  ai-fishtank:
+    driver: bridge
+
+volumes:
+  pgdata:
+  api_modules:
+  web_modules:
+
+services:
+
+  # ── PostgreSQL ────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks:
+      - ai-fishtank
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../db/migrations:/docker-entrypoint-initdb.d
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aifishtank}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aifishtank}
+      POSTGRES_DB: ${POSTGRES_DB:-aifishtank}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aifishtank}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── GraphQL API ───────────────────────────────────────────────────────────────
+  api:
+    image: node:20-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "npm install && npm run codegen && npm run dev"
+    networks:
+      - ai-fishtank
+    ports:
+      - "4000:4000"
+    volumes:
+      - ../api/src:/app/src
+      - ../api/package.json:/app/package.json
+      - ../api/tsconfig.json:/app/tsconfig.json
+      - ../api/codegen.yml:/app/codegen.yml
+      - api_modules:/app/node_modules
+      - ${AGENT_SSH_DIR:-/home/agent/.ssh}:/agent-ssh
+      - ${REPOS_BASE:-/home/agent/repos}:/repos
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://aifishtank:aifishtank@postgres:5432/aifishtank}
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${PORT:-4000}
+      REPOS_BASE: ${REPOS_BASE:-/home/agent/repos}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Web UI (Next.js) ──────────────────────────────────────────────────────────
+  web:
+    image: node:20-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    networks:
+      - ai-fishtank
+    ports:
+      - "8080:3000"
+    volumes:
+      - ../web/src:/app/src
+      - ../web/public:/app/public
+      - ../web/package.json:/app/package.json
+      - ../web/tsconfig.json:/app/tsconfig.json
+      - ../web/next.config.js:/app/next.config.js
+      - web_modules:/app/node_modules
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000/graphql}
+      NODE_ENV: ${NODE_ENV:-development}
+    depends_on:
+      - api

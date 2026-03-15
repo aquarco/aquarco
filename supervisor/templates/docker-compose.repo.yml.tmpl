@@ -1,0 +1,89 @@
+# Template for target repository Docker Compose stack
+# Copied to each repo's directory and customized by the supervisor via repo-manager.sh.
+# Variables of the form ${VAR:-default} are resolved by Docker Compose at runtime from
+# the .env file placed alongside this file.  __PLACEHOLDERS__ are substituted by sed
+# inside repo-manager.sh before the file reaches Docker Compose.
+
+name: aifishtank-${REPO_NAME:-repo}
+
+networks:
+  default:
+    name: aifishtank-${REPO_NAME:-repo}
+
+volumes:
+  frontend_modules:
+  api_modules:
+  pgdata:
+
+services:
+
+  # ── Frontend (Next.js) ───────────────────────────────────────────────────────
+  frontend:
+    image: node:20-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "
+        if [ -f /app/package.json ]; then
+          npm install && npm run dev
+        else
+          echo 'No package.json in /app — skipping frontend' && sleep infinity
+        fi
+      "
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./frontend:/app:delegated
+      - frontend_modules:/app/node_modules
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-4000}/graphql
+    depends_on:
+      api:
+        condition: service_started
+
+  # ── GraphQL API ───────────────────────────────────────────────────────────────
+  api:
+    image: node:20-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "
+        if [ -f /app/package.json ]; then
+          npm install && npm run dev
+        else
+          echo 'No package.json in /app — skipping api' && sleep infinity
+        fi
+      "
+    ports:
+      - "${API_PORT:-4000}:4000"
+    volumes:
+      - ./api:/app:delegated
+      - api_modules:/app/node_modules
+    environment:
+      NODE_ENV: development
+      PORT: "4000"
+      DATABASE_URL: >-
+        postgresql://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-dev}@postgres:5432/${POSTGRES_DB:-dev}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── PostgreSQL ────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev}
+      POSTGRES_DB: ${POSTGRES_DB:-dev}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dev}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5

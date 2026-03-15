@@ -1,0 +1,47 @@
+{
+  "_meta": {
+    "description": "Product Requirements Document — managed by Ralph agent",
+    "last_updated": "",
+    "version": "0.1.0",
+    "updated_by": "ralph"
+  },
+  "project": {
+    "name": "",
+    "description": "",
+    "status": "planning"
+  },
+  "architecture_decisions": [],
+  "requirements": {
+    "functional": [],
+    "non_functional": []
+  },
+  "components": {
+    "frontend": {
+      "stack": ["Next.js", "React", "MUI"],
+      "status": "not_started",
+      "notes": ""
+    },
+    "graphql_api": {
+      "status": "not_started",
+      "notes": ""
+    },
+    "database": {
+      "engine": "PostgreSQL",
+      "status": "not_started",
+      "migrations": [],
+      "notes": ""
+    },
+    "dev_infra": {
+      "tooling": ["Docker Compose"],
+      "status": "not_started",
+      "notes": ""
+    },
+    "runtime": {
+      "platform": "Docker Compose",
+      "notes": "No k3s/Kubernetes. Docker Compose with source mounts and hot reload."
+    }
+  },
+  "open_questions": [],
+  "risks": [],
+  "changelog": []
+}

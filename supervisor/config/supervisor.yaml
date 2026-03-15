@@ -1,0 +1,129 @@
+apiVersion: aifishtank.supervisor/v1
+kind: SupervisorConfig
+
+metadata:
+  name: aifishtank-supervisor
+  version: "1.0.0"
+
+spec:
+  workdir: /home/agent/ai-fishtank
+  agentsDir: /home/agent/ai-fishtank/agents/definitions
+  promptsDir: /home/agent/ai-fishtank/agents/prompts
+
+  database:
+    url: postgresql://aifishtank:aifishtank@localhost:5432/aifishtank
+    maxConnections: 5
+
+  logging:
+    level: info
+    file: /var/log/aifishtank/supervisor.log
+    maxSizeMB: 100
+    maxFiles: 5
+    format: json
+
+  globalLimits:
+    maxConcurrentAgents: 3
+    maxTokensPerHour: 1000000
+    cooldownBetweenTasksSeconds: 5
+    maxRetries: 3
+    retryDelaySeconds: 60
+
+  configReload:
+    signal: SIGHUP
+    validateBeforeReload: true
+
+  repoConfig:
+    autoReload: true
+    configFile: .aifishtank.yaml
+
+  repositories:
+    - name: quantvise.com
+      url: git@github.com:borissuska/quantvise.com.git
+      branch: main
+      cloneDir: /home/agent/repos/quantvise.com
+      pollers: [github-tasks, github-source]
+      auth: ssh
+      ports:
+        web: 3000
+        graphql: 8000
+        postgres: 5433
+
+  pollers:
+    - name: github-tasks
+      type: github-tasks
+      enabled: true
+      intervalSeconds: 60
+      config:
+        repositories: all
+        sources:
+          - type: issues
+            labels: [agent-task]
+            states: [open]
+        categorization:
+          defaultCategory: analyze
+          labelMapping:
+            bug: implementation
+            feature: analyze
+            docs: docs
+            test: test
+            review-needed: review
+            design-needed: design
+
+    - name: github-source
+      type: github-source
+      enabled: true
+      intervalSeconds: 30
+      config:
+        repositories: all
+        watch:
+          - type: pull_request
+            states: [open]
+        triggers:
+          pr_opened: [review, test]
+          pr_updated: [review]
+
+    - name: external-triggers
+      type: file-watch
+      enabled: true
+      intervalSeconds: 10
+      config:
+        watchDir: /var/lib/aifishtank/triggers
+        processedDir: /var/lib/aifishtank/triggers/processed
+
+  pipelines:
+    - name: feature-pipeline
+      trigger:
+        labels: [feature, enhancement]
+      stages:
+        - { category: analyze, required: true }
+        - { category: design, required: true, conditions: ["analysis.estimated_complexity >= medium"] }
+        - { category: implementation, required: true }
+        - { category: test, required: true }
+        - { category: docs, required: false }
+        - { category: review, required: true }
+
+    - name: bugfix-pipeline
+      trigger:
+        labels: [bug]
+      stages:
+        - { category: analyze, required: true }
+        - { category: implementation, required: true }
+        - { category: test, required: true }
+        - { category: review, required: true }
+
+    - name: pr-review-pipeline
+      trigger:
+        events: [pr_opened, pr_updated]
+      stages:
+        - { category: review, required: true }
+        - { category: test, required: true }
+
+  health:
+    enabled: true
+    reportIntervalMinutes: 30
+    reportDestination: github-issue
+    issueNumber: 1
+
+  secrets:
+    githubTokenFile: /home/agent/.github-token
+    anthropicKeyFile: /home/agent/.anthropic-key

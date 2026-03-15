@@ -1,0 +1,113 @@
+apiVersion: aifishtank.agents/v1
+kind: AgentDefinition
+metadata:
+  name: review-agent
+  version: "1.0.0"
+  description: "Reviews code changes and pull requests for quality, correctness, and security"
+  labels:
+    team: platform
+    domain: review
+  annotations:
+    pipeline-position: "standalone"
+    docs: "agents/prompts/review-agent.md"
+
+spec:
+  categories:
+    - review
+
+  priority: 10
+
+  promptFile: review-agent.md
+
+  tools:
+    allowed:
+      - Read
+      - Bash
+      - Grep
+      - Glob
+    denied:
+      - Write
+      - Edit
+
+  resources:
+    maxTokens: 100000
+    timeoutMinutes: 30
+    maxConcurrent: 2
+
+  environment:
+    AGENT_MODE: "review"
+    STRICT_MODE: "true"
+
+  capabilities:
+    canPush: false
+    canCreatePR: true
+    canCommentOnPR: true
+    canApprove: true
+    canMerge: false
+    canAccessDocker: false
+    canAccessK8s: false
+    canCreateIssues: false
+    canCloseIssues: false
+
+  output:
+    format: github-pr-comment
+    mustInclude:
+      - summary
+      - findings
+      - recommendation
+      - severity
+
+  outputSchema:
+    type: object
+    required:
+      - summary
+      - findings
+      - recommendation
+      - severity
+    properties:
+      summary:
+        type: string
+        description: "Brief summary of the review"
+      findings:
+        type: array
+        items:
+          type: object
+          properties:
+            file:
+              type: string
+            line:
+              type: integer
+            severity:
+              type: string
+              enum:
+                - info
+                - warning
+                - error
+                - critical
+            message:
+              type: string
+        description: "Structured list of individual findings"
+      recommendation:
+        type: string
+        enum:
+          - approve
+          - request_changes
+          - comment
+        description: "Final review recommendation"
+      severity:
+        type: string
+        enum:
+          - clean
+          - minor_issues
+          - major_issues
+          - blocking
+        description: "Overall severity classification of all findings combined"
+
+  triggers:
+    produces:
+      - review-complete
+    consumes: []
+
+  healthCheck:
+    enabled: true
+    intervalSeconds: 300

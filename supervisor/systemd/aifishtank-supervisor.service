@@ -1,0 +1,56 @@
+[Unit]
+Description=AI Fishtank Agent Supervisor
+Documentation=https://github.com/owner/ai-fishtank
+After=postgresql.service docker.service network.target
+Wants=postgresql.service
+# Ensure the supervisor only starts after the database is accepting connections.
+# The postgres service unit name may vary by distro; override if needed.
+
+[Service]
+Type=simple
+User=agent
+Group=agent
+
+# Main entry point.
+ExecStart=/home/agent/ai-fishtank/supervisor/scripts/supervisor.sh
+
+# On SIGHUP the supervisor re-reads its config file without restarting.
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy: restart on unexpected failures, not on clean exit (code 0).
+Restart=on-failure
+RestartSec=10
+
+# Give the process up to 30 seconds to finish in-flight work on SIGTERM.
+TimeoutStopSec=30
+
+# Working directory; supervisor uses absolute paths internally but this
+# provides a sane default for relative operations.
+WorkingDirectory=/home/agent/ai-fishtank
+
+# Standard PATH for finding gh, git, psql, yq, jq, claude, etc.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/home/agent/.local/bin
+
+# Optional: load secrets from /etc/aifishtank/secrets.env if it exists.
+# The leading "-" means systemd will not fail if the file is absent.
+EnvironmentFile=-/etc/aifishtank/secrets.env
+
+# Resource constraints to prevent runaway processes.
+# Adjust based on available VM memory.
+MemoryMax=2G
+TasksMax=64
+
+# Security hardening.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/agent /var/log/aifishtank /var/lib/aifishtank /var/run/aifishtank /tmp
+
+# Logging: send stdout/stderr to the journal; journalctl -u aifishtank-supervisor follows.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aifishtank-supervisor
+
+[Install]
+WantedBy=multi-user.target

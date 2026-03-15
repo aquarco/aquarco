@@ -1,0 +1,36 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: aifishtank
+
+# ── Alerting ──────────────────────────────────────────────────────────────────
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['alertmanager:9093']
+
+# ── Rule files ────────────────────────────────────────────────────────────────
+# rule_files:
+#   - /etc/prometheus/rules/*.yml
+
+# ── Scrape targets ────────────────────────────────────────────────────────────
+scrape_configs:
+
+  # Prometheus self-monitoring
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Node exporter — OS-level metrics (present when node_exporter is running)
+  - job_name: node
+    static_configs:
+      - targets: ['localhost:9100']
+
+  # AI Fishtank GraphQL API — custom application metrics
+  # The /metrics endpoint is a placeholder; add prom-client instrumentation to
+  # the API service (api/src/metrics.ts) to activate this scrape target.
+  - job_name: aifishtank-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['localhost:4000']

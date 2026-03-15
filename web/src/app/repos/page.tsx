@@ -1,0 +1,568 @@
+'use client'
+
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { useQuery, useMutation } from '@apollo/client'
+import Link from '@mui/material/Link'
+import CircularProgress from '@mui/material/CircularProgress'
+import GitHubIcon from '@mui/icons-material/GitHub'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import Box from '@mui/material/Box'
+import Typography from '@mui/material/Typography'
+import Button from '@mui/material/Button'
+import Table from '@mui/material/Table'
+import TableBody from '@mui/material/TableBody'
+import TableCell from '@mui/material/TableCell'
+import TableContainer from '@mui/material/TableContainer'
+import TableHead from '@mui/material/TableHead'
+import TableRow from '@mui/material/TableRow'
+import Paper from '@mui/material/Paper'
+import Skeleton from '@mui/material/Skeleton'
+import Alert from '@mui/material/Alert'
+import Dialog from '@mui/material/Dialog'
+import DialogTitle from '@mui/material/DialogTitle'
+import DialogContent from '@mui/material/DialogContent'
+import DialogActions from '@mui/material/DialogActions'
+import TextField from '@mui/material/TextField'
+import Chip, { type ChipProps } from '@mui/material/Chip'
+import Collapse from '@mui/material/Collapse'
+import Stack from '@mui/material/Stack'
+import AddIcon from '@mui/icons-material/Add'
+import IconButton from '@mui/material/IconButton'
+import DeleteIcon from '@mui/icons-material/Delete'
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
+import VpnKeyIcon from '@mui/icons-material/VpnKey'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import Tooltip from '@mui/material/Tooltip'
+import RefreshIcon from '@mui/icons-material/Refresh'
+import LogoutIcon from '@mui/icons-material/Logout'
+import { GET_REPOSITORIES, REGISTER_REPOSITORY, REMOVE_REPOSITORY, RETRY_CLONE, GITHUB_AUTH_STATUS, GITHUB_LOGIN_START, GITHUB_LOGIN_POLL, GITHUB_LOGOUT } from '@/lib/graphql/queries'
+import { formatDate } from '@/lib/format'
+
+interface Repository {
+  name: string
+  url: string
+  branch: string
+  cloneDir: string
+  cloneStatus: string
+  lastPulledAt: string | null
+  errorMessage: string | null
+  deployPublicKey: string | null
+  taskCount: number
+}
+
+function getCloneStatusColor(status: string): ChipProps['color'] {
+  switch (status?.toUpperCase()) {
+    case 'READY': return 'success'
+    case 'PENDING': return 'default'
+    case 'CLONING': return 'warning'
+    case 'ERROR': return 'error'
+    default: return 'default'
+  }
+}
+
+interface AddRepoFormState {
+  name: string
+  url: string
+  branch: string
+  cloneDir: string
+}
+
+const EMPTY_FORM: AddRepoFormState = { name: '', url: '', branch: 'main', cloneDir: '' }
+
+export default function ReposPage() {
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [form, setForm] = useState<AddRepoFormState>(EMPTY_FORM)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [collapsedErrors, setCollapsedErrors] = useState<Set<string>>(new Set())
+  const [copiedKey, setCopiedKey] = useState(false)
+  const [copiedCode, setCopiedCode] = useState(false)
+  const [loginDialogOpen, setLoginDialogOpen] = useState(false)
+  const [deviceCode, setDeviceCode] = useState<{ userCode: string; verificationUri: string } | null>(null)
+  const [loginError, setLoginError] = useState<string | null>(null)
+  const [loginSuccess, setLoginSuccess] = useState<string | null>(null)
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const { data, loading, error, refetch } = useQuery(GET_REPOSITORIES)
+  const { data: authData, refetch: refetchAuth } = useQuery(GITHUB_AUTH_STATUS)
+
+  // Poll while any repo is in a non-terminal state
+  const repositories: Repository[] = data?.repositories ?? []
+  const hasActiveRepo = repositories.some(
+    (r) => r.cloneStatus === 'PENDING' || r.cloneStatus === 'CLONING'
+  )
+  useEffect(() => {
+    if (!hasActiveRepo) return
+    const timer = setInterval(() => refetch(), 3000)
+    return () => clearInterval(timer)
+  }, [hasActiveRepo, refetch])
+
+  const [registerRepository, { loading: registering }] = useMutation(
+    REGISTER_REPOSITORY,
+    {
+      onCompleted: (result) => {
+        const errors = result?.registerRepository?.errors
+        if (errors?.length) {
+          setFormError(errors.map((e: { message: string }) => e.message).join(', '))
+        } else {
+          setDialogOpen(false)
+          setForm(EMPTY_FORM)
+          setFormError(null)
+          refetch()
+        }
+      },
+      onError: (err) => {
+        setFormError(err.message)
+      },
+    }
+  )
+
+  const [removeRepository] = useMutation(REMOVE_REPOSITORY, {
+    onCompleted: () => refetch(),
+  })
+
+  const [githubLoginStart] = useMutation(GITHUB_LOGIN_START)
+  const [githubLoginPoll] = useMutation(GITHUB_LOGIN_POLL)
+  const [githubLogout] = useMutation(GITHUB_LOGOUT, {
+    onCompleted: () => refetchAuth(),
+  })
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => stopPolling()
+  }, [stopPolling])
+
+  async function handleGithubLogin() {
+    setLoginError(null)
+    setLoginSuccess(null)
+    setDeviceCode(null)
+    setLoginDialogOpen(true)
+
+    try {
+      const { data } = await githubLoginStart()
+      const code = data?.githubLoginStart
+      if (!code) {
+        setLoginError('Failed to start login flow')
+        return
+      }
+      setDeviceCode({ userCode: code.userCode, verificationUri: code.verificationUri })
+
+      // Start polling
+      pollTimerRef.current = setInterval(async () => {
+        try {
+          const { data: pollData } = await githubLoginPoll()
+          const result = pollData?.githubLoginPoll
+          if (!result) return
+
+          if (result.success) {
+            stopPolling()
+            setLoginSuccess(result.username ? `Logged in as ${result.username}` : 'Login successful')
+            setDeviceCode(null)
+            refetchAuth()
+          } else if (result.error) {
+            stopPolling()
+            setLoginError(result.error)
+            setDeviceCode(null)
+          }
+        } catch {
+          // poll failed, keep trying
+        }
+      }, 5000)
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : 'Failed to start login')
+    }
+  }
+
+  function handleLoginDialogClose() {
+    stopPolling()
+    setLoginDialogOpen(false)
+    setDeviceCode(null)
+    setLoginError(null)
+    setLoginSuccess(null)
+  }
+
+  const [retryClone] = useMutation(RETRY_CLONE, {
+    onCompleted: () => refetch(),
+  })
+
+  function handleSubmit() {
+    if (!form.name.trim() || !form.url.trim()) {
+      setFormError('Name and URL are required.')
+      return
+    }
+    registerRepository({
+      variables: {
+        input: {
+          name: form.name.trim(),
+          url: form.url.trim(),
+          branch: form.branch.trim() || 'main',
+          cloneDir: form.cloneDir.trim() || undefined,
+        },
+      },
+    })
+  }
+
+  function handleClose() {
+    setDialogOpen(false)
+    setForm(EMPTY_FORM)
+    setFormError(null)
+  }
+
+  return (
+    <Box>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+        <Typography variant="h5" fontWeight={700}>
+          Repositories
+        </Typography>
+        <Stack direction="row" spacing={1}>
+          {authData?.githubAuthStatus?.authenticated ? (
+            <Button
+              variant="outlined"
+              color="success"
+              startIcon={<GitHubIcon />}
+              endIcon={<LogoutIcon />}
+              onClick={() => { if (confirm('Logout from GitHub?')) githubLogout() }}
+              data-testid="btn-github-logout"
+            >
+              {authData.githubAuthStatus.username ?? 'Connected'}
+            </Button>
+          ) : (
+            <Button
+              variant="outlined"
+              startIcon={<GitHubIcon />}
+              onClick={handleGithubLogin}
+              data-testid="btn-github-login"
+            >
+              GitHub Login
+            </Button>
+          )}
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => setDialogOpen(true)}
+            data-testid="btn-add-repository"
+          >
+            Add Repository
+          </Button>
+        </Stack>
+      </Stack>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          Failed to load repositories: {error.message}
+        </Alert>
+      )}
+
+      <TableContainer component={Paper} variant="outlined">
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Name</TableCell>
+              <TableCell>URL</TableCell>
+              <TableCell>Branch</TableCell>
+              <TableCell>Clone Status</TableCell>
+              <TableCell>Last Pulled</TableCell>
+              <TableCell align="right">Tasks</TableCell>
+              <TableCell />
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {loading
+              ? [...Array(4)].map((_, i) => (
+                  <TableRow key={i}>
+                    {[...Array(6)].map((_, j) => (
+                      <TableCell key={j}>
+                        <Skeleton variant="text" />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              : repositories.map((repo) => {
+                  const isError = repo.cloneStatus?.toUpperCase() === 'ERROR'
+                  const isExpanded = !collapsedErrors.has(repo.name)
+                  const isSshUrl = repo.url.startsWith('git@') || repo.url.includes('ssh://')
+                  return (
+                    <React.Fragment key={repo.name}>
+                      <TableRow
+                        data-testid={`repo-row-${repo.name}`}
+                        sx={isError ? { cursor: 'pointer' } : undefined}
+                        onClick={isError ? () => setCollapsedErrors((prev) => {
+                          const next = new Set(prev)
+                          if (next.has(repo.name)) next.delete(repo.name)
+                          else next.add(repo.name)
+                          return next
+                        }) : undefined}
+                      >
+                        <TableCell>
+                          <Stack direction="row" alignItems="center" spacing={0.5}>
+                            {isError && (
+                              <IconButton size="small" sx={{ p: 0 }}>
+                                {isExpanded ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
+                              </IconButton>
+                            )}
+                            <span>{repo.name}</span>
+                          </Stack>
+                        </TableCell>
+                        <TableCell
+                          sx={{
+                            maxWidth: 280,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {repo.url}
+                        </TableCell>
+                        <TableCell>{repo.branch}</TableCell>
+                        <TableCell>
+                          <Chip
+                            label={repo.cloneStatus}
+                            color={getCloneStatusColor(repo.cloneStatus)}
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell>{formatDate(repo.lastPulledAt)}</TableCell>
+                        <TableCell align="right">{repo.taskCount ?? 0}</TableCell>
+                        <TableCell align="right" sx={{ py: 0 }}>
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (confirm(`Remove repository "${repo.name}"?`)) {
+                                removeRepository({ variables: { name: repo.name } })
+                              }
+                            }}
+                            data-testid={`btn-remove-repo-${repo.name}`}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                      {isError && (
+                        <TableRow>
+                          <TableCell colSpan={7} sx={{ py: 0, borderBottom: isExpanded ? undefined : 'none' }}>
+                            <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                              <Alert
+                                severity="error"
+                                icon={<VpnKeyIcon />}
+                                sx={{ my: 1 }}
+                                data-testid={`repo-error-${repo.name}`}
+                              >
+                                <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                                  Clone failed
+                                </Typography>
+                                {repo.errorMessage && (
+                                  <Typography variant="body2" sx={{ mb: 1, fontFamily: 'monospace', whiteSpace: 'pre-wrap', fontSize: '0.8rem' }}>
+                                    {repo.errorMessage}
+                                  </Typography>
+                                )}
+                                <Typography variant="body2">
+                                  {isSshUrl
+                                    ? 'This is a private repository using SSH. You must add the VM\u2019s deploy key to this repository on GitHub.'
+                                    : 'This repository may be private. Ensure the GitHub PAT has access, or switch to an SSH URL and add the VM\u2019s deploy key.'}
+                                </Typography>
+                                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                                  <strong>Steps:</strong> Go to your repository Settings &rarr; Deploy keys &rarr; Add deploy key, then paste the public key below.
+                                </Typography>
+                                {repo.deployPublicKey ? (
+                                  <Box sx={{ mt: 1, position: 'relative' }}>
+                                    <Typography variant="caption" fontWeight={700}>Public key:</Typography>
+                                    <Box
+                                      sx={{
+                                        mt: 0.5,
+                                        p: 1,
+                                        pr: 5,
+                                        bgcolor: 'grey.100',
+                                        borderRadius: 1,
+                                        fontFamily: 'monospace',
+                                        fontSize: '0.75rem',
+                                        wordBreak: 'break-all',
+                                        whiteSpace: 'pre-wrap',
+                                      }}
+                                    >
+                                      {repo.deployPublicKey}
+                                      <Tooltip title={copiedKey ? 'Copied!' : 'Copy to clipboard'}>
+                                        <IconButton
+                                          size="small"
+                                          sx={{ position: 'absolute', top: 24, right: 4 }}
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            navigator.clipboard.writeText(repo.deployPublicKey!)
+                                            setCopiedKey(true)
+                                            setTimeout(() => setCopiedKey(false), 2000)
+                                          }}
+                                          data-testid="btn-copy-deploy-key"
+                                        >
+                                          <ContentCopyIcon fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                    </Box>
+                                  </Box>
+                                ) : null}
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  startIcon={<RefreshIcon />}
+                                  sx={{ mt: 1.5 }}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    retryClone({ variables: { name: repo.name } })
+                                  }}
+                                  data-testid={`btn-retry-clone-${repo.name}`}
+                                >
+                                  Retry Clone
+                                </Button>
+                              </Alert>
+                            </Collapse>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </React.Fragment>
+                  )
+                })}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      {/* Add Repository dialog */}
+      <Dialog open={dialogOpen} onClose={handleClose} maxWidth="sm" fullWidth>
+        <DialogTitle>Add Repository</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {formError && <Alert severity="error">{formError}</Alert>}
+            <TextField
+              label="Name"
+              required
+              fullWidth
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              data-testid="repo-form-name"
+            />
+            <TextField
+              label="URL"
+              required
+              fullWidth
+              value={form.url}
+              onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
+              placeholder="https://github.com/org/repo.git"
+              data-testid="repo-form-url"
+            />
+            <TextField
+              label="Branch"
+              fullWidth
+              value={form.branch}
+              onChange={(e) => setForm((f) => ({ ...f, branch: e.target.value }))}
+              data-testid="repo-form-branch"
+            />
+            <TextField
+              label="Clone Directory"
+              fullWidth
+              value={form.cloneDir}
+              onChange={(e) => setForm((f) => ({ ...f, cloneDir: e.target.value }))}
+              placeholder="/repos/my-project (optional)"
+              data-testid="repo-form-clone-dir"
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleClose}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleSubmit}
+            disabled={registering}
+            data-testid="btn-add-repository-confirm"
+          >
+            {registering ? 'Adding…' : 'Add'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* GitHub Login dialog */}
+      <Dialog open={loginDialogOpen} onClose={handleLoginDialogClose} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <GitHubIcon />
+            <span>GitHub Login</span>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }} alignItems="center">
+            {loginError && <Alert severity="error" sx={{ width: '100%' }}>{loginError}</Alert>}
+            {loginSuccess && (
+              <Alert severity="success" icon={<CheckCircleIcon />} sx={{ width: '100%' }}>
+                {loginSuccess}
+              </Alert>
+            )}
+            {deviceCode && (
+              <>
+                <Typography variant="body2" align="center">
+                  Enter this code on GitHub:
+                </Typography>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Box
+                    sx={{
+                      px: 3,
+                      py: 1.5,
+                      bgcolor: 'grey.100',
+                      borderRadius: 1,
+                      fontFamily: 'monospace',
+                      fontSize: '1.5rem',
+                      fontWeight: 700,
+                      letterSpacing: '0.15em',
+                      userSelect: 'all',
+                    }}
+                  >
+                    {deviceCode.userCode}
+                  </Box>
+                  <Tooltip title={copiedCode ? 'Copied!' : 'Copy code'}>
+                    <IconButton
+                      size="small"
+                      color={copiedCode ? 'success' : 'default'}
+                      onClick={() => {
+                        navigator.clipboard.writeText(deviceCode.userCode)
+                        setCopiedCode(true)
+                        setTimeout(() => setCopiedCode(false), 2000)
+                      }}
+                    >
+                      {copiedCode ? <CheckCircleIcon fontSize="small" /> : <ContentCopyIcon fontSize="small" />}
+                    </IconButton>
+                  </Tooltip>
+                </Stack>
+                <Button
+                  variant="contained"
+                  startIcon={<GitHubIcon />}
+                  href={deviceCode.verificationUri}
+                  target="_blank"
+                  rel="noopener"
+                >
+                  Open GitHub
+                </Button>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <CircularProgress size={16} />
+                  <Typography variant="body2" color="text.secondary">
+                    Waiting for authorization...
+                  </Typography>
+                </Stack>
+              </>
+            )}
+            {!deviceCode && !loginError && !loginSuccess && (
+              <CircularProgress />
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleLoginDialogClose}>
+            {loginSuccess ? 'Done' : 'Cancel'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  )
+}

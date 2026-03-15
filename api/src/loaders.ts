@@ -1,0 +1,108 @@
+import DataLoader from 'dataloader'
+import { Pool } from 'pg'
+
+// Raw DB row shapes (snake_case from PostgreSQL)
+export interface RepositoryRow {
+  name: string
+  url: string
+  branch: string
+  clone_dir: string
+  pollers: string[]
+  last_cloned_at: string | null
+  last_pulled_at: string | null
+  clone_status: string
+  head_sha: string | null
+}
+
+export interface StageRow {
+  id: string
+  task_id: string
+  stage_number: number
+  category: string
+  agent: string | null
+  agent_version: string | null
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  structured_output: unknown | null
+  raw_output: string | null
+  tokens_input: number | null
+  tokens_output: number | null
+  error_message: string | null
+  retry_count: number
+}
+
+export interface ContextRow {
+  id: string
+  task_id: string
+  stage_number: number | null
+  key: string
+  value_type: string
+  value_json: unknown | null
+  value_text: string | null
+  value_file_ref: string | null
+  created_at: string
+}
+
+export interface Loaders {
+  repositoryLoader: DataLoader<string, RepositoryRow | null>
+  stagesByTaskLoader: DataLoader<string, StageRow[]>
+  contextByTaskLoader: DataLoader<string, ContextRow[]>
+}
+
+export function createLoaders(pool: Pool): Loaders {
+  const repositoryLoader = new DataLoader<string, RepositoryRow | null>(
+    async (names) => {
+      const result = await pool.query<RepositoryRow>(
+        'SET search_path TO aifishtank, public; SELECT * FROM repositories WHERE name = ANY($1)',
+        [names as string[]]
+      )
+      const byName = new Map<string, RepositoryRow>()
+      for (const row of result.rows) {
+        byName.set(row.name, row)
+      }
+      return names.map((name) => byName.get(name) ?? null)
+    },
+    { cache: true }
+  )
+
+  const stagesByTaskLoader = new DataLoader<string, StageRow[]>(
+    async (taskIds) => {
+      const result = await pool.query<StageRow>(
+        'SET search_path TO aifishtank, public; SELECT * FROM stages WHERE task_id = ANY($1) ORDER BY task_id, stage_number ASC',
+        [taskIds as string[]]
+      )
+      const byTaskId = new Map<string, StageRow[]>()
+      for (const row of result.rows) {
+        const list = byTaskId.get(row.task_id) ?? []
+        list.push(row)
+        byTaskId.set(row.task_id, list)
+      }
+      return taskIds.map((id) => byTaskId.get(id) ?? [])
+    },
+    { cache: true }
+  )
+
+  const contextByTaskLoader = new DataLoader<string, ContextRow[]>(
+    async (taskIds) => {
+      const result = await pool.query<ContextRow>(
+        'SET search_path TO aifishtank, public; SELECT * FROM context WHERE task_id = ANY($1) ORDER BY task_id, created_at ASC',
+        [taskIds as string[]]
+      )
+      const byTaskId = new Map<string, ContextRow[]>()
+      for (const row of result.rows) {
+        const list = byTaskId.get(row.task_id) ?? []
+        list.push(row)
+        byTaskId.set(row.task_id, list)
+      }
+      return taskIds.map((id) => byTaskId.get(id) ?? [])
+    },
+    { cache: true }
+  )
+
+  return {
+    repositoryLoader,
+    stagesByTaskLoader,
+    contextByTaskLoader,
+  }
+}

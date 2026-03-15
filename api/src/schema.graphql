@@ -1,0 +1,260 @@
+scalar DateTime
+scalar JSON
+
+type Query {
+  # Tasks
+  tasks(status: TaskStatus, category: TaskCategory, repository: String, limit: Int, offset: Int): TaskConnection!
+  task(id: ID!): Task
+
+  # Repositories
+  repositories: [Repository!]!
+  repository(name: String!): Repository
+
+  # Agent instances
+  agentInstances: [AgentInstance!]!
+
+  # Pipeline status
+  pipelineStatus(taskId: ID!): PipelineStatus
+
+  # GitHub auth
+  githubAuthStatus: GithubAuthStatus!
+
+  # Dashboard stats
+  dashboardStats: DashboardStats!
+}
+
+type Mutation {
+  # Task management
+  createTask(input: CreateTaskInput!): TaskPayload!
+  updateTaskStatus(id: ID!, status: TaskStatus!): TaskPayload!
+  retryTask(id: ID!): TaskPayload!
+  cancelTask(id: ID!): TaskPayload!
+
+  # Repository management
+  registerRepository(input: RegisterRepositoryInput!): RepositoryPayload!
+  removeRepository(name: String!): RepositoryPayload!
+
+  # GitHub auth
+  githubLoginStart: GithubDeviceCode!
+  githubLoginPoll: GithubLoginResult!
+  githubLogout: Boolean!
+
+  # Repository actions
+  retryClone(name: String!): RepositoryPayload!
+
+  # Intervention
+  unblockTask(id: ID!, resolution: String!): TaskPayload!
+}
+
+type Subscription {
+  taskUpdated(repository: String): Task!
+  pipelineProgress(taskId: ID!): PipelineStatus!
+}
+
+# --- Types ---
+
+type Task {
+  id: ID!
+  title: String!
+  category: TaskCategory!
+  status: TaskStatus!
+  priority: Int!
+  source: String!
+  sourceRef: String
+  pipeline: String
+  repository: Repository!
+  initialContext: JSON
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  startedAt: DateTime
+  completedAt: DateTime
+  assignedAgent: String
+  currentStage: Int!
+  retryCount: Int!
+  errorMessage: String
+  stages: [Stage!]!
+  context: [ContextEntry!]!
+}
+
+type Stage {
+  id: ID!
+  taskId: ID!
+  stageNumber: Int!
+  category: TaskCategory!
+  agent: String
+  agentVersion: String
+  status: StageStatus!
+  startedAt: DateTime
+  completedAt: DateTime
+  structuredOutput: JSON
+  rawOutput: String
+  tokensInput: Int
+  tokensOutput: Int
+  errorMessage: String
+  retryCount: Int!
+}
+
+type Repository {
+  name: String!
+  url: String!
+  branch: String!
+  cloneDir: String!
+  pollers: [String!]!
+  lastClonedAt: DateTime
+  lastPulledAt: DateTime
+  cloneStatus: CloneStatus!
+  headSha: String
+  errorMessage: String
+  deployPublicKey: String
+  taskCount: Int!
+}
+
+type AgentInstance {
+  agentName: String!
+  activeCount: Int!
+  totalExecutions: Int!
+  totalTokensUsed: Int!
+  lastExecutionAt: DateTime
+}
+
+type ContextEntry {
+  id: ID!
+  taskId: ID!
+  stageNumber: Int
+  key: String!
+  valueType: String!
+  valueJson: JSON
+  valueText: String
+  valueFileRef: String
+  createdAt: DateTime!
+}
+
+type PipelineStatus {
+  taskId: ID!
+  pipeline: String
+  currentStage: Int!
+  totalStages: Int!
+  stages: [Stage!]!
+  status: TaskStatus!
+}
+
+type DashboardStats {
+  totalTasks: Int!
+  pendingTasks: Int!
+  executingTasks: Int!
+  completedTasks: Int!
+  failedTasks: Int!
+  blockedTasks: Int!
+  activeAgents: Int!
+  totalTokensToday: Int!
+  tasksByCategory: [CategoryCount!]!
+  tasksByRepository: [RepositoryCount!]!
+}
+
+type CategoryCount {
+  category: TaskCategory!
+  count: Int!
+}
+
+type RepositoryCount {
+  repository: String!
+  count: Int!
+}
+
+type TaskConnection {
+  nodes: [Task!]!
+  totalCount: Int!
+}
+
+# --- Payloads ---
+
+type TaskPayload {
+  task: Task
+  errors: [Error!]
+}
+
+type RepositoryPayload {
+  repository: Repository
+  errors: [Error!]
+}
+
+type Error {
+  field: String
+  message: String!
+}
+
+# --- Inputs ---
+
+input CreateTaskInput {
+  title: String!
+  category: TaskCategory!
+  repository: String!
+  source: String!
+  sourceRef: String
+  pipeline: String
+  priority: Int
+  initialContext: JSON
+}
+
+input RegisterRepositoryInput {
+  name: String!
+  url: String!
+  branch: String
+  cloneDir: String
+  pollers: [String!]
+}
+
+# --- Enums ---
+
+enum TaskStatus {
+  PENDING
+  QUEUED
+  EXECUTING
+  COMPLETED
+  FAILED
+  TIMEOUT
+  BLOCKED
+}
+
+enum TaskCategory {
+  REVIEW
+  IMPLEMENTATION
+  TEST
+  DESIGN
+  DOCS
+  ANALYZE
+}
+
+enum StageStatus {
+  PENDING
+  EXECUTING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+# --- GitHub Auth ---
+
+type GithubAuthStatus {
+  authenticated: Boolean!
+  username: String
+}
+
+type GithubDeviceCode {
+  userCode: String!
+  verificationUri: String!
+  expiresIn: Int!
+}
+
+type GithubLoginResult {
+  success: Boolean!
+  username: String
+  error: String
+}
+
+enum CloneStatus {
+  PENDING
+  CLONING
+  READY
+  ERROR
+}

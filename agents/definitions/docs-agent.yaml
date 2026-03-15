@@ -1,0 +1,85 @@
+apiVersion: aifishtank.agents/v1
+kind: AgentDefinition
+metadata:
+  name: docs-agent
+  version: "1.0.0"
+  description: "Keeps documentation current: README, CHANGELOG, API docs, and inline comments"
+  labels:
+    team: platform
+    domain: documentation
+  annotations:
+    pipeline-position: "fifth"
+    docs: "agents/prompts/docs-agent.md"
+
+spec:
+  categories:
+    - docs
+
+  priority: 20
+
+  promptFile: docs-agent.md
+
+  tools:
+    allowed:
+      - Read
+      - Write
+      - Edit
+      - Grep
+      - Glob
+
+  resources:
+    maxTokens: 80000
+    timeoutMinutes: 30
+    maxConcurrent: 1
+
+  environment:
+    AGENT_MODE: "docs"
+
+  capabilities:
+    canPush: true
+    canCreatePR: false
+    canCommentOnPR: false
+    canApprove: false
+    canMerge: false
+    canAccessDocker: false
+    canAccessK8s: false
+    canCreateIssues: false
+    canCloseIssues: false
+
+  output:
+    format: commit
+    mustInclude:
+      - files_updated
+      - summary
+
+  outputSchema:
+    type: object
+    required:
+      - files_updated
+      - summary
+    properties:
+      files_updated:
+        type: array
+        items:
+          type: string
+        description: "Paths of all documentation files created or modified"
+      summary:
+        type: string
+        description: "Narrative description of what documentation was changed and why"
+
+  triggers:
+    produces:
+      - docs-complete
+    consumes:
+      - implementation-complete
+
+  conditions:
+    filePatterns:
+      - "src/**"
+      - "lib/**"
+      - "packages/**"
+      - "api/**"
+
+  healthCheck:
+    enabled: true
+    intervalSeconds: 300

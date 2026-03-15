@@ -1,0 +1,94 @@
+apiVersion: aifishtank.agents/v1
+kind: AgentDefinition
+metadata:
+  name: implementation-agent
+  version: "1.0.0"
+  description: "Implements features and bug fixes by writing and modifying code"
+  labels:
+    team: platform
+    domain: implementation
+  annotations:
+    pipeline-position: "third"
+    docs: "agents/prompts/implementation-agent.md"
+
+spec:
+  categories:
+    - implementation
+
+  priority: 10
+
+  promptFile: implementation-agent.md
+
+  tools:
+    allowed:
+      - Read
+      - Write
+      - Edit
+      - Bash
+      - Grep
+      - Glob
+
+  resources:
+    maxTokens: 200000
+    timeoutMinutes: 60
+    maxConcurrent: 1
+
+  environment:
+    AGENT_MODE: "implementation"
+
+  capabilities:
+    canPush: true
+    canCreatePR: true
+    canCommentOnPR: false
+    canApprove: false
+    canMerge: false
+    canAccessDocker: true
+    canAccessK8s: false
+    canCreateIssues: false
+    canCloseIssues: false
+
+  output:
+    format: commit
+    mustInclude:
+      - summary
+      - files_changed
+      - test_status
+
+  outputSchema:
+    type: object
+    required:
+      - summary
+      - files_changed
+      - test_status
+    properties:
+      summary:
+        type: string
+        description: "What was implemented"
+      files_changed:
+        type: array
+        items:
+          type: string
+        description: "Relative paths of all modified files"
+      test_status:
+        type: string
+        enum:
+          - passed
+          - failed
+          - skipped
+        description: "Result of running the test suite after implementation"
+
+  triggers:
+    produces:
+      - implementation-complete
+    consumes:
+      - design-complete
+
+  conditions:
+    filePatterns:
+      - "src/**"
+      - "lib/**"
+      - "packages/**"
+
+  healthCheck:
+    enabled: true
+    intervalSeconds: 300

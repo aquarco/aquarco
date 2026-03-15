@@ -1,0 +1,70 @@
+# Vagrantfile — AI Fishtank VM
+# Ubuntu 24.04 LTS with VirtualBox NAT networking and port forwarding
+# See tasks/TASK-001-virtualbox-sandbox-architecture.md for full architecture.
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "bento/ubuntu-24.04"  # Ubuntu 24.04 LTS
+  config.vm.hostname = "aifishtank"
+
+  # VirtualBox provider settings
+  config.vm.provider "virtualbox" do |vb|
+    vb.name = "aifishtank"
+    vb.memory = 12288  # 12 GB (recommended)
+    vb.cpus = 6
+    vb.gui = false
+
+    # Performance settings (VirtualBox 7.2+ CLI flag names)
+    vb.customize ["modifyvm", :id, "--ioapic", "on"]
+    vb.customize ["modifyvm", :id, "--audio-enabled", "off"]
+    vb.customize ["modifyvm", :id, "--usb-ohci", "off"]
+  end
+
+  # -------------------------------------------------------------------------
+  # Port forwarding — AI Fishtank system ports
+  # -------------------------------------------------------------------------
+  config.vm.network "forwarded_port", guest: 8080, host: 8080, id: "webui"        # Web UI dashboard
+  config.vm.network "forwarded_port", guest: 4000, host: 4000, id: "api"          # GraphQL API
+  config.vm.network "forwarded_port", guest: 5432, host: 15432, id: "postgres"    # PostgreSQL (system) — host 15432 to avoid local PG conflict
+  config.vm.network "forwarded_port", guest: 9090, host: 9090, id: "prometheus"   # Prometheus
+  config.vm.network "forwarded_port", guest: 3000, host: 13000, id: "grafana"     # Grafana — host 13000 to avoid conflict
+  config.vm.network "forwarded_port", guest: 8081, host: 8081, id: "adminer"      # Adminer DB UI
+  config.vm.network "forwarded_port", guest: 8000, host: 8000, id: "quantvise-gql" # QuantVise GraphQL API
+
+  # -------------------------------------------------------------------------
+  # Port forwarding — Repo slots (added/removed dynamically by manage-ports.sh
+  # when repos are registered with the supervisor; these are placeholder slots)
+  # -------------------------------------------------------------------------
+  # Repo 1
+  config.vm.network "forwarded_port", guest: 3001, host: 3001, id: "repo1-fe"
+  config.vm.network "forwarded_port", guest: 4001, host: 4001, id: "repo1-api"
+  config.vm.network "forwarded_port", guest: 5433, host: 5433, id: "repo1-pg"
+  # Repo 2
+  config.vm.network "forwarded_port", guest: 3002, host: 13002, id: "repo2-fe"   # host 13002 to avoid conflict
+  config.vm.network "forwarded_port", guest: 4002, host: 4002, id: "repo2-api"
+  config.vm.network "forwarded_port", guest: 5434, host: 15434, id: "repo2-pg"  # host 15434 to avoid conflict
+  # Repo 3
+  config.vm.network "forwarded_port", guest: 3003, host: 3003, id: "repo3-fe"
+  config.vm.network "forwarded_port", guest: 4003, host: 4003, id: "repo3-api"
+  config.vm.network "forwarded_port", guest: 5435, host: 5435, id: "repo3-pg"
+  # Repo 4
+  config.vm.network "forwarded_port", guest: 3004, host: 3004, id: "repo4-fe"
+  config.vm.network "forwarded_port", guest: 4004, host: 4004, id: "repo4-api"
+  config.vm.network "forwarded_port", guest: 5436, host: 5436, id: "repo4-pg"
+
+  # -------------------------------------------------------------------------
+  # Synced folders
+  # -------------------------------------------------------------------------
+  # Mount the ai-fishtank repo into the VM so agents work on live source
+  config.vm.synced_folder "..", "/home/agent/ai-fishtank", type: "virtualbox"
+
+  # Export logs to host for observability without SSH
+  config.vm.synced_folder "../logs", "/var/log/aifishtank-export",
+    type: "virtualbox",
+    create: true,
+    mount_options: ["dmode=755", "fmode=644"]
+
+  # -------------------------------------------------------------------------
+  # Provisioning
+  # -------------------------------------------------------------------------
+  config.vm.provision "shell", path: "scripts/provision.sh"
+end

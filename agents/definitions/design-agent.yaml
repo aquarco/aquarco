@@ -1,0 +1,111 @@
+apiVersion: aifishtank.agents/v1
+kind: AgentDefinition
+metadata:
+  name: design-agent
+  version: "1.0.0"
+  description: "Creates technical designs, architectural decisions, and implementation plans"
+  labels:
+    team: platform
+    domain: design
+  annotations:
+    pipeline-position: "second"
+    docs: "agents/prompts/design-agent.md"
+
+spec:
+  categories:
+    - design
+
+  priority: 10
+
+  promptFile: design-agent.md
+
+  tools:
+    allowed:
+      - Read
+      - Write
+      - Grep
+      - Glob
+      - Bash
+    denied:
+      - Edit
+
+  resources:
+    maxTokens: 150000
+    timeoutMinutes: 45
+    maxConcurrent: 1
+
+  environment:
+    AGENT_MODE: "design"
+
+  capabilities:
+    canPush: true
+    canCreatePR: false
+    canCommentOnPR: true
+    canApprove: false
+    canMerge: false
+    canAccessDocker: false
+    canAccessK8s: false
+    canCreateIssues: true
+    canCloseIssues: false
+
+  output:
+    format: task-file
+    mustInclude:
+      - design_summary
+      - components_affected
+      - implementation_steps
+      - acceptance_criteria
+
+  outputSchema:
+    type: object
+    required:
+      - design_summary
+      - components_affected
+      - implementation_steps
+      - acceptance_criteria
+    properties:
+      design_summary:
+        type: string
+        description: "High-level summary of the technical design"
+      components_affected:
+        type: array
+        items:
+          type: string
+        description: "Components, services, or packages that will be modified"
+      implementation_steps:
+        type: array
+        items:
+          type: object
+          properties:
+            step:
+              type: integer
+            description:
+              type: string
+            files:
+              type: array
+              items:
+                type: string
+        description: "Ordered list of implementation steps"
+      acceptance_criteria:
+        type: array
+        items:
+          type: string
+        description: "Testable acceptance criteria for the implementation"
+      api_changes:
+        type: object
+        description: "Structured description of API changes (or ref to blob)"
+      database_migrations:
+        type: array
+        items:
+          type: string
+        description: "Migration files that will be required"
+
+  triggers:
+    produces:
+      - design-complete
+    consumes:
+      - analysis-complete
+
+  healthCheck:
+    enabled: true
+    intervalSeconds: 300

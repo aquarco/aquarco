@@ -1,0 +1,96 @@
+apiVersion: aifishtank.agents/v1
+kind: AgentDefinition
+metadata:
+  name: test-agent
+  version: "1.0.0"
+  description: "Writes and runs tests, reports coverage, and validates implementation correctness"
+  labels:
+    team: platform
+    domain: testing
+  annotations:
+    pipeline-position: "fourth"
+    docs: "agents/prompts/test-agent.md"
+
+spec:
+  categories:
+    - test
+
+  priority: 10
+
+  promptFile: test-agent.md
+
+  tools:
+    allowed:
+      - Read
+      - Write
+      - Edit
+      - Bash
+      - Grep
+      - Glob
+
+  resources:
+    maxTokens: 100000
+    timeoutMinutes: 45
+    maxConcurrent: 2
+
+  environment:
+    AGENT_MODE: "test"
+
+  capabilities:
+    canPush: true
+    canCreatePR: false
+    canCommentOnPR: true
+    canApprove: false
+    canMerge: false
+    canAccessDocker: true
+    canAccessK8s: false
+    canCreateIssues: true
+    canCloseIssues: false
+
+  output:
+    format: commit
+    mustInclude:
+      - tests_added
+      - tests_passed
+      - tests_failed
+      - coverage_percent
+      - test_files
+
+  outputSchema:
+    type: object
+    required:
+      - tests_added
+      - tests_passed
+      - tests_failed
+      - coverage_percent
+      - test_files
+    properties:
+      tests_added:
+        type: integer
+        description: "Number of new test cases written"
+      tests_passed:
+        type: integer
+        description: "Number of tests that passed in the final run"
+      tests_failed:
+        type: integer
+        description: "Number of tests that failed in the final run"
+      coverage_percent:
+        type: number
+        minimum: 0
+        maximum: 100
+        description: "Overall code coverage percentage after adding tests"
+      test_files:
+        type: array
+        items:
+          type: string
+        description: "Paths of all test files created or modified"
+
+  triggers:
+    produces:
+      - test-complete
+    consumes:
+      - implementation-complete
+
+  healthCheck:
+    enabled: true
+    intervalSeconds: 300
