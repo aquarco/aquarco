@@ -57,6 +57,27 @@ export const Mutation = {
     return logout()
   },
 
+  async claudeLoginStart() {
+    const { startClaudeLogin } = await import('../claude-auth.js')
+    return startClaudeLogin()
+  },
+
+  async claudeLoginPoll() {
+    const { pollClaudeLogin } = await import('../claude-auth.js')
+    return pollClaudeLogin()
+  },
+
+  async claudeSubmitCode(_: unknown, args: { code: string }) {
+    const { submitClaudeCode } = await import('../claude-auth.js')
+    const result = await submitClaudeCode(args.code)
+    return { success: result.success, email: null, error: result.error }
+  },
+
+  async claudeLogout() {
+    const { claudeLogout } = await import('../claude-auth.js')
+    return claudeLogout()
+  },
+
   async createTask(
     _: unknown,
     args: {

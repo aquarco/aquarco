@@ -1,0 +1,34 @@
+[Unit]
+Description=AI Fishtank Claude Auth Helper
+Documentation=https://github.com/owner/ai-fishtank
+After=network.target
+PartOf=aifishtank-supervisor.service
+
+[Service]
+Type=simple
+User=vagrant
+Group=vagrant
+
+ExecStart=/home/agent/ai-fishtank/supervisor/scripts/claude-auth-helper.sh
+
+Restart=on-failure
+RestartSec=5
+
+WorkingDirectory=/home/agent/ai-fishtank
+
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/home/agent/.local/bin:/home/agent/.npm-global/bin
+
+# Resource constraints
+MemoryMax=512M
+TasksMax=128
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=full
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aifishtank-claude-auth
+
+[Install]
+WantedBy=multi-user.target

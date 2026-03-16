@@ -87,8 +87,8 @@ get_agents_for_category() {
   echo "$AGENT_REGISTRY_JSON" \
     | jq -r --arg cat "$category" '
         .agents[]
-        | select(.spec.categories[]? == $cat)
-        | [(.spec.priority // 50 | tostring), .metadata.name]
+        | select(.categories[]? == $cat)
+        | [(.priority // 50 | tostring), .name]
         | join("\t")
       ' \
     | sort -t$'\t' -k1 -n \
@@ -143,8 +143,8 @@ agent_is_available() {
   max_concurrent="$(echo "$AGENT_REGISTRY_JSON" \
     | jq -r --arg name "$agent_name" '
         .agents[]
-        | select(.metadata.name == $name)
-        | .spec.resources.maxConcurrent // 1
+        | select(.name == $name)
+        | .resources.maxConcurrent // 1
       ' 2>/dev/null || echo "1")"
 
   # Get active_count from the database.
@@ -238,8 +238,8 @@ get_agent_prompt_file() {
   prompt_file="$(echo "$AGENT_REGISTRY_JSON" \
     | jq -r --arg name "$agent_name" '
         .agents[]
-        | select(.metadata.name == $name)
-        | .spec.promptFile
+        | select(.name == $name)
+        | .promptFile
       ' 2>/dev/null || echo "")"
 
   if [[ -z "$prompt_file" || "$prompt_file" == "null" ]]; then
@@ -260,8 +260,8 @@ get_agent_timeout() {
   echo "$AGENT_REGISTRY_JSON" \
     | jq -r --arg name "$agent_name" '
         .agents[]
-        | select(.metadata.name == $name)
-        | .spec.resources.timeoutMinutes // 30
+        | select(.name == $name)
+        | .resources.timeoutMinutes // 30
       ' 2>/dev/null || echo "30"
 }
 
@@ -270,7 +270,7 @@ get_agent_timeout() {
 # New rows start with active_count = 0.
 _sync_agent_instances() {
   local agent_names
-  mapfile -t agent_names < <(echo "$AGENT_REGISTRY_JSON" | jq -r '.agents[].metadata.name' 2>/dev/null)
+  mapfile -t agent_names < <(echo "$AGENT_REGISTRY_JSON" | jq -r '.agents[].name' 2>/dev/null)
 
   for agent_name in "${agent_names[@]}"; do
     local sql

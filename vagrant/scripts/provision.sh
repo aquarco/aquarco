@@ -222,6 +222,24 @@ else
   log "WARNING: ${SYSTEMD_SRC} not found; skipping service install"
 fi
 
+# ─── 12a. Claude auth helper service ─────────────────────────────────────
+
+log "Installing aifishtank-claude-auth systemd service..."
+CLAUDE_AUTH_SRC="${AGENT_HOME}/ai-fishtank/supervisor/systemd/aifishtank-claude-auth.service"
+CLAUDE_AUTH_DEST="/etc/systemd/system/aifishtank-claude-auth.service"
+
+if [[ -f "${CLAUDE_AUTH_SRC}" ]]; then
+  cp "${CLAUDE_AUTH_SRC}" "${CLAUDE_AUTH_DEST}"
+  mkdir -p /var/lib/aifishtank/claude-ipc
+  chown vagrant:vagrant /var/lib/aifishtank/claude-ipc
+  systemctl daemon-reload
+  systemctl enable aifishtank-claude-auth.service
+  systemctl start aifishtank-claude-auth.service || true
+  log "Claude auth helper service enabled and started"
+else
+  log "WARNING: ${CLAUDE_AUTH_SRC} not found; skipping claude-auth service install"
+fi
+
 # ─── 12b. System Docker Compose stack (auto-start on boot) ──────────────────
 
 log "Installing aifishtank-stack systemd service..."

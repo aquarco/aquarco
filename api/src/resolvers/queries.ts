@@ -150,6 +150,11 @@ export const Query = {
     return getAuthStatus()
   },
 
+  async claudeAuthStatus() {
+    const { getClaudeAuthStatus } = await import('../claude-auth.js')
+    return getClaudeAuthStatus()
+  },
+
   async dashboardStats(_: unknown, __: unknown, ctx: Context) {
     const [totals, byCat, byRepo, agents, tokens] = await Promise.all([
       ctx.pool.query<Record<string, unknown>>(`

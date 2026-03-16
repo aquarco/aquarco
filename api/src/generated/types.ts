@@ -34,6 +34,25 @@ export type CategoryCount = {
   count: Scalars['Int']['output'];
 };
 
+export type ClaudeAuthStatus = {
+  __typename?: 'ClaudeAuthStatus';
+  authenticated: Scalars['Boolean']['output'];
+  email?: Maybe<Scalars['String']['output']>;
+};
+
+export type ClaudeLoginResult = {
+  __typename?: 'ClaudeLoginResult';
+  email?: Maybe<Scalars['String']['output']>;
+  error?: Maybe<Scalars['String']['output']>;
+  success: Scalars['Boolean']['output'];
+};
+
+export type ClaudeLoginStart = {
+  __typename?: 'ClaudeLoginStart';
+  authorizeUrl: Scalars['String']['output'];
+  expiresIn: Scalars['Int']['output'];
+};
+
 export enum CloneStatus {
   Cloning = 'cloning',
   Error = 'error',
@@ -108,6 +127,10 @@ export type GithubLoginResult = {
 export type Mutation = {
   __typename?: 'Mutation';
   cancelTask: TaskPayload;
+  claudeLoginPoll: ClaudeLoginResult;
+  claudeLoginStart: ClaudeLoginStart;
+  claudeLogout: Scalars['Boolean']['output'];
+  claudeSubmitCode: ClaudeLoginResult;
   createTask: TaskPayload;
   githubLoginPoll: GithubLoginResult;
   githubLoginStart: GithubDeviceCode;
@@ -123,6 +146,11 @@ export type Mutation = {
 
 export type MutationCancelTaskArgs = {
   id: Scalars['ID']['input'];
+};
+
+
+export type MutationClaudeSubmitCodeArgs = {
+  code: Scalars['String']['input'];
 };
 
 
@@ -175,6 +203,7 @@ export type PipelineStatus = {
 export type Query = {
   __typename?: 'Query';
   agentInstances: Array<AgentInstance>;
+  claudeAuthStatus: ClaudeAuthStatus;
   dashboardStats: DashboardStats;
   githubAuthStatus: GithubAuthStatus;
   pipelineStatus?: Maybe<PipelineStatus>;
@@ -417,6 +446,9 @@ export type ResolversTypes = ResolversObject<{
   AgentInstance: ResolverTypeWrapper<AgentInstance>;
   Boolean: ResolverTypeWrapper<Scalars['Boolean']['output']>;
   CategoryCount: ResolverTypeWrapper<CategoryCount>;
+  ClaudeAuthStatus: ResolverTypeWrapper<ClaudeAuthStatus>;
+  ClaudeLoginResult: ResolverTypeWrapper<ClaudeLoginResult>;
+  ClaudeLoginStart: ResolverTypeWrapper<ClaudeLoginStart>;
   CloneStatus: null;
   ContextEntry: ResolverTypeWrapper<ContextEntry>;
   CreateTaskInput: CreateTaskInput;
@@ -452,6 +484,9 @@ export type ResolversParentTypes = ResolversObject<{
   AgentInstance: AgentInstance;
   Boolean: Scalars['Boolean']['output'];
   CategoryCount: CategoryCount;
+  ClaudeAuthStatus: ClaudeAuthStatus;
+  ClaudeLoginResult: ClaudeLoginResult;
+  ClaudeLoginStart: ClaudeLoginStart;
   ContextEntry: ContextEntry;
   CreateTaskInput: CreateTaskInput;
   DashboardStats: DashboardStats;
@@ -490,6 +525,25 @@ export type AgentInstanceResolvers<ContextType = Context, ParentType extends Res
 export type CategoryCountResolvers<ContextType = Context, ParentType extends ResolversParentTypes['CategoryCount'] = ResolversParentTypes['CategoryCount']> = ResolversObject<{
   category?: Resolver<ResolversTypes['TaskCategory'], ParentType, ContextType>;
   count?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
+export type ClaudeAuthStatusResolvers<ContextType = Context, ParentType extends ResolversParentTypes['ClaudeAuthStatus'] = ResolversParentTypes['ClaudeAuthStatus']> = ResolversObject<{
+  authenticated?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
+  email?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
+export type ClaudeLoginResultResolvers<ContextType = Context, ParentType extends ResolversParentTypes['ClaudeLoginResult'] = ResolversParentTypes['ClaudeLoginResult']> = ResolversObject<{
+  email?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  error?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  success?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
+export type ClaudeLoginStartResolvers<ContextType = Context, ParentType extends ResolversParentTypes['ClaudeLoginStart'] = ResolversParentTypes['ClaudeLoginStart']> = ResolversObject<{
+  authorizeUrl?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  expiresIn?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
 
@@ -558,6 +612,10 @@ export interface JsonScalarConfig extends GraphQLScalarTypeConfig<ResolversTypes
 
 export type MutationResolvers<ContextType = Context, ParentType extends ResolversParentTypes['Mutation'] = ResolversParentTypes['Mutation']> = ResolversObject<{
   cancelTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationCancelTaskArgs, 'id'>>;
+  claudeLoginPoll?: Resolver<ResolversTypes['ClaudeLoginResult'], ParentType, ContextType>;
+  claudeLoginStart?: Resolver<ResolversTypes['ClaudeLoginStart'], ParentType, ContextType>;
+  claudeLogout?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
+  claudeSubmitCode?: Resolver<ResolversTypes['ClaudeLoginResult'], ParentType, ContextType, RequireFields<MutationClaudeSubmitCodeArgs, 'code'>>;
   createTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationCreateTaskArgs, 'input'>>;
   githubLoginPoll?: Resolver<ResolversTypes['GithubLoginResult'], ParentType, ContextType>;
   githubLoginStart?: Resolver<ResolversTypes['GithubDeviceCode'], ParentType, ContextType>;
@@ -582,6 +640,7 @@ export type PipelineStatusResolvers<ContextType = Context, ParentType extends Re
 
 export type QueryResolvers<ContextType = Context, ParentType extends ResolversParentTypes['Query'] = ResolversParentTypes['Query']> = ResolversObject<{
   agentInstances?: Resolver<Array<ResolversTypes['AgentInstance']>, ParentType, ContextType>;
+  claudeAuthStatus?: Resolver<ResolversTypes['ClaudeAuthStatus'], ParentType, ContextType>;
   dashboardStats?: Resolver<ResolversTypes['DashboardStats'], ParentType, ContextType>;
   githubAuthStatus?: Resolver<ResolversTypes['GithubAuthStatus'], ParentType, ContextType>;
   pipelineStatus?: Resolver<Maybe<ResolversTypes['PipelineStatus']>, ParentType, ContextType, RequireFields<QueryPipelineStatusArgs, 'taskId'>>;
@@ -688,6 +747,9 @@ export type TaskStatusResolvers = { BLOCKED: 'blocked', COMPLETED: 'completed', 
 export type Resolvers<ContextType = Context> = ResolversObject<{
   AgentInstance?: AgentInstanceResolvers<ContextType>;
   CategoryCount?: CategoryCountResolvers<ContextType>;
+  ClaudeAuthStatus?: ClaudeAuthStatusResolvers<ContextType>;
+  ClaudeLoginResult?: ClaudeLoginResultResolvers<ContextType>;
+  ClaudeLoginStart?: ClaudeLoginStartResolvers<ContextType>;
   CloneStatus?: CloneStatusResolvers;
   ContextEntry?: ContextEntryResolvers<ContextType>;
   DashboardStats?: DashboardStatsResolvers<ContextType>;

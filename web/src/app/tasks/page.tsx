@@ -21,8 +21,11 @@ import MenuItem from '@mui/material/MenuItem'
 import FormControl from '@mui/material/FormControl'
 import InputLabel from '@mui/material/InputLabel'
 import Chip from '@mui/material/Chip'
+import Button from '@mui/material/Button'
+import AddIcon from '@mui/icons-material/Add'
 import { GET_TASKS, GET_REPOSITORIES } from '@/lib/graphql/queries'
 import { StatusChip } from '@/components/ui/StatusChip'
+import { CreateTaskDialog } from '@/components/tasks/CreateTaskDialog'
 import { monoStyle } from '@/lib/theme'
 import { formatDate } from '@/lib/format'
 
@@ -51,10 +54,11 @@ export default function TasksPage() {
   const [repoFilter, setRepoFilter] = useState('')
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
+  const [dialogOpen, setDialogOpen] = useState(false)
 
   const { data: reposData } = useQuery(GET_REPOSITORIES)
 
-  const { data, loading, error } = useQuery(GET_TASKS, {
+  const { data, loading, error, refetch } = useQuery(GET_TASKS, {
     variables: {
       limit: rowsPerPage,
       offset: page * rowsPerPage,
@@ -68,11 +72,25 @@ export default function TasksPage() {
   const totalCount: number = data?.tasks?.totalCount ?? -1
   const repositories: Repository[] = reposData?.repositories ?? []
 
+  const handleTaskCreated = () => {
+    refetch()
+  }
+
   return (
     <Box>
-      <Typography variant="h5" fontWeight={700} gutterBottom>
-        Tasks
-      </Typography>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+        <Typography variant="h5" fontWeight={700}>
+          Tasks
+        </Typography>
+        <Button
+          variant="contained"
+          startIcon={<AddIcon />}
+          onClick={() => setDialogOpen(true)}
+          data-testid="btn-create-task"
+        >
+          Create Task
+        </Button>
+      </Stack>
 
       {/* Filters */}
       <Stack direction="row" spacing={2} sx={{ mb: 2 }} flexWrap="wrap">
@@ -195,6 +213,13 @@ export default function TasksPage() {
         }}
         rowsPerPageOptions={[10, 25, 50]}
         labelDisplayedRows={({ from, to }) => `${from}–${to}`}
+      />
+
+      <CreateTaskDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onSuccess={handleTaskCreated}
+        repositories={repositories}
       />
     </Box>
   )

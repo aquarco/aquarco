@@ -19,6 +19,9 @@ type Query {
   # GitHub auth
   githubAuthStatus: GithubAuthStatus!
 
+  # Claude auth
+  claudeAuthStatus: ClaudeAuthStatus!
+
   # Dashboard stats
   dashboardStats: DashboardStats!
 }
@@ -38,6 +41,12 @@ type Mutation {
   githubLoginStart: GithubDeviceCode!
   githubLoginPoll: GithubLoginResult!
   githubLogout: Boolean!
+
+  # Claude auth
+  claudeLoginStart: ClaudeLoginStart!
+  claudeLoginPoll: ClaudeLoginResult!
+  claudeSubmitCode(code: String!): ClaudeLoginResult!
+  claudeLogout: Boolean!
 
   # Repository actions
   retryClone(name: String!): RepositoryPayload!
@@ -249,6 +258,24 @@ type GithubDeviceCode {
 type GithubLoginResult {
   success: Boolean!
   username: String
+  error: String
+}
+
+# --- Claude Auth ---
+
+type ClaudeAuthStatus {
+  authenticated: Boolean!
+  email: String
+}
+
+type ClaudeLoginStart {
+  authorizeUrl: String!
+  expiresIn: Int!
+}
+
+type ClaudeLoginResult {
+  success: Boolean!
+  email: String
   error: String
 }
 

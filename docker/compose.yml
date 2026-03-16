@@ -50,6 +50,7 @@ services:
       - api_modules:/app/node_modules
       - ${AGENT_SSH_DIR:-/home/agent/.ssh}:/agent-ssh
       - ${REPOS_BASE:-/home/agent/repos}:/repos
+      - /var/lib/aifishtank/claude-ipc:/claude-ipc
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://aifishtank:aifishtank@postgres:5432/aifishtank}
       NODE_ENV: ${NODE_ENV:-development}

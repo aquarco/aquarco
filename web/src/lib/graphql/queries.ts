@@ -218,6 +218,52 @@ export const GITHUB_LOGOUT = gql`
   }
 `
 
+// ── Claude Auth ──────────────────────────────────────────────────────────────
+
+export const CLAUDE_AUTH_STATUS = gql`
+  query ClaudeAuthStatus {
+    claudeAuthStatus {
+      authenticated
+      email
+    }
+  }
+`
+
+export const CLAUDE_LOGIN_START = gql`
+  mutation ClaudeLoginStart {
+    claudeLoginStart {
+      authorizeUrl
+      expiresIn
+    }
+  }
+`
+
+export const CLAUDE_LOGIN_POLL = gql`
+  mutation ClaudeLoginPoll {
+    claudeLoginPoll {
+      success
+      email
+      error
+    }
+  }
+`
+
+export const CLAUDE_SUBMIT_CODE = gql`
+  mutation ClaudeSubmitCode($code: String!) {
+    claudeSubmitCode(code: $code) {
+      success
+      email
+      error
+    }
+  }
+`
+
+export const CLAUDE_LOGOUT = gql`
+  mutation ClaudeLogout {
+    claudeLogout
+  }
+`
+
 // ── Agents ────────────────────────────────────────────────────────────────────
 
 export const GET_AGENT_INSTANCES = gql`
