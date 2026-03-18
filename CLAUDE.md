@@ -39,6 +39,36 @@ Always check `prd.json` for current requirements, architecture decisions, and st
 - **Runtime**: Docker Compose only (no Kubernetes/k3s)
 - **CI/CD**: Scripts managed by scripting agent
 
+## Supervisor (Python)
+The supervisor system manages autonomous AI agent pipelines. It was rewritten from
+~2,500 lines of bash to a Python async package at `supervisor/python/`.
+
+### Key Modules
+| Module | Responsibility |
+|--------|---------------|
+| `main.py` | Entry point, main loop, signal handling, health reporting |
+| `config.py` | YAML config loading with Pydantic validation |
+| `database.py` | Async PostgreSQL pool (psycopg) |
+| `task_queue.py` | Task CRUD, status transitions, poll state |
+| `pipeline/executor.py` | Multi-stage pipeline execution, git branching, PR creation |
+| `pipeline/agent_registry.py` | Agent discovery, capacity management |
+| `pipeline/context.py` | Context accumulation for stages |
+| `cli/claude.py` | Claude CLI subprocess wrapper |
+| `pollers/` | GitHub issues, PRs, commits, file-drop triggers |
+| `workers/` | Git clone and pull workers |
+
+### Running
+```bash
+cd supervisor/python && pip install -e ".[dev]"
+aifishtank-supervisor --config supervisor/config/supervisor.yaml
+# Or via systemd: aifishtank-supervisor-python.service
+```
+
+### Testing
+```bash
+cd supervisor/python && python -m pytest tests/ -v
+```
+
 ## Mission-Critical Flows (E2E)
 The `e2e` agent owns Playwright tests for three non-negotiable areas:
 - **User registration** — full signup flow, validation, duplicate handling

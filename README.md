@@ -1,101 +1,315 @@
-# Multi-Agent Development System
+# AI Fishtank
 
-A Claude Code agent system that coordinates specialized AI agents for every aspect of development.
+Sandboxed VirtualBox VM for autonomous AI agents. Agents watch GitHub
+repositories for issues and PRs, run multi-stage pipelines (analyze, design,
+implement, test, review), and submit pull requests — all inside an isolated VM.
+
+## Quick Start
+
+```bash
+cd vagrant
+vagrant up          # Provision Ubuntu 24.04 VM (~5 min)
+```
+
+Open http://localhost:8080, log in to GitHub and Claude, then add a repository.
 
 ## Architecture
 
 ```
-solution-architect  ←─── coordinates everything
-     │
-     ├── ralph           ─── writes decisions to prd.json (on request only)
-     ├── docs            ─── keeps CLAUDE.md, README.md, CHANGELOG.md current
-     ├── e2e             ─── Playwright tests for registration, portfolio, public pages
-     ├── database        ─── PostgreSQL schema, migrations, queries
-     ├── qa              ─── code quality, standards
-     ├── testing         ─── unit / integration / e2e tests
-     ├── security        ─── OWASP, auth, secrets, audits
-     ├── scripting       ─── shell scripts, Makefile, CI/CD
-     ├── dev-infra       ─── Docker Compose, dev containers
-     ├── graphql         ─── GraphQL API development
-     └── frontend        ─── React + MUI + Next.js
+┌─ Host (macOS) ────────────────────────────────────────────────────┐
+│  vagrant/Vagrantfile          Port forwards: 8080,4000,15432,...  │
+│                                                                   │
+│  ┌─ VirtualBox VM (Ubuntu 24.04) ──────────────────────────────┐  │
+│  │                                                             │  │
+│  │  ┌─ Docker Compose ──────────────────────────────────────┐  │  │
+│  │  │  postgres:16  (5432)    ← migrations from db/         │  │  │
+│  │  │  api:node:20  (4000)    ← GraphQL, auth handlers      │  │  │
+│  │  │  web:node:20  (8080)    ← Next.js dashboard           │  │  │
+│  │  └───────────────────────────────────────────────────────┘  │  │
+│  │                                                             │  │
+│  │  ┌─ Systemd Services (agent:agent) ──────────────────────┐  │  │
+│  │  │  aifishtank-supervisor-python  ← Python supervisor    │  │  │
+│  │  │  aifishtank-claude-auth        ← Claude IPC helper    │  │  │
+│  │  │  aifishtank-stack              ← docker compose up/dn │  │  │
+│  │  └───────────────────────────────────────────────────────┘  │  │
+│  └─────────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
-## How It Works
+## Components
 
-### Automatic Trigger (on every change)
-Every time Claude writes or edits a file, the `PostToolUse` hook fires:
-1. Detects which file changed and categorizes it
-2. Injects context into the conversation
-3. The `solution-architect` reviews the change and delegates to specialists
+### Docker Compose Stack (`docker/compose.yml`)
 
-### Manual Commands
-| Command | Description |
-|---------|-------------|
-| `/architect-init` | Initialize a new project — sets up `prd.json` |
-| `/new-feature <description>` | Implement a feature with full agent pipeline |
-| `/review` | Multi-agent review: QA + Security + Testing |
-| `/deploy-check` | Pre-deployment validation checklist |
-| `/prd` | Show human-readable PRD summary |
+| Service  | Image              | Port            | User     | Purpose                     |
+|----------|--------------------|-----------------|----------|-----------------------------|
+| postgres | postgres:16-alpine | 5432 (internal) | postgres | Database                    |
+| api      | node:20-alpine     | 4000            | node     | GraphQL API, auth endpoints |
+| web      | node:20-alpine     | 8080 (→3000)    | node     | Next.js dashboard           |
 
-### PRD (Product Requirements Document)
-All architectural decisions are recorded in `prd.json` by the **Ralph agent**.
-- Ralph writes **only when explicitly asked** — not automatically
-- Invoke manually: *"Ralph — record this decision: [decision]"*
+Source code is bind-mounted for hot reload; `node_modules` use named volumes.
 
-## Setup
+### Systemd Services
+
+| Service                      | User:Group  | Entry Point                                       |
+|------------------------------|-------------|---------------------------------------------------|
+| aifishtank-stack             | agent:agent | `docker compose up -d` (oneshot)                  |
+| aifishtank-supervisor-python | agent:agent | `/home/agent/.venv/bin/aifishtank-supervisor run` |
+| aifishtank-claude-auth       | agent:agent | `supervisor/scripts/claude-auth-helper.sh`        |
+
+All three are enabled on boot. The supervisor waits for the Docker stack
+(`After=aifishtank-stack.service`).
+
+### Python Supervisor (`supervisor/python/`)
+
+Async Python process running the main loop every ~5 seconds:
+
+1. **Refresh secrets** — re-read token files (picks up logins without restart)
+2. **Clone pending repos** — `git clone` with GitHub token auth
+3. **Pull ready repos** — `git fetch/pull` every 30s
+4. **Run pollers** — watch GitHub issues (60s), PRs (30s), file triggers (10s)
+5. **Dispatch tasks** — assign to agents (max 3 concurrent)
+6. **Health report** — post to GitHub issue every 30 min
+
+## Port Forwarding (VM → Host)
+
+| Guest | Host  | Service    |
+|-------|-------|------------|
+| 8080  | 8080  | Web UI     |
+| 4000  | 4000  | GraphQL API|
+| 5432  | 15432 | PostgreSQL |
+| 9090  | 9090  | Prometheus |
+| 3000  | 13000 | Grafana    |
+| 8081  | 8081  | Adminer    |
+
+## File Layout
+
+### VM Host Filesystem
+
+```
+/home/agent/
+  .ssh/
+    github-token              ← GitHub OAuth token (written by API container)
+    deploy-keys/{repo}/       ← per-repo SSH deploy keys (generated on clone failure)
+  .claude/
+    .credentials.json         ← Claude auth token (written by auth helper)
+  .venv/                      ← Python virtualenv with supervisor CLI
+  ai-fishtank/                ← synced from host git repo (VirtualBox shared folder)
+  repos/{repo-name}/          ← cloned target repositories
+
+/var/lib/aifishtank/
+  claude-ipc/                 ← file-based IPC between API container and auth helper
+  triggers/                   ← external trigger drop directory
+
+/var/log/aifishtank/
+  supervisor.log              ← JSON structured logs
+  agents/*.log                ← per-agent execution logs
+```
+
+### API Container Mounts
+
+| Host Path                      | Container Path | Purpose                 |
+|--------------------------------|----------------|-------------------------|
+| /home/agent/.ssh               | /agent-ssh     | GitHub token read/write |
+| /home/agent/repos              | /repos         | Cloned repos access     |
+| /var/lib/aifishtank/claude-ipc | /claude-ipc    | Claude auth IPC         |
+| api/src                        | /app/src       | Hot-reloaded source     |
+
+## Authentication Flows
+
+### GitHub Login (Device Flow OAuth)
+
+User clicks **GitHub Login** on the Repositories page.
+
+```
+User          Web UI           API Container          GitHub            VM Host
+ │              │                    │                    │                │
+ │ click login ─→                    │                    │                │
+ │              ├─ githubLoginStart ─→                    │                │
+ │              │                    ├─ POST /login/device/code ──────────→│
+ │              │                    │← device_code, user_code ────────────┤
+ │              │← user_code, URL ───┤                    │                │
+ │              │                    │                    │                │
+ │ copy+open ───→ (copies code, opens GitHub) ───────────→│                │
+ │ paste code, approve ──────────────────────────────────→│                │
+ │              │                    │                    │                │
+ │              ├─ githubLoginPoll ──→ (respects rate limit)               │
+ │              │                    │←── access_token ───┤                │
+ │              │                    ├── write /agent-ssh/github-token ───→│
+ │              │                    │         (mode 0600, agent:agent)    │
+ │              │← success, username ┤                    │                │
+ │              │                    │                    │                │
+ │              │                    │                    │  supervisor:   │
+ │              │                    │                    │  _refresh_secrets()
+ │              │                    │                    │  detects token │
+ │              │                    │                    │  sets GH_TOKEN,│
+ │              │                    │                    │  GIT_ASKPASS   │
+```
+
+**Token path**: API writes `/agent-ssh/github-token` (container) →
+`/home/agent/.ssh/github-token` (host) → supervisor reads on next loop (~5s).
+
+**Git HTTPS auth**: The supervisor creates a `GIT_ASKPASS` helper script that
+returns `x-access-token` as username and the OAuth token as password. All
+`git` and `gh` subprocesses inherit these env vars.
+
+### Claude Login (PKCE OAuth via IPC)
+
+User clicks **Claude Login** on the Agents page.
+
+```
+User          Web UI           API Container            IPC Files         Auth Helper
+ │              │                    │                       │                 │
+ │ click login ─→                    │                       │                 │
+ │              ├─ claudeLoginStart ─→                       │                 │
+ │              │                    ├─ write login-request ─→                 │
+ │              │                    │                       │←── detect ──────┤
+ │              │                    │                       │  launch OAuth ──┤
+ │              │                    │←─── login-response ───┤                 │
+ │              │←─ authorize URL ───┤                       │                 │
+ │              │                    │                       │                 │
+ │ visit URL, approve ───────────────────────────────────────→ Anthropic OAuth │
+ │              │                    │                       │                 │
+ │ paste code ──→                    │                       │                 │
+ │              ├─ claudeSubmitCode ─→                       │                 │
+ │              │                    ├─ write code-submit ───→                 │
+ │              │                    │                       │←──── submit ────┤
+ │              │                    │                       │  write creds ───┤
+ │              │                    │                       │──→ ~/.claude/   │
+ │              │                    │←─── code-complete ────┤    .credentials │
+ │              │←─ success, email ──┤                       │                 │
+```
+
+**IPC mechanism**: The API container cannot run the `claude` CLI directly
+(it runs inside Docker). It writes request files to `/claude-ipc/` (mounted
+from `/var/lib/aifishtank/claude-ipc/`). The `claude-auth-helper.sh` systemd
+service watches that directory and handles requests using Python PKCE OAuth.
+
+### Repository Clone
+
+User clicks **Add Repository** on the Repositories page.
+
+```
+User          Web UI           API Container        PostgreSQL        Supervisor
+ │              │                    │                   │                 │
+ │ add repo ────→                    │                   │                 │
+ │              ├─ registerRepo ────→│                   │                 │
+ │              │                    ├── INSERT repos ──→│                 │
+ │              │                    │  (status=pending) │                 │
+ │              │← success ──────────┤                   │                 │
+ │              │                    │                   │                 │
+ │              │                    │                   │←── next loop ───┤
+ │              │                    │                   │  SELECT pending │
+ │              │                    │                   │  UPDATE cloning │
+ │              │                    │                   │  git clone      │
+ │              │                    │                   │  (HTTPS+token)  │
+ │              │                    │                   │  UPDATE ready   │
+ │              │                    │                   │  (+ head_sha)   │
+ │              │                    │                   │                 │
+ │              │ poll (3s) ────────→│←── status=READY ──┤                 │
+ │              │←─ READY ───────────┤                   │                 │
+```
+
+When logged into GitHub, the Add Repository dialog shows an autocomplete
+with the user's repositories. Selecting one auto-fills name, URL, and default
+branch. Free-text entry is always available.
+
+If HTTPS clone fails, the supervisor generates an SSH deploy key and stores
+the public key in the database for display in the UI.
+
+## Process Ownership
+
+| What              | User:Group  | Where           | Reads                       | Writes                         |
+|-------------------|-------------|-----------------|-----------------------------|--------------------------------|
+| PostgreSQL        | postgres    | Docker          | —                           | pgdata volume                  |
+| GraphQL API       | node        | Docker          | /agent-ssh/github-token     | /agent-ssh/github-token        |
+|                   |             |                 | /claude-ipc/* responses     | /claude-ipc/* requests         |
+| Web UI            | node        | Docker          | —                           | —                              |
+| Python Supervisor | agent:agent | VM host systemd | ~/.ssh/github-token         | /var/log/aifishtank/           |
+|                   |             |                 | ~/.anthropic-key            | ~/repos/                       |
+|                   |             |                 | supervisor.yaml             | /tmp/git-askpass-helper.sh     |
+| Claude Auth       | agent:agent | VM host systemd | /claude-ipc/* requests      | ~/.claude/.credentials.json    |
+|                   |             |                 | ~/.claude/.credentials.json | /claude-ipc/* responses        |
+| Clone Worker      | agent:agent | in supervisor   | GITHUB_TOKEN env            | ~/repos/{name}/                |
+|                   |             |                 |                             | ~/.ssh/deploy-keys/            |
+| Pull Worker       | agent:agent | in supervisor   | GITHUB_TOKEN env            | ~/repos/{name}/ (git pull)     |
+| Pollers           | agent:agent | in supervisor   | GH_TOKEN env                | DB (tasks table)               |
+
+## Supervisor Configuration
+
+`supervisor/config/supervisor.yaml`:
+
+```yaml
+spec:
+  database:
+    url: postgresql://aifishtank:aifishtank@localhost:5432/aifishtank
+  globalLimits:
+    maxConcurrentAgents: 3
+    maxTokensPerHour: 1000000
+    cooldownBetweenTasksSeconds: 5
+  secrets:
+    githubTokenFile: /home/agent/.ssh/github-token
+    anthropicKeyFile: /home/agent/.anthropic-key
+```
+
+Secrets are re-read from disk every loop iteration (~5s). When a token file
+appears after the user logs in via web UI, the supervisor detects it
+automatically and logs `github_token_detected`.
+
+SIGHUP triggers a full config reload: `systemctl reload aifishtank-supervisor-python`
+
+## Claude Code Agent System
+
+The project uses a multi-agent system coordinated by the Solution Architect.
+
+```
+solution-architect  ←── coordinates all agents
+     │
+     ├── ralph           ── writes decisions to prd.json (on request only)
+     ├── docs            ── keeps CLAUDE.md, README.md, CHANGELOG.md current
+     ├── e2e             ── Playwright tests for critical flows
+     ├── database        ── PostgreSQL schema, migrations, queries
+     ├── qa              ── code quality, standards
+     ├── testing         ── unit / integration / e2e tests
+     ├── security        ── OWASP, auth, secrets, audits
+     ├── scripting       ── shell scripts, CI/CD
+     ├── dev-infra       ── Docker Compose, dev containers
+     ├── graphql         ── GraphQL API development
+     └── frontend        ── React + MUI + Next.js
+```
+
+Agent definitions live in `.claude/agents/`. Slash commands:
+
+| Command                       | Description                                 |
+|-------------------------------|---------------------------------------------|
+| `/architect-init`             | Initialize project, set up prd.json         |
+| `/new-feature <description>`  | Implement feature with full agent pipeline  |
+| `/review`                     | Multi-agent review: QA + Security + Testing |
+| `/deploy-check`               | Pre-deployment validation checklist         |
+| `/prd`                        | Show human-readable PRD summary             |
+
+## Development
+
+The codebase is synced into the VM via VirtualBox shared folder.
+Source changes on the host are immediately visible inside the VM.
+
+- **API/Web**: Hot-reloaded automatically (Docker bind mounts + polling watchers)
+- **Supervisor**: Editable pip install (`pip install -e`); restart service to pick up changes
+- **DB schema**: Migrations in `db/migrations/` run on first `docker compose up`
+
+### Useful Commands
 
 ```bash
-# 1. Install dependencies
-make setup
+# VM access
+cd vagrant && vagrant ssh
 
-# 2. Copy env vars
-cp .env.example .env
+# Inside VM — supervisor
+sudo journalctl -u aifishtank-supervisor-python -f     # follow logs
+sudo systemctl restart aifishtank-supervisor-python     # restart
+sudo systemctl reload aifishtank-supervisor-python      # reload config (SIGHUP)
 
-# 3. Start dev stack
-make dev
+# Inside VM — Docker stack
+sudo docker compose -f /home/agent/ai-fishtank/docker/compose.yml logs -f api
 
-# 4. Initialize project with Claude Code
-claude
-> /architect-init
+# DB access from host
+psql postgresql://aifishtank:aifishtank@localhost:15432/aifishtank
 ```
-
-## File Structure
-
-```
-.claude/
-  agents/           # Subagent system prompts
-    solution-architect.md
-    ralph.md
-    docs.md
-    e2e.md
-    database.md
-    qa.md
-    testing.md
-    security.md
-    scripting.md
-    dev-infra.md
-    graphql.md
-    frontend.md
-  commands/         # Slash commands
-    architect-init.md
-    new-feature.md
-    review.md
-    deploy-check.md
-    prd.md
-  hooks/            # Automatic triggers
-    orchestrate-on-change.sh   # Fires on every Write/Edit
-    session-start.sh           # Fires at session start
-  skills/           # Shared domain knowledge
-    architecture/SKILL.md
-  logs/             # Hook execution logs (gitignored)
-  settings.json     # Hook config + permissions
-
-CLAUDE.md           # Project memory loaded every session
-prd.json            # Living architecture document (managed by ralph)
-Makefile            # All common tasks
-```
-
-## Decision Log
-
-Architecture decisions are stored in `prd.json` as ADRs (Architecture Decision Records).
-To view: `make prd-show` or `/prd` in Claude Code.
