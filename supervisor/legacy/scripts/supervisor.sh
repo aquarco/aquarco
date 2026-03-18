@@ -15,6 +15,11 @@
 
 set -euo pipefail
 
+# Feature flag: if SUPERVISOR_USE_PYTHON=1, delegate to the Python implementation.
+if [ "${SUPERVISOR_USE_PYTHON:-0}" = "1" ]; then
+    exec aifishtank-supervisor "$@"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUPERVISOR_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -237,7 +242,7 @@ dispatch_pending_tasks() {
 
     # task_row: id<TAB>title<TAB>category<TAB>pipeline<TAB>repository<TAB>source<TAB>source_ref
     local task_id task_title task_category task_pipeline task_repository
-    IFS=$'\t' read -r task_id task_title task_category task_pipeline task_repository _ _ <<< "$task_row"
+    IFS=$'\x1f' read -r task_id task_title task_category task_pipeline task_repository _ _ <<< "$task_row"
 
     if [[ -z "$task_id" ]]; then
       break
@@ -246,6 +251,7 @@ dispatch_pending_tasks() {
     log "info" "Dispatching task=$task_id category=$task_category pipeline=$task_pipeline"
 
     # Run the pipeline in a background subshell so the main loop stays responsive.
+    # Redirect stderr to the log file so pipeline-executor logs are captured.
     (
       set -euo pipefail
 
@@ -254,6 +260,8 @@ dispatch_pending_tasks() {
       source "${SUPERVISOR_ROOT}/lib/task-queue.sh"
       source "${SUPERVISOR_ROOT}/lib/agent-registry.sh"
       source "${SUPERVISOR_ROOT}/lib/pipeline-executor.sh"
+
+      load_registry || { log "error" "Failed to load agent registry in subshell"; exit 1; }
 
       assign_agent "$task_id" "pending-assignment"
       update_task_status "$task_id" "executing"
@@ -265,7 +273,7 @@ dispatch_pending_tasks() {
         log "error" "Pipeline failed for task=$task_id"
         exit 1
       fi
-    ) &
+    ) >> "${CFG_LOG_FILE:-/dev/null}" 2>&1 &
 
     (( dispatched++ )) || true
     log "info" "Background pipeline started for task=$task_id (PID=$!)"

@@ -32,18 +32,19 @@ _tq_log() {
 # Execute a SQL string against the configured database.
 # Prints output to stdout; returns psql exit code.
 _psql() {
-  psql --no-psqlrc --tuples-only --no-align \
+  psql --no-psqlrc --tuples-only --no-align --quiet -F $'\x1f' \
     "${DATABASE_URL:?DATABASE_URL is not set}" \
-    "$@"
+    -c "SET search_path TO aifishtank, public;" \
+    "$@" | { grep -v '^SET$' || true; }
 }
 
 # ── Private: _psql_json ───────────────────────────────────────────────────────
 # Execute SQL and return a single JSON string result.
 _psql_json() {
-  psql --no-psqlrc --tuples-only --no-align \
+  psql --no-psqlrc --tuples-only --no-align --quiet -F $'\x1f' \
     "${DATABASE_URL:?DATABASE_URL is not set}" \
     -c "SET search_path TO aifishtank, public;" \
-    "$@"
+    "$@" | { grep -v '^SET$' || true; }
 }
 
 # ── Public: create_task ───────────────────────────────────────────────────────
@@ -68,7 +69,8 @@ create_task() {
   local source_ref="$5"
   local repository="$6"
   local pipeline="$7"
-  local context_json="${8:-{}}"
+  local default_ctx='{}'
+  local context_json="${8:-$default_ctx}"
 
   _tq_log "info" "Creating task id=$id category=$category source=$source repository=$repository"
 
@@ -84,22 +86,17 @@ create_task() {
   e_context="$(_tq_escape "$context_json")"
 
   local sql
-  sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
-INSERT INTO tasks (id, title, category, source, source_ref, repository, pipeline, initial_context)
-VALUES (
-  \$tq\$${e_id}\$tq\$,
-  \$tq\$${e_title}\$tq\$,
-  \$tq\$${e_category}\$tq\$,
-  \$tq\$${e_source}\$tq\$,
-  \$tq\$${e_source_ref}\$tq\$,
-  \$tq\$${e_repository}\$tq\$,
-  \$tq\$${e_pipeline}\$tq\$,
-  \$tq\$${e_context}\$tq\$::jsonb
-)
-ON CONFLICT (id) DO NOTHING;
-SQL
-)"
+  sql="INSERT INTO tasks (id, title, category, source, source_ref, repository, pipeline, initial_context)"
+  sql+=" VALUES ("
+  sql+=" \$tq\$${e_id}\$tq\$,"
+  sql+=" \$tq\$${e_title}\$tq\$,"
+  sql+=" \$tq\$${e_category}\$tq\$,"
+  sql+=" \$tq\$${e_source}\$tq\$,"
+  sql+=" \$tq\$${e_source_ref}\$tq\$,"
+  sql+=" \$tq\$${e_repository}\$tq\$,"
+  sql+=" \$tq\$${e_pipeline}\$tq\$,"
+  sql+=" \$tq\$${e_context}\$tq\$::jsonb"
+  sql+=" ) ON CONFLICT (id) DO NOTHING;"
 
   if _psql -c "$sql" &>/dev/null; then
     _tq_log "info" "Task created: id=$id"
@@ -119,7 +116,6 @@ SQL
 get_next_task() {
   local sql
   sql="$(cat <<'SQL'
-SET search_path TO aifishtank, public;
 UPDATE tasks
 SET    status     = 'queued',
        updated_at = NOW()
@@ -161,7 +157,7 @@ update_task_status() {
   local timestamp_clause=""
   case "$status" in
     executing)
-      timestamp_clause=", started_at = COALESCE(started_at, NOW())"
+      timestamp_clause=", started_at = NOW(), error_message = NULL"
       ;;
     completed|failed|timeout)
       timestamp_clause=", completed_at = NOW()"
@@ -174,7 +170,6 @@ update_task_status() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
 UPDATE tasks
 SET    status     = \$tq\$${e_status}\$tq\$${timestamp_clause},
        updated_at = NOW()
@@ -202,7 +197,6 @@ task_exists() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
 SELECT COUNT(*) FROM tasks WHERE id = \$tq\$${e_task_id}\$tq\$;
 SQL
 )"
@@ -226,7 +220,6 @@ get_task() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
 SELECT row_to_json(t)
 FROM (
   SELECT id, title, category, status, priority, source, source_ref,
@@ -270,7 +263,6 @@ fail_task() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
 UPDATE tasks
 SET    retry_count   = retry_count + 1,
        error_message = \$tq\$${e_error}\$tq\$,
@@ -309,7 +301,6 @@ complete_task() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
 UPDATE tasks
 SET    status       = 'completed',
        completed_at = NOW(),
@@ -353,36 +344,28 @@ store_stage_output() {
   e_output="$(_tq_escape "$output_json")"
 
   local sql
-  sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
-INSERT INTO stages (task_id, stage_number, category, agent, status, structured_output, started_at, completed_at)
-VALUES (
-  \$tq\$${e_task_id}\$tq\$,
-  ${stage_num},
-  \$tq\$${e_category}\$tq\$,
-  \$tq\$${e_agent}\$tq\$,
-  'completed',
-  \$tq\$${e_output}\$tq\$::jsonb,
-  NOW(),
-  NOW()
-)
-ON CONFLICT (task_id, stage_number) DO UPDATE
-  SET agent             = EXCLUDED.agent,
-      status            = 'completed',
-      structured_output = EXCLUDED.structured_output,
-      completed_at      = NOW();
+  sql="INSERT INTO stages (task_id, stage_number, category, agent, status, structured_output, started_at, completed_at)"
+  sql+=" VALUES ("
+  sql+=" \$tq\$${e_task_id}\$tq\$,"
+  sql+=" ${stage_num},"
+  sql+=" \$tq\$${e_category}\$tq\$,"
+  sql+=" \$tq\$${e_agent}\$tq\$,"
+  sql+=" 'completed',"
+  sql+=" \$tq\$${e_output}\$tq\$::jsonb,"
+  sql+=" NOW(), NOW())"
+  sql+=" ON CONFLICT (task_id, stage_number) DO UPDATE"
+  sql+=" SET agent = EXCLUDED.agent,"
+  sql+=" status = 'completed',"
+  sql+=" structured_output = EXCLUDED.structured_output,"
+  sql+=" completed_at = NOW();"
+  sql+=" UPDATE tasks SET current_stage = ${stage_num} + 1, updated_at = NOW()"
+  sql+=" WHERE id = \$tq\$${e_task_id}\$tq\$;"
 
-UPDATE tasks
-SET    current_stage = ${stage_num} + 1,
-       updated_at    = NOW()
-WHERE  id = \$tq\$${e_task_id}\$tq\$;
-SQL
-)"
-
-  if _psql -c "$sql" &>/dev/null; then
+  local sql_result
+  if sql_result="$(_psql -c "$sql" 2>&1)"; then
     return 0
   else
-    _tq_log "error" "Failed to store stage output: task=$task_id stage=$stage_num"
+    _tq_log "error" "Failed to store stage output: task=$task_id stage=$stage_num error=$sql_result"
     return 1
   fi
 }
@@ -403,7 +386,6 @@ get_task_context() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
 SELECT get_task_context(\$tq\$${e_task_id}\$tq\$);
 SQL
 )"
@@ -428,7 +410,8 @@ SQL
 update_poll_state() {
   local poller_name="$1"
   local cursor="${2:-}"
-  local state_data="${3:-{}}"
+  local default_state='{}'
+  local state_data="${3:-$default_state}"
 
   local e_poller_name e_cursor e_state
   e_poller_name="$(_tq_escape "$poller_name")"
@@ -436,23 +419,17 @@ update_poll_state() {
   e_state="$(_tq_escape "$state_data")"
 
   local sql
-  sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
-INSERT INTO poll_state (poller_name, last_poll_at, last_successful_at, cursor, state_data)
-VALUES (
-  \$tq\$${e_poller_name}\$tq\$,
-  NOW(),
-  NOW(),
-  \$tq\$${e_cursor}\$tq\$,
-  \$tq\$${e_state}\$tq\$::jsonb
-)
-ON CONFLICT (poller_name) DO UPDATE
-  SET last_poll_at       = NOW(),
-      last_successful_at = NOW(),
-      cursor             = EXCLUDED.cursor,
-      state_data         = EXCLUDED.state_data;
-SQL
-)"
+  sql="INSERT INTO poll_state (poller_name, last_poll_at, last_successful_at, cursor, state_data)"
+  sql+=" VALUES ("
+  sql+=" \$tq\$${e_poller_name}\$tq\$,"
+  sql+=" NOW(), NOW(),"
+  sql+=" \$tq\$${e_cursor}\$tq\$,"
+  sql+=" \$tq\$${e_state}\$tq\$::jsonb)"
+  sql+=" ON CONFLICT (poller_name) DO UPDATE"
+  sql+=" SET last_poll_at = NOW(),"
+  sql+=" last_successful_at = NOW(),"
+  sql+=" cursor = EXCLUDED.cursor,"
+  sql+=" state_data = EXCLUDED.state_data;"
 
   _psql -c "$sql" &>/dev/null
 }
@@ -470,7 +447,6 @@ get_poll_cursor() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
 SELECT COALESCE(cursor, '') FROM poll_state WHERE poller_name = \$tq\$${e_poller_name}\$tq\$;
 SQL
 )"
@@ -488,7 +464,6 @@ get_timed_out_tasks() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
 SELECT id
 FROM   tasks
 WHERE  status     = 'executing'
@@ -513,7 +488,6 @@ assign_agent() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
 UPDATE tasks
 SET    assigned_agent = \$tq\$${e_agent_name}\$tq\$,
        status         = 'executing',

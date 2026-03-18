@@ -30,9 +30,10 @@ _ar_log() {
 
 # ── Private: _psql ────────────────────────────────────────────────────────────
 _ar_psql() {
-  psql --no-psqlrc --tuples-only --no-align \
+  psql --no-psqlrc --tuples-only --no-align --quiet \
     "${DATABASE_URL:?DATABASE_URL is not set}" \
-    "$@"
+    -c "SET search_path TO aifishtank, public;" \
+    "$@" | { grep -v '^SET$' || true; }
 }
 
 # ── Public: load_registry ────────────────────────────────────────────────────
@@ -150,7 +151,6 @@ agent_is_available() {
   # Get active_count from the database.
   local active_count_sql
   active_count_sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
 SELECT COALESCE(active_count, 0) FROM agent_instances WHERE agent_name = \$\$${agent_name}\$\$;
 SQL
 )"
@@ -173,7 +173,6 @@ increment_agent_instances() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
 INSERT INTO agent_instances (agent_name, active_count, total_executions, last_execution_at)
 VALUES (\$\$${agent_name}\$\$, 1, 1, NOW())
 ON CONFLICT (agent_name) DO UPDATE
@@ -197,7 +196,6 @@ decrement_agent_instances() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
 UPDATE agent_instances
 SET    active_count = GREATEST(active_count - 1, 0)
 WHERE  agent_name   = \$\$${agent_name}\$\$;
@@ -275,7 +273,6 @@ _sync_agent_instances() {
   for agent_name in "${agent_names[@]}"; do
     local sql
     sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
 INSERT INTO agent_instances (agent_name, active_count, total_executions)
 VALUES (\$\$${agent_name}\$\$, 0, 0)
 ON CONFLICT (agent_name) DO NOTHING;

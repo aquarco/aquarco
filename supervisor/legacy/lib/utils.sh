@@ -38,19 +38,23 @@ _tq_escape() {
 # Returns 0 on success (slug printed to stdout), 1 if URL is unrecognised.
 _url_to_slug() {
   local url="$1"
+  local slug=""
 
   # HTTPS: https://github.com/owner/repo[.git]
-  if [[ "$url" =~ ^https://github.com/([^/]+/[^/]+?)(.git)?$ ]]; then
-    echo "${BASH_REMATCH[1]}"
-    return 0
-  fi
-
+  if [[ "$url" =~ ^https://github.com/([^/]+/[^/]+)$ ]]; then
+    slug="${BASH_REMATCH[1]}"
   # SSH: git@github.com:owner/repo[.git]
-  if [[ "$url" =~ ^git@github.com:([^/]+/[^/]+?)(.git)?$ ]]; then
-    echo "${BASH_REMATCH[1]}"
-    return 0
+  elif [[ "$url" =~ ^git@github.com:([^/]+/[^/]+)$ ]]; then
+    slug="${BASH_REMATCH[1]}"
   fi
 
-  echo ""
-  return 1
+  if [[ -z "$slug" ]]; then
+    echo ""
+    return 1
+  fi
+
+  # Strip trailing .git if present.
+  slug="${slug%.git}"
+  echo "$slug"
+  return 0
 }
