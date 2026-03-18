@@ -66,7 +66,7 @@ type LoginStep = 'idle' | 'starting' | 'authorize' | 'paste-code' | 'submitting'
 
 export default function AgentsPage() {
   const { data, loading, error } = useQuery(GET_AGENT_INSTANCES)
-  const { data: authData, refetch: refetchAuth } = useQuery(CLAUDE_AUTH_STATUS)
+  const { data: authData, loading: authLoading, refetch: refetchAuth } = useQuery(CLAUDE_AUTH_STATUS)
 
   const [loginDialogOpen, setLoginDialogOpen] = useState(false)
   const [loginStep, setLoginStep] = useState<LoginStep>('idle')
@@ -75,6 +75,7 @@ export default function AgentsPage() {
   const [loginError, setLoginError] = useState<string | null>(null)
   const [loginSuccess, setLoginSuccess] = useState<string | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const loginStepRef = useRef<LoginStep>('idle')
 
   const [claudeLoginStart] = useMutation(CLAUDE_LOGIN_START)
   const [claudeLoginPoll] = useMutation(CLAUDE_LOGIN_POLL)
@@ -82,6 +83,11 @@ export default function AgentsPage() {
   const [claudeLogout] = useMutation(CLAUDE_LOGOUT, {
     onCompleted: () => refetchAuth(),
   })
+
+  const updateLoginStep = useCallback((step: LoginStep) => {
+    loginStepRef.current = step
+    setLoginStep(step)
+  }, [])
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
@@ -103,7 +109,7 @@ export default function AgentsPage() {
     setLoginSuccess(null)
     setAuthorizeUrl(null)
     setAuthCode('')
-    setLoginStep('starting')
+    updateLoginStep('starting')
     setLoginDialogOpen(true)
 
     try {
@@ -111,24 +117,24 @@ export default function AgentsPage() {
       const result = data?.claudeLoginStart
       if (!result?.authorizeUrl) {
         setLoginError('Failed to start login flow. Is the claude-auth-helper running on the host?')
-        setLoginStep('idle')
+        updateLoginStep('idle')
         return
       }
       setAuthorizeUrl(result.authorizeUrl)
-      setLoginStep('authorize')
+      updateLoginStep('authorize')
     } catch (err) {
       setLoginError(err instanceof Error ? err.message : 'Failed to start login')
-      setLoginStep('idle')
+      updateLoginStep('idle')
     }
   }
 
   function handleOpenedAuthPage() {
-    setLoginStep('paste-code')
+    updateLoginStep('paste-code')
   }
 
   async function handleSubmitCode() {
     if (!authCode.trim()) return
-    setLoginStep('submitting')
+    updateLoginStep('submitting')
     setLoginError(null)
 
     try {
@@ -137,14 +143,13 @@ export default function AgentsPage() {
 
       if (result?.success) {
         setLoginSuccess('Login successful')
-        setLoginStep('done')
+        updateLoginStep('done')
         refetchAuth()
       } else if (result?.error) {
         setLoginError(result.error)
-        setLoginStep('paste-code')
+        updateLoginStep('paste-code')
       } else {
         // Start polling auth status to confirm
-        setLoginStep('submitting')
         pollTimerRef.current = setInterval(async () => {
           try {
             const { data: pollData } = await claudeLoginPoll()
@@ -152,7 +157,7 @@ export default function AgentsPage() {
             if (pollResult?.success) {
               stopPolling()
               setLoginSuccess(pollResult.email ? `Logged in as ${pollResult.email}` : 'Login successful')
-              setLoginStep('done')
+              updateLoginStep('done')
               refetchAuth()
             }
           } catch {
@@ -160,25 +165,25 @@ export default function AgentsPage() {
           }
         }, 3000)
 
-        // Stop polling after 30s
+        // Stop polling after 30s (use ref to avoid stale closure)
         setTimeout(() => {
-          if (loginStep === 'submitting') {
+          if (loginStepRef.current === 'submitting') {
             stopPolling()
             setLoginError('Login verification timed out. Please try again.')
-            setLoginStep('paste-code')
+            updateLoginStep('paste-code')
           }
         }, 30000)
       }
     } catch (err) {
       setLoginError(err instanceof Error ? err.message : 'Failed to submit code')
-      setLoginStep('paste-code')
+      updateLoginStep('paste-code')
     }
   }
 
   function handleLoginDialogClose() {
     stopPolling()
     setLoginDialogOpen(false)
-    setLoginStep('idle')
+    updateLoginStep('idle')
     setAuthorizeUrl(null)
     setAuthCode('')
     setLoginError(null)
@@ -207,12 +212,13 @@ export default function AgentsPage() {
             </Button>
           ) : (
             <Button
-              variant="contained"
-              startIcon={<SmartToyIcon />}
+              variant="outlined"
+              startIcon={authLoading ? <CircularProgress size={18} /> : <SmartToyIcon />}
               onClick={handleClaudeLogin}
+              disabled={authLoading}
               data-testid="btn-claude-login"
             >
-              Login Claude
+              Claude Login
             </Button>
           )}
         </Stack>

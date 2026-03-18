@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useReducer } from 'react'
 import { useQuery } from '@apollo/client'
 import { useRouter } from 'next/navigation'
 import Box from '@mui/material/Box'
@@ -27,7 +27,7 @@ import { GET_TASKS, GET_REPOSITORIES } from '@/lib/graphql/queries'
 import { StatusChip } from '@/components/ui/StatusChip'
 import { CreateTaskDialog } from '@/components/tasks/CreateTaskDialog'
 import { monoStyle } from '@/lib/theme'
-import { formatDate } from '@/lib/format'
+import { formatDate, formatElapsed } from '@/lib/format'
 
 const TASK_STATUSES = ['PENDING', 'QUEUED', 'EXECUTING', 'COMPLETED', 'FAILED', 'TIMEOUT', 'BLOCKED']
 const TASK_CATEGORIES = ['REVIEW', 'IMPLEMENTATION', 'TEST', 'DESIGN', 'DOCS', 'ANALYZE']
@@ -39,6 +39,7 @@ interface Task {
   status: string
   repository: { name: string }
   createdAt: string
+  updatedAt: string
   pipeline?: string | null
   assignedAgent?: string | null
 }
@@ -55,6 +56,8 @@ export default function TasksPage() {
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [, tick] = useReducer((x: number) => x + 1, 0)
+  useEffect(() => { const id = setInterval(tick, 1000); return () => clearInterval(id) }, [])
 
   const { data: reposData } = useQuery(GET_REPOSITORIES)
 
@@ -66,6 +69,7 @@ export default function TasksPage() {
       category: categoryFilter || undefined,
       repository: repoFilter || undefined,
     },
+    pollInterval: 5000,
   })
 
   const tasks: Task[] = data?.tasks?.nodes ?? []
@@ -156,7 +160,7 @@ export default function TasksPage() {
               <TableCell>Status</TableCell>
               <TableCell>Repository</TableCell>
               <TableCell>Pipeline</TableCell>
-              <TableCell>Created</TableCell>
+              <TableCell>Updated</TableCell>
               <TableCell>Agent</TableCell>
             </TableRow>
           </TableHead>
@@ -193,7 +197,11 @@ export default function TasksPage() {
                     </TableCell>
                     <TableCell>{task.repository.name}</TableCell>
                     <TableCell>{task.pipeline ?? '—'}</TableCell>
-                    <TableCell>{formatDate(task.createdAt)}</TableCell>
+                    <TableCell title={formatDate(task.updatedAt)}>
+                      {['COMPLETED', 'FAILED', 'TIMEOUT'].includes(task.status?.toUpperCase())
+                        ? formatDate(task.completedAt || task.updatedAt)
+                        : formatElapsed(task.updatedAt)}
+                    </TableCell>
                     <TableCell>{task.assignedAgent ?? '—'}</TableCell>
                   </TableRow>
                 ))}

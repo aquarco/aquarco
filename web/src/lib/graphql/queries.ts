@@ -192,6 +192,18 @@ export const GITHUB_AUTH_STATUS = gql`
   }
 `
 
+export const GITHUB_REPOSITORIES = gql`
+  query GithubRepositories {
+    githubRepositories {
+      nameWithOwner
+      url
+      defaultBranch
+      isPrivate
+      description
+    }
+  }
+`
+
 export const GITHUB_LOGIN_START = gql`
   mutation GithubLoginStart {
     githubLoginStart {

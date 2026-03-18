@@ -36,7 +36,9 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import Tooltip from '@mui/material/Tooltip'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import LogoutIcon from '@mui/icons-material/Logout'
-import { GET_REPOSITORIES, REGISTER_REPOSITORY, REMOVE_REPOSITORY, RETRY_CLONE, GITHUB_AUTH_STATUS, GITHUB_LOGIN_START, GITHUB_LOGIN_POLL, GITHUB_LOGOUT } from '@/lib/graphql/queries'
+import Autocomplete from '@mui/material/Autocomplete'
+import LockIcon from '@mui/icons-material/Lock'
+import { GET_REPOSITORIES, REGISTER_REPOSITORY, REMOVE_REPOSITORY, RETRY_CLONE, GITHUB_AUTH_STATUS, GITHUB_LOGIN_START, GITHUB_LOGIN_POLL, GITHUB_LOGOUT, GITHUB_REPOSITORIES } from '@/lib/graphql/queries'
 import { formatDate } from '@/lib/format'
 
 interface Repository {
@@ -61,6 +63,14 @@ function getCloneStatusColor(status: string): ChipProps['color'] {
   }
 }
 
+interface GithubRepo {
+  nameWithOwner: string
+  url: string
+  defaultBranch: string
+  isPrivate: boolean
+  description: string | null
+}
+
 interface AddRepoFormState {
   name: string
   url: string
@@ -79,12 +89,18 @@ export default function ReposPage() {
   const [copiedCode, setCopiedCode] = useState(false)
   const [loginDialogOpen, setLoginDialogOpen] = useState(false)
   const [deviceCode, setDeviceCode] = useState<{ userCode: string; verificationUri: string } | null>(null)
+  const [githubOpened, setGithubOpened] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
   const [loginSuccess, setLoginSuccess] = useState<string | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const { data, loading, error, refetch } = useQuery(GET_REPOSITORIES)
-  const { data: authData, refetch: refetchAuth } = useQuery(GITHUB_AUTH_STATUS)
+  const { data: authData, loading: authLoading, refetch: refetchAuth } = useQuery(GITHUB_AUTH_STATUS)
+  const isGithubAuthenticated = authData?.githubAuthStatus?.authenticated === true
+  const { data: ghReposData, loading: ghReposLoading } = useQuery(GITHUB_REPOSITORIES, {
+    skip: !isGithubAuthenticated,
+  })
+  const githubRepos: GithubRepo[] = ghReposData?.githubRepositories ?? []
 
   // Poll while any repo is in a non-terminal state
   const repositories: Repository[] = data?.repositories ?? []
@@ -142,6 +158,7 @@ export default function ReposPage() {
     setLoginError(null)
     setLoginSuccess(null)
     setDeviceCode(null)
+    setGithubOpened(false)
     setLoginDialogOpen(true)
 
     try {
@@ -153,27 +170,32 @@ export default function ReposPage() {
       }
       setDeviceCode({ userCode: code.userCode, verificationUri: code.verificationUri })
 
-      // Start polling
-      pollTimerRef.current = setInterval(async () => {
+      // Start sequential polling (backend enforces GitHub's rate limit via delay)
+      async function poll() {
+        if (!pollTimerRef.current) return
         try {
           const { data: pollData } = await githubLoginPoll()
+          if (!pollTimerRef.current) return
           const result = pollData?.githubLoginPoll
-          if (!result) return
 
-          if (result.success) {
+          if (result?.success) {
             stopPolling()
             setLoginSuccess(result.username ? `Logged in as ${result.username}` : 'Login successful')
             setDeviceCode(null)
             refetchAuth()
-          } else if (result.error) {
+            return
+          } else if (result?.error) {
             stopPolling()
             setLoginError(result.error)
             setDeviceCode(null)
+            return
           }
         } catch {
           // poll failed, keep trying
         }
-      }, 5000)
+        if (pollTimerRef.current) pollTimerRef.current = setTimeout(poll, 1000)
+      }
+      pollTimerRef.current = setTimeout(poll, 1000)
     } catch (err) {
       setLoginError(err instanceof Error ? err.message : 'Failed to start login')
     }
@@ -235,8 +257,9 @@ export default function ReposPage() {
           ) : (
             <Button
               variant="outlined"
-              startIcon={<GitHubIcon />}
+              startIcon={authLoading ? <CircularProgress size={18} /> : <GitHubIcon />}
               onClick={handleGithubLogin}
+              disabled={authLoading}
               data-testid="btn-github-login"
             >
               GitHub Login
@@ -437,14 +460,79 @@ export default function ReposPage() {
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             {formError && <Alert severity="error">{formError}</Alert>}
-            <TextField
-              label="Name"
-              required
-              fullWidth
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              data-testid="repo-form-name"
-            />
+            {isGithubAuthenticated ? (
+              <Autocomplete
+                freeSolo
+                options={githubRepos}
+                loading={ghReposLoading}
+                getOptionLabel={(option) =>
+                  typeof option === 'string' ? option : option.nameWithOwner
+                }
+                filterOptions={(options, { inputValue }) => {
+                  const q = inputValue.toLowerCase()
+                  return options.filter(
+                    (o) =>
+                      o.nameWithOwner.toLowerCase().includes(q) ||
+                      (o.description?.toLowerCase().includes(q) ?? false)
+                  )
+                }}
+                renderOption={(props, option) => (
+                  <li {...props} key={option.nameWithOwner}>
+                    <Stack sx={{ width: '100%' }}>
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <Typography variant="body2" fontWeight={600}>
+                          {option.nameWithOwner}
+                        </Typography>
+                        {option.isPrivate && (
+                          <LockIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+                        )}
+                      </Stack>
+                      {option.description && (
+                        <Typography variant="caption" color="text.secondary" noWrap>
+                          {option.description}
+                        </Typography>
+                      )}
+                    </Stack>
+                  </li>
+                )}
+                onChange={(_e, value) => {
+                  if (value && typeof value !== 'string') {
+                    const repoName = value.nameWithOwner.split('/').pop() ?? value.nameWithOwner
+                    setForm({
+                      name: repoName,
+                      url: value.url,
+                      branch: value.defaultBranch,
+                      cloneDir: '',
+                    })
+                  }
+                }}
+                onInputChange={(_e, value, reason) => {
+                  if (reason === 'input') {
+                    setForm((f) => ({ ...f, name: value }))
+                  }
+                }}
+                inputValue={form.name}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Repository"
+                    required
+                    placeholder="Search your GitHub repos or type a name"
+                    data-testid="repo-form-name"
+                  />
+                )}
+                data-testid="repo-form-autocomplete"
+              />
+            ) : (
+              <TextField
+                label="Name"
+                required
+                fullWidth
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                data-testid="repo-form-name"
+              />
+            )}
             <TextField
               label="URL"
               required
@@ -505,51 +593,45 @@ export default function ReposPage() {
                 <Typography variant="body2" align="center">
                   Enter this code on GitHub:
                 </Typography>
-                <Stack direction="row" alignItems="center" spacing={1}>
-                  <Box
-                    sx={{
-                      px: 3,
-                      py: 1.5,
-                      bgcolor: 'grey.100',
-                      borderRadius: 1,
-                      fontFamily: 'monospace',
-                      fontSize: '1.5rem',
-                      fontWeight: 700,
-                      letterSpacing: '0.15em',
-                      userSelect: 'all',
-                    }}
-                  >
-                    {deviceCode.userCode}
-                  </Box>
-                  <Tooltip title={copiedCode ? 'Copied!' : 'Copy code'}>
-                    <IconButton
-                      size="small"
-                      color={copiedCode ? 'success' : 'default'}
-                      onClick={() => {
-                        navigator.clipboard.writeText(deviceCode.userCode)
-                        setCopiedCode(true)
-                        setTimeout(() => setCopiedCode(false), 2000)
-                      }}
-                    >
-                      {copiedCode ? <CheckCircleIcon fontSize="small" /> : <ContentCopyIcon fontSize="small" />}
-                    </IconButton>
-                  </Tooltip>
-                </Stack>
+                <Box
+                  sx={{
+                    px: 3,
+                    py: 1.5,
+                    bgcolor: 'grey.100',
+                    borderRadius: 1,
+                    fontFamily: 'monospace',
+                    fontSize: '1.5rem',
+                    fontWeight: 700,
+                    letterSpacing: '0.15em',
+                    userSelect: 'all',
+                    textAlign: 'center',
+                  }}
+                >
+                  {deviceCode.userCode}
+                </Box>
                 <Button
                   variant="contained"
                   startIcon={<GitHubIcon />}
                   href={deviceCode.verificationUri}
                   target="_blank"
                   rel="noopener"
+                  onClick={() => {
+                    navigator.clipboard.writeText(deviceCode.userCode)
+                    setCopiedCode(true)
+                    setTimeout(() => setCopiedCode(false), 2000)
+                    setGithubOpened(true)
+                  }}
                 >
-                  Open GitHub
+                  {copiedCode ? 'Copied! Opening GitHub…' : 'Copy Code & Open GitHub'}
                 </Button>
-                <Stack direction="row" alignItems="center" spacing={1}>
-                  <CircularProgress size={16} />
-                  <Typography variant="body2" color="text.secondary">
-                    Waiting for authorization...
-                  </Typography>
-                </Stack>
+                {githubOpened && (
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <CircularProgress size={16} />
+                    <Typography variant="body2" color="text.secondary">
+                      Waiting for authorization...
+                    </Typography>
+                  </Stack>
+                )}
               </>
             )}
             {!deviceCode && !loginError && !loginSuccess && (

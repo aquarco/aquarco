@@ -5,6 +5,7 @@ import { useQuery, useMutation } from '@apollo/client'
 import { useParams } from 'next/navigation'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
+import Chip from '@mui/material/Chip'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Grid from '@mui/material/Grid'
@@ -38,6 +39,8 @@ interface Stage {
   status: string
   startedAt: string | null
   completedAt: string | null
+  structuredOutput: unknown | null
+  rawOutput: string | null
   tokensInput: number | null
   tokensOutput: number | null
   errorMessage: string | null
@@ -101,6 +104,7 @@ export default function TaskDetailPage() {
   const { data, loading, error, refetch } = useQuery(GET_TASK, {
     variables: { id },
     skip: !id,
+    pollInterval: 5000,
   })
 
   const [retryTask, { loading: retrying }] = useMutation(RETRY_TASK, {
@@ -284,6 +288,134 @@ export default function TaskDetailPage() {
             </Stepper>
           </CardContent>
         </Card>
+      )}
+
+      {/* Stage output */}
+      {stages.some((s) => s.structuredOutput || s.rawOutput) && (
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+            Stage Output
+          </Typography>
+          {stages
+            .filter((s) => s.structuredOutput || s.rawOutput)
+            .map((stage) => {
+              const output = stage.structuredOutput as Record<string, unknown> | null
+              const findings = output?.findings as Array<{
+                severity?: string
+                file?: string
+                line?: number
+                message?: string
+              }> | undefined
+              const summary = output?.summary as string | undefined
+              const recommendation = output?.recommendation as string | undefined
+
+              return (
+                <Accordion key={stage.id} variant="outlined" disableGutters>
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                    <Stack direction="row" spacing={2} alignItems="center">
+                      <Typography fontWeight={600}>
+                        Stage {stage.stageNumber}: {stage.category}
+                      </Typography>
+                      {stage.agent && (
+                        <Typography variant="caption" color="text.secondary">
+                          {stage.agent}
+                        </Typography>
+                      )}
+                      <StatusChip status={stage.status} size="small" />
+                    </Stack>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    {summary && (
+                      <Typography variant="body2" sx={{ mb: 2 }}>
+                        {summary}
+                      </Typography>
+                    )}
+                    {recommendation && (
+                      <Alert severity="info" sx={{ mb: 2 }}>
+                        {recommendation}
+                      </Alert>
+                    )}
+                    {findings && findings.length > 0 && (
+                      <Stack spacing={1} sx={{ mb: 2 }}>
+                        {findings.map((f, i) => (
+                          <Box
+                            key={i}
+                            sx={{
+                              p: 1.5,
+                              borderRadius: 1,
+                              backgroundColor: 'background.default',
+                              border: '1px solid',
+                              borderColor: 'divider',
+                            }}
+                          >
+                            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                              {f.severity && (
+                                <Chip
+                                  label={f.severity}
+                                  size="small"
+                                  color={
+                                    f.severity === 'error' || f.severity === 'critical'
+                                      ? 'error'
+                                      : f.severity === 'warning'
+                                        ? 'warning'
+                                        : 'default'
+                                  }
+                                />
+                              )}
+                              {f.file && (
+                                <Typography variant="caption" sx={monoStyle}>
+                                  {f.file}{f.line ? `:${f.line}` : ''}
+                                </Typography>
+                              )}
+                            </Stack>
+                            {f.message && (
+                              <Typography variant="body2">{f.message}</Typography>
+                            )}
+                          </Box>
+                        ))}
+                      </Stack>
+                    )}
+                    {!findings && output && (
+                      <Box
+                        component="pre"
+                        sx={{
+                          m: 0,
+                          p: 1.5,
+                          backgroundColor: 'background.default',
+                          borderRadius: 1,
+                          overflow: 'auto',
+                          ...monoStyle,
+                          fontSize: '0.78rem',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {JSON.stringify(output, null, 2)}
+                      </Box>
+                    )}
+                    {!output && stage.rawOutput && (
+                      <Box
+                        component="pre"
+                        sx={{
+                          m: 0,
+                          p: 1.5,
+                          backgroundColor: 'background.default',
+                          borderRadius: 1,
+                          overflow: 'auto',
+                          ...monoStyle,
+                          fontSize: '0.78rem',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {stage.rawOutput}
+                      </Box>
+                    )}
+                  </AccordionDetails>
+                </Accordion>
+              )
+            })}
+        </Box>
       )}
 
       {/* Context inspector */}
