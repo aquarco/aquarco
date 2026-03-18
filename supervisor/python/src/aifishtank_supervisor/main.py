@@ -222,7 +222,7 @@ class Supervisor:
                 break
 
             # Launch task in background
-            coro = self._run_task(task.id, task.pipeline, task.initial_context)
+            coro = self._run_task(task.id, task.pipeline or "", task.initial_context or {})
             t = asyncio.create_task(coro)
             self._in_flight.add(t)
 

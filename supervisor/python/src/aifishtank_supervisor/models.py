@@ -85,11 +85,11 @@ class Task(BaseModel):
     category: str
     status: TaskStatus = TaskStatus.PENDING
     priority: int = 50
-    source: str = ""
-    source_ref: str = ""
-    pipeline: str = ""
-    repository: str = ""
-    initial_context: dict[str, Any] = Field(default_factory=dict)
+    source: str | None = ""
+    source_ref: str | None = ""
+    pipeline: str | None = ""
+    repository: str | None = ""
+    initial_context: dict[str, Any] | None = Field(default_factory=dict)
     created_at: datetime | None = None
     updated_at: datetime | None = None
     started_at: datetime | None = None
