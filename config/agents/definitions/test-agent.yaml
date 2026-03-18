@@ -7,9 +7,6 @@ metadata:
   labels:
     team: platform
     domain: testing
-  annotations:
-    pipeline-position: "fourth"
-    docs: "agents/prompts/test-agent.md"
 
 spec:
   categories:
@@ -35,17 +32,6 @@ spec:
 
   environment:
     AGENT_MODE: "test"
-
-  capabilities:
-    canPush: true
-    canCreatePR: false
-    canCommentOnPR: true
-    canApprove: false
-    canMerge: false
-    canAccessDocker: true
-    canAccessK8s: false
-    canCreateIssues: true
-    canCloseIssues: false
 
   output:
     format: commit
@@ -84,12 +70,6 @@ spec:
         items:
           type: string
         description: "Paths of all test files created or modified"
-
-  triggers:
-    produces:
-      - test-complete
-    consumes:
-      - implementation-complete
 
   healthCheck:
     enabled: true

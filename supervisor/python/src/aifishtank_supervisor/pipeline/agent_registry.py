@@ -168,14 +168,22 @@ class AgentRegistry:
     def get_allowed_tools(self, agent_name: str) -> list[str]:
         """Get the list of allowed tools for an agent."""
         spec = self._agents.get(agent_name, {})
-        tools: list[str] = spec.get("allowedTools", [])
+        tools_section: dict[str, Any] = spec.get("tools", {})
+        tools: list[str] = tools_section.get("allowed", [])
         return tools
 
     def get_denied_tools(self, agent_name: str) -> list[str]:
         """Get the list of denied tools for an agent."""
         spec = self._agents.get(agent_name, {})
-        tools: list[str] = spec.get("deniedTools", [])
+        tools_section: dict[str, Any] = spec.get("tools", {})
+        tools: list[str] = tools_section.get("denied", [])
         return tools
+
+    def get_agent_environment(self, agent_name: str) -> dict[str, str]:
+        """Get environment variables for an agent."""
+        spec = self._agents.get(agent_name, {})
+        env: dict[str, str] = spec.get("environment", {})
+        return env
 
     def _get_max_concurrent(self, agent_name: str) -> int:
         """Get max concurrent instances for an agent."""

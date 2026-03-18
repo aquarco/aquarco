@@ -7,9 +7,6 @@ metadata:
   labels:
     team: platform
     domain: design
-  annotations:
-    pipeline-position: "second"
-    docs: "agents/prompts/design-agent.md"
 
 spec:
   categories:
@@ -36,17 +33,6 @@ spec:
 
   environment:
     AGENT_MODE: "design"
-
-  capabilities:
-    canPush: true
-    canCreatePR: false
-    canCommentOnPR: true
-    canApprove: false
-    canMerge: false
-    canAccessDocker: false
-    canAccessK8s: false
-    canCreateIssues: true
-    canCloseIssues: false
 
   output:
     format: task-file
@@ -99,12 +85,6 @@ spec:
         items:
           type: string
         description: "Migration files that will be required"
-
-  triggers:
-    produces:
-      - design-complete
-    consumes:
-      - analysis-complete
 
   healthCheck:
     enabled: true

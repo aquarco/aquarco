@@ -7,9 +7,6 @@ metadata:
   labels:
     team: platform
     domain: review
-  annotations:
-    pipeline-position: "standalone"
-    docs: "agents/prompts/review-agent.md"
 
 spec:
   categories:
@@ -37,17 +34,6 @@ spec:
   environment:
     AGENT_MODE: "review"
     STRICT_MODE: "true"
-
-  capabilities:
-    canPush: false
-    canCreatePR: true
-    canCommentOnPR: true
-    canApprove: true
-    canMerge: false
-    canAccessDocker: false
-    canAccessK8s: false
-    canCreateIssues: false
-    canCloseIssues: false
 
   output:
     format: github-pr-comment
@@ -102,11 +88,6 @@ spec:
           - major_issues
           - blocking
         description: "Overall severity classification of all findings combined"
-
-  triggers:
-    produces:
-      - review-complete
-    consumes: []
 
   healthCheck:
     enabled: true

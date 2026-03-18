@@ -11,6 +11,7 @@ from typing import Any
 
 import yaml
 
+from ..database import Database
 from ..logging import get_logger
 from ..models import SupervisorConfig, TaskCategory
 from ..task_queue import TaskQueue
@@ -35,8 +36,10 @@ class ExternalTriggersPoller(BasePoller):
 
     name = "external-triggers"
 
-    def __init__(self, config: SupervisorConfig, task_queue: TaskQueue) -> None:
-        super().__init__(config, task_queue)
+    def __init__(
+        self, config: SupervisorConfig, task_queue: TaskQueue, db: Database,
+    ) -> None:
+        super().__init__(config, task_queue, db)
         poller_cfg = self._get_poller_config()
         self._watch_dir = Path(poller_cfg.get("watchDir", "/var/lib/aifishtank/triggers"))
         self._processed_dir = Path(
@@ -109,9 +112,12 @@ class ExternalTriggersPoller(BasePoller):
             self._move_to_failed(trigger_file, f"invalid-category-{category}")
             return False
 
-        # Validate repository exists in config
-        known_repos = {r.name for r in self._config.spec.repositories}
-        if repository not in known_repos:
+        # Validate repository exists in DB
+        repo_exists = await self._db.fetch_val(
+            "SELECT COUNT(*) FROM repositories WHERE name = %(name)s",
+            {"name": repository},
+        )
+        if not repo_exists:
             self._move_to_failed(trigger_file, f"unknown-repository-{repository}")
             return False
 

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ..database import Database
 from ..logging import get_logger
 from ..models import SupervisorConfig
 from ..task_queue import TaskQueue
@@ -23,8 +24,10 @@ class GitHubSourcePoller(BasePoller):
 
     name = "github-source"
 
-    def __init__(self, config: SupervisorConfig, task_queue: TaskQueue) -> None:
-        super().__init__(config, task_queue)
+    def __init__(
+        self, config: SupervisorConfig, task_queue: TaskQueue, db: Database,
+    ) -> None:
+        super().__init__(config, task_queue, db)
         poller_cfg = self._get_poller_config()
         self._triggers: dict[str, list[str]] = poller_cfg.get("triggers", {})
 
@@ -36,25 +39,22 @@ class GitHubSourcePoller(BasePoller):
 
         total_created = 0
 
-        for repo in self._config.spec.repositories:
-            if self.name not in repo.pollers:
-                continue
-
-            slug = _url_to_slug(repo.url)
+        for repo in await self._get_repositories(self.name):
+            slug = _url_to_slug(repo["url"])
             if not slug:
                 continue
 
             try:
-                created = await self._poll_prs(repo.name, slug, cursor)
+                created = await self._poll_prs(repo["name"], slug, cursor)
                 total_created += created
             except Exception as e:
                 log.error("pr_poll_failed", repo=slug, error=str(e))
 
             try:
-                created = await self._poll_commits(repo.name, repo.clone_dir, cursor)
+                created = await self._poll_commits(repo["name"], repo["clone_dir"], cursor)
                 total_created += created
             except Exception as e:
-                log.error("commit_poll_failed", repo=repo.name, error=str(e))
+                log.error("commit_poll_failed", repo=repo["name"], error=str(e))
 
         new_cursor = datetime.now(timezone.utc).isoformat()
         await self._tq.update_poll_state(

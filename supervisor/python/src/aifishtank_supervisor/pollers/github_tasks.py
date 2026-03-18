@@ -7,8 +7,9 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ..database import Database
 from ..logging import get_logger
-from ..models import SupervisorConfig
+from ..models import PipelineConfig, SupervisorConfig
 from ..task_queue import TaskQueue
 from ..utils import url_to_slug as _url_to_slug
 from .base import BasePoller
@@ -21,12 +22,19 @@ class GitHubTasksPoller(BasePoller):
 
     name = "github-tasks"
 
-    def __init__(self, config: SupervisorConfig, task_queue: TaskQueue) -> None:
-        super().__init__(config, task_queue)
+    def __init__(
+        self,
+        config: SupervisorConfig,
+        task_queue: TaskQueue,
+        db: Database,
+        pipelines: list[PipelineConfig] | None = None,
+    ) -> None:
+        super().__init__(config, task_queue, db)
         poller_cfg = self._get_poller_config()
         categorization = poller_cfg.get("categorization", {})
         self._label_mapping: dict[str, str] = categorization.get("labelMapping", {})
         self._default_category: str = categorization.get("defaultCategory", "analyze")
+        self._pipelines = pipelines or []
 
     async def poll(self) -> int:
         """Poll GitHub issues and create tasks."""
@@ -36,11 +44,8 @@ class GitHubTasksPoller(BasePoller):
 
         total_created = 0
 
-        for repo in self._config.spec.repositories:
-            if self.name not in repo.pollers:
-                continue
-
-            slug = _url_to_slug(repo.url)
+        for repo in await self._get_repositories(self.name):
+            slug = _url_to_slug(repo["url"])
             if not slug:
                 continue
 
@@ -51,7 +56,7 @@ class GitHubTasksPoller(BasePoller):
                 continue
 
             for issue in issues:
-                created = await self._process_issue(issue, repo.name, slug)
+                created = await self._process_issue(issue, repo["name"], slug)
                 if created:
                     total_created += 1
 
@@ -110,7 +115,7 @@ class GitHubTasksPoller(BasePoller):
     def _select_pipeline(self, labels: list[str]) -> str:
         """Select a pipeline based on issue labels."""
         label_set = set(labels)
-        for pipeline in self._config.spec.pipelines:
+        for pipeline in self._pipelines:
             trigger_labels = set(pipeline.trigger.labels)
             if trigger_labels and trigger_labels & label_set:
                 return pipeline.name

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
+from aifishtank_supervisor.database import Database
 from aifishtank_supervisor.models import SupervisorConfig
 from aifishtank_supervisor.pollers.external_triggers import ExternalTriggersPoller
 from aifishtank_supervisor.task_queue import TaskQueue
@@ -34,7 +35,9 @@ def poller(
     tq = AsyncMock(spec=TaskQueue)
     tq.task_exists.return_value = False
     tq.create_task.return_value = True
-    return ExternalTriggersPoller(sample_config, tq)
+    db = AsyncMock(spec=Database)
+    db.fetch_val = AsyncMock(return_value=1)  # repo exists
+    return ExternalTriggersPoller(sample_config, tq, db)
 
 
 @pytest.mark.asyncio
@@ -173,7 +176,8 @@ async def test_poll_nonexistent_dir(
             p.config["watchDir"] = "/nonexistent/path"
 
     tq = AsyncMock(spec=TaskQueue)
-    poller = ExternalTriggersPoller(sample_config, tq)
+    db = AsyncMock(spec=Database)
+    poller = ExternalTriggersPoller(sample_config, tq, db)
 
     created = await poller.poll()
     assert created == 0

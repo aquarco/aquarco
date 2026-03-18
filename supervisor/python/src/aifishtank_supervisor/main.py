@@ -16,10 +16,10 @@ from .cli.agents import app as agents_app
 from .cli.auth_helper import auth_watch
 from .cli.repo_manager import repo_app
 from .cli.status import status
-from .config import load_config, load_secrets
+from .config import load_config, load_pipelines, load_secrets
 from .database import Database
 from .logging import get_logger, setup_logging
-from .models import SupervisorConfig
+from .models import PipelineConfig, SupervisorConfig
 from .pipeline.agent_registry import AgentRegistry
 from .pipeline.executor import PipelineExecutor
 from .pollers.external_triggers import ExternalTriggersPoller
@@ -43,9 +43,15 @@ DEFAULT_CONFIG = "/home/agent/ai-fishtank/supervisor/config/supervisor.yaml"
 class Supervisor:
     """Main supervisor process."""
 
-    def __init__(self, config: SupervisorConfig, secrets: dict[str, str]) -> None:
+    def __init__(
+        self,
+        config: SupervisorConfig,
+        secrets: dict[str, str],
+        pipelines: list[PipelineConfig] | None = None,
+    ) -> None:
         self._config = config
         self._secrets = secrets
+        self._pipelines = pipelines or []
         self._shutdown = False
         self._shutdown_event: asyncio.Event | None = None
         self._reload_requested = False
@@ -106,7 +112,7 @@ class Supervisor:
         await self._registry.load()
 
         self._executor = PipelineExecutor(
-            self._db, self._tq, self._registry, self._config
+            self._db, self._tq, self._registry, self._pipelines
         )
         self._clone_worker = CloneWorker(
             self._db, github_token=self._secrets.get("github_token")
@@ -115,9 +121,9 @@ class Supervisor:
 
         # Initialize pollers
         self._pollers = [
-            GitHubTasksPoller(self._config, self._tq),
-            GitHubSourcePoller(self._config, self._tq),
-            ExternalTriggersPoller(self._config, self._tq),
+            GitHubTasksPoller(self._config, self._tq, self._db, self._pipelines),
+            GitHubSourcePoller(self._config, self._tq, self._db),
+            ExternalTriggersPoller(self._config, self._tq, self._db),
         ]
 
         # Install signal handlers
@@ -278,10 +284,12 @@ class Supervisor:
 
             report = _build_health_report(stats, uptime_minutes)
 
-            # Post to GitHub issue
-            repo = self._config.spec.repositories[0] if self._config.spec.repositories else None
-            if repo:
-                slug = url_to_slug(repo.url)
+            # Post to GitHub issue — pick the first ready repo from DB
+            repo_row = await self._db.fetch_one(
+                "SELECT url FROM repositories WHERE clone_status = 'ready' LIMIT 1"
+            )
+            if repo_row:
+                slug = url_to_slug(repo_row["url"])
                 issue_number = self._config.spec.health.issue_number
                 if slug:
                     proc = await asyncio.create_subprocess_exec(
@@ -412,7 +420,17 @@ def run(
     """Start the AI Fishtank supervisor."""
     cfg = load_config(config)
     secrets = load_secrets(cfg)
-    supervisor = Supervisor(cfg, secrets)
+
+    # Load pipelines from external file
+    pipelines_file = cfg.spec.pipelines_file
+    if pipelines_file:
+        pipelines = load_pipelines(pipelines_file)
+    else:
+        # Default: look for pipelines.yaml next to the config file
+        default_path = Path(config).parent.parent / "config" / "pipelines.yaml"
+        pipelines = load_pipelines(default_path) if default_path.exists() else []
+
+    supervisor = Supervisor(cfg, secrets, pipelines)
     asyncio.run(supervisor.start(config))
 
 

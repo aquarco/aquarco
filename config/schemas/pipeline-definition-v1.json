@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aifishtank.agents/schemas/pipeline-definition-v1.json",
+  "title": "PipelineDefinition",
+  "description": "Schema for AI Fishtank pipeline definition YAML files (aifishtank.agents/v1)",
+  "type": "object",
+  "required": ["apiVersion", "kind", "pipelines"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "aifishtank.agents/v1",
+      "description": "API version — must be exactly aifishtank.agents/v1"
+    },
+    "kind": {
+      "type": "string",
+      "const": "PipelineDefinition",
+      "description": "Resource kind — must be exactly PipelineDefinition"
+    },
+    "pipelines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Pipeline"
+      },
+      "description": "List of pipeline definitions"
+    }
+  },
+  "$defs": {
+    "Pipeline": {
+      "type": "object",
+      "required": ["name", "version", "trigger", "stages"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Unique pipeline identifier in kebab-case"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+          "description": "Semantic version (semver 2.0.0 compatible)"
+        },
+        "trigger": {
+          "$ref": "#/$defs/Trigger"
+        },
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Stage"
+          },
+          "description": "Ordered list of pipeline stages"
+        }
+      }
+    },
+    "Trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "labels": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true,
+          "description": "Issue/PR labels that activate this pipeline"
+        },
+        "events": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true,
+          "description": "Event types that activate this pipeline"
+        }
+      }
+    },
+    "Stage": {
+      "type": "object",
+      "required": ["category"],
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": ["review", "implementation", "test", "design", "docs", "analyze"],
+          "description": "Agent category for this stage"
+        },
+        "required": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this stage must succeed for the pipeline to continue"
+        },
+        "conditions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Conditions that must be met for this stage to run"
+        }
+      }
+    }
+  }
+}

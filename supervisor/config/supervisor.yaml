@@ -7,8 +7,9 @@ metadata:
 
 spec:
   workdir: /home/agent/ai-fishtank
-  agentsDir: /home/agent/ai-fishtank/agents/definitions
-  promptsDir: /home/agent/ai-fishtank/agents/prompts
+  agentsDir: /home/agent/ai-fishtank/config/agents/definitions
+  promptsDir: /home/agent/ai-fishtank/config/agents/prompts
+  pipelinesFile: /home/agent/ai-fishtank/config/pipelines.yaml
 
   database:
     url: postgresql://aifishtank:aifishtank@localhost:5432/aifishtank
@@ -35,18 +36,6 @@ spec:
   repoConfig:
     autoReload: true
     configFile: .aifishtank.yaml
-
-  repositories:
-    - name: quantvise.com
-      url: https://github.com/borissuska/quantvise.com.git
-      branch: main
-      cloneDir: /home/agent/repos/quantvise.com
-      pollers: [github-tasks, github-source]
-      auth: token
-      ports:
-        web: 3000
-        graphql: 8000
-        postgres: 5433
 
   pollers:
     - name: github-tasks
@@ -89,35 +78,6 @@ spec:
       config:
         watchDir: /var/lib/aifishtank/triggers
         processedDir: /var/lib/aifishtank/triggers/processed
-
-  pipelines:
-    - name: feature-pipeline
-      trigger:
-        labels: [feature, enhancement]
-      stages:
-        - { category: analyze, required: true }
-        - { category: design, required: true, conditions: ["analysis.estimated_complexity >= medium"] }
-        - { category: implementation, required: true }
-        - { category: test, required: true }
-        - { category: docs, required: false }
-        - { category: review, required: true }
-
-    - name: bugfix-pipeline
-      trigger:
-        labels: [bug]
-      stages:
-        - { category: analyze, required: true }
-        - { category: implementation, required: true }
-        - { category: test, required: true }
-        - { category: review, required: true }
-
-    - name: pr-review-pipeline
-      trigger:
-        events: [pr_opened, pr_updated]
-      stages:
-        - { category: review, required: true }
-        - { category: implementation, required: true }
-        - { category: test, required: true }
 
   health:
     enabled: true

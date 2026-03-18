@@ -327,6 +327,7 @@ async def test_maybe_report_health_enabled(sample_config: Any) -> None:
         {"status": "completed", "count": 5},
         {"status": "failed", "count": 1},
     ])
+    mock_db.fetch_one = AsyncMock(return_value={"url": "https://github.com/test/repo.git"})
     supervisor._db = mock_db
 
     with patch(
@@ -524,9 +525,7 @@ async def test_start_initializes_components(sample_config: Any, tmp_path: Any) -
             },
             "secrets": {"githubTokenFile": "/tmp/t", "anthropicKeyFile": "/tmp/a"},
             "health": {"enabled": False},
-            "repositories": [],
             "pollers": [],
-            "pipelines": [],
         },
     }
     config_path.write_text(yaml.dump(config_data))

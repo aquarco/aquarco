@@ -9,7 +9,7 @@ import yaml
 
 from .exceptions import ConfigError, ConfigFileNotFoundError, ConfigValidationError
 from .logging import get_logger
-from .models import SupervisorConfig
+from .models import PipelineConfig, PipelineTrigger, StageConfig, SupervisorConfig
 
 log = get_logger("config")
 
@@ -50,8 +50,39 @@ def _validate_config(config: SupervisorConfig) -> None:
     if not config.spec.database.url:
         raise ConfigValidationError("Database URL must not be empty")
 
-    if not config.spec.repositories:
-        log.warning("No repositories configured")
+
+def load_pipelines(pipelines_file: str | Path) -> list[PipelineConfig]:
+    """Load pipeline definitions from a YAML file."""
+    path = Path(pipelines_file)
+    if not path.exists():
+        log.warning("pipelines_file_not_found", path=str(path))
+        return []
+
+    try:
+        raw = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as e:
+        raise ConfigError(f"Failed to parse pipelines YAML: {e}") from e
+
+    if not isinstance(raw, dict):
+        raise ConfigValidationError("Pipelines file must contain a YAML mapping")
+
+    pipelines: list[PipelineConfig] = []
+    for entry in raw.get("pipelines", []):
+        trigger_data = entry.get("trigger", {})
+        trigger = PipelineTrigger(
+            labels=trigger_data.get("labels", []),
+            events=trigger_data.get("events", []),
+        )
+        stages = [StageConfig(**s) for s in entry.get("stages", [])]
+        pipelines.append(PipelineConfig(
+            name=entry["name"],
+            version=entry.get("version", "0.0.0"),
+            trigger=trigger,
+            stages=stages,
+        ))
+
+    log.info("pipelines_loaded", count=len(pipelines))
+    return pipelines
 
 
 def load_secrets(config: SupervisorConfig) -> dict[str, str]:
@@ -82,18 +113,15 @@ def get_poller_config(config: SupervisorConfig, poller_name: str) -> dict[str, A
 
 
 def get_repository_config(config: SupervisorConfig, repo_name: str) -> dict[str, Any] | None:
-    """Get configuration for a named repository."""
-    for repo in config.spec.repositories:
-        if repo.name == repo_name:
-            return repo.model_dump()
+    """Get repository config by name. Repositories are now DB-managed; returns None."""
     return None
 
 
 def get_pipeline_config(
-    config: SupervisorConfig, pipeline_name: str,
+    pipelines: list[PipelineConfig], pipeline_name: str,
 ) -> list[dict[str, Any]] | None:
     """Get stage configs for a named pipeline."""
-    for pipeline in config.spec.pipelines:
+    for pipeline in pipelines:
         if pipeline.name == pipeline_name:
             return [s.model_dump() for s in pipeline.stages]
     return None

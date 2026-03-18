@@ -25,6 +25,7 @@ async def execute_claude(
     denied_tools: list[str] | None = None,
     task_id: str = "",
     stage_num: int = 0,
+    extra_env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Invoke the Claude CLI and return structured output.
 
@@ -68,6 +69,11 @@ async def execute_claude(
             timeout=timeout_seconds,
         )
 
+        # Merge extra environment variables from agent definition
+        proc_env: dict[str, str] | None = None
+        if extra_env:
+            proc_env = {**os.environ, **extra_env}
+
         with open(context_file) as stdin_f, open(debug_log, "w") as stderr_f:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -75,6 +81,7 @@ async def execute_claude(
                 stdout=asyncio.subprocess.PIPE,
                 stderr=stderr_f,
                 cwd=work_dir,
+                env=proc_env,
             )
 
             try:

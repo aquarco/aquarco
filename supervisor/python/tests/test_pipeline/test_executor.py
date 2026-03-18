@@ -180,7 +180,7 @@ def test_compare_complexity_invalid_expected() -> None:
 # --- PipelineExecutor._resolve_clone_dir ---
 
 @pytest.mark.asyncio
-async def test_resolve_clone_dir_found(sample_config: Any) -> None:
+async def test_resolve_clone_dir_found(sample_pipelines: Any) -> None:
     """Returns clone_dir when the DB row is found."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/my-repo", "branch": "main"})
@@ -188,14 +188,14 @@ async def test_resolve_clone_dir_found(sample_config: Any) -> None:
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_registry = AsyncMock()
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
     clone_dir = await executor._resolve_clone_dir("task-001")
 
     assert clone_dir == "/repos/my-repo"
 
 
 @pytest.mark.asyncio
-async def test_resolve_clone_dir_not_found_raises(sample_config: Any) -> None:
+async def test_resolve_clone_dir_not_found_raises(sample_pipelines: Any) -> None:
     """Raises PipelineError when no row is returned."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value=None)
@@ -203,7 +203,7 @@ async def test_resolve_clone_dir_not_found_raises(sample_config: Any) -> None:
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_registry = AsyncMock()
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with pytest.raises(PipelineError, match="No clone_dir found for task task-999"):
         await executor._resolve_clone_dir("task-999")
@@ -212,24 +212,24 @@ async def test_resolve_clone_dir_not_found_raises(sample_config: Any) -> None:
 # --- PipelineExecutor._get_repo_slug ---
 
 @pytest.mark.asyncio
-async def test_get_repo_slug_returns_slug(sample_config: Any) -> None:
+async def test_get_repo_slug_returns_slug(sample_pipelines: Any) -> None:
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(
         return_value={"url": "https://github.com/owner/repo.git"}
     )
 
-    executor = PipelineExecutor(mock_db, AsyncMock(), AsyncMock(), sample_config)
+    executor = PipelineExecutor(mock_db, AsyncMock(), AsyncMock(), sample_pipelines)
     slug = await executor._get_repo_slug("task-001")
 
     assert slug == "owner/repo"
 
 
 @pytest.mark.asyncio
-async def test_get_repo_slug_not_found_returns_none(sample_config: Any) -> None:
+async def test_get_repo_slug_not_found_returns_none(sample_pipelines: Any) -> None:
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value=None)
 
-    executor = PipelineExecutor(mock_db, AsyncMock(), AsyncMock(), sample_config)
+    executor = PipelineExecutor(mock_db, AsyncMock(), AsyncMock(), sample_pipelines)
     slug = await executor._get_repo_slug("task-999")
 
     assert slug is None
@@ -238,9 +238,9 @@ async def test_get_repo_slug_not_found_returns_none(sample_config: Any) -> None:
 # --- PipelineExecutor._setup_branch ---
 
 @pytest.mark.asyncio
-async def test_setup_branch_uses_head_branch_if_provided(sample_config: Any) -> None:
+async def test_setup_branch_uses_head_branch_if_provided(sample_pipelines: Any) -> None:
     """When context has a head_branch, checkout it directly."""
-    executor = PipelineExecutor(AsyncMock(), AsyncMock(), AsyncMock(), sample_config)
+    executor = PipelineExecutor(AsyncMock(), AsyncMock(), AsyncMock(), sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pipeline.executor._git_checkout", new_callable=AsyncMock
@@ -256,7 +256,7 @@ async def test_setup_branch_uses_head_branch_if_provided(sample_config: Any) -> 
 
 
 @pytest.mark.asyncio
-async def test_setup_branch_creates_branch_from_task_title(sample_config: Any) -> None:
+async def test_setup_branch_creates_branch_from_task_title(sample_pipelines: Any) -> None:
     """When no head_branch, a new branch is created from the task title."""
     mock_tq = AsyncMock()
     task = MagicMock()
@@ -265,7 +265,7 @@ async def test_setup_branch_creates_branch_from_task_title(sample_config: Any) -
 
     mock_db = AsyncMock()
     mock_db.fetch_one = AsyncMock(return_value={"branch": "main"})
-    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
@@ -277,11 +277,11 @@ async def test_setup_branch_creates_branch_from_task_title(sample_config: Any) -
 
 
 @pytest.mark.asyncio
-async def test_setup_branch_raises_if_task_not_found(sample_config: Any) -> None:
+async def test_setup_branch_raises_if_task_not_found(sample_pipelines: Any) -> None:
     mock_tq = AsyncMock()
     mock_tq.get_task = AsyncMock(return_value=None)
 
-    executor = PipelineExecutor(AsyncMock(), mock_tq, AsyncMock(), sample_config)
+    executor = PipelineExecutor(AsyncMock(), mock_tq, AsyncMock(), sample_pipelines)
 
     with pytest.raises(PipelineError, match="Task task-999 not found"):
         await executor._setup_branch("task-999", {}, "/repos/myrepo")
@@ -290,13 +290,13 @@ async def test_setup_branch_raises_if_task_not_found(sample_config: Any) -> None
 # --- PipelineExecutor.execute_pipeline ---
 
 @pytest.mark.asyncio
-async def test_execute_pipeline_unknown_pipeline_raises(sample_config: Any) -> None:
+async def test_execute_pipeline_unknown_pipeline_raises(sample_pipelines: Any) -> None:
     """A pipeline name not in config raises PipelineError."""
     mock_db = AsyncMock(spec=Database)
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_checkpoint = AsyncMock(return_value=None)
 
-    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
 
     with pytest.raises(PipelineError, match="Pipeline 'nonexistent-pipeline' not found"):
         await executor.execute_pipeline("nonexistent-pipeline", "task-001", {})
@@ -304,7 +304,7 @@ async def test_execute_pipeline_unknown_pipeline_raises(sample_config: Any) -> N
 
 @pytest.mark.asyncio
 async def test_execute_pipeline_no_pipeline_name_uses_task_category(
-    sample_config: Any,
+    sample_pipelines: Any,
 ) -> None:
     """When pipeline_name is empty, falls back to single-stage execution."""
     mock_db = AsyncMock(spec=Database)
@@ -329,7 +329,7 @@ async def test_execute_pipeline_no_pipeline_name_uses_task_category(
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     # _execute_agent calls execute_claude which raises AgentExecutionError (no prompt file)
     # -> _execute_stage wraps it as StageError
@@ -479,7 +479,7 @@ async def test_get_ahead_count_returns_zero_on_non_numeric() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_stage_success(sample_config: Any) -> None:
+async def test_execute_stage_success(sample_pipelines: Any) -> None:
     """_execute_stage selects agent, runs it, and returns output."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
@@ -491,7 +491,7 @@ async def test_execute_stage_success(sample_config: Any) -> None:
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pipeline.executor.execute_claude",
@@ -509,7 +509,7 @@ async def test_execute_stage_success(sample_config: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_stage_failure_records_and_raises(sample_config: Any) -> None:
+async def test_execute_stage_failure_records_and_raises(sample_pipelines: Any) -> None:
     """_execute_stage records failure and raises StageError on agent error."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
@@ -521,7 +521,7 @@ async def test_execute_stage_failure_records_and_raises(sample_config: Any) -> N
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pipeline.executor.execute_claude",
@@ -538,7 +538,7 @@ async def test_execute_stage_failure_records_and_raises(sample_config: Any) -> N
 
 
 @pytest.mark.asyncio
-async def test_execute_single_stage_success(sample_config: Any) -> None:
+async def test_execute_single_stage_success(sample_pipelines: Any) -> None:
     """Successful single-stage completes the task."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
@@ -555,7 +555,7 @@ async def test_execute_single_stage_success(sample_config: Any) -> None:
     task.title = "Review stuff"
     mock_tq.get_task = AsyncMock(return_value=task)
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pipeline.executor.execute_claude",
@@ -572,7 +572,7 @@ async def test_execute_single_stage_success(sample_config: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_single_stage_fails_task_on_stage_error(sample_config: Any) -> None:
+async def test_execute_single_stage_fails_task_on_stage_error(sample_pipelines: Any) -> None:
     """StageError causes the task to be failed via fail_task."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
@@ -584,7 +584,7 @@ async def test_execute_single_stage_fails_task_on_stage_error(sample_config: Any
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pipeline.executor.execute_claude",
@@ -601,7 +601,7 @@ async def test_execute_single_stage_fails_task_on_stage_error(sample_config: Any
 
 
 @pytest.mark.asyncio
-async def test_execute_pipeline_full_flow(sample_config: Any) -> None:
+async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
     """Full pipeline execution with stages, branch setup, and PR creation."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
@@ -622,7 +622,7 @@ async def test_execute_pipeline_full_flow(sample_config: Any) -> None:
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pipeline.executor.execute_claude",
@@ -650,7 +650,7 @@ async def test_execute_pipeline_full_flow(sample_config: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_pipeline_with_checkpoint_resume(sample_config: Any) -> None:
+async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) -> None:
     """Pipeline resumes from checkpoint, skipping completed stages."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
@@ -671,7 +671,7 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_config: Any) -> No
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pipeline.executor.execute_claude",
@@ -700,7 +700,7 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_config: Any) -> No
 
 
 @pytest.mark.asyncio
-async def test_execute_pipeline_required_stage_fails(sample_config: Any) -> None:
+async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> None:
     """When a required stage fails, the task is failed and pipeline stops."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
@@ -720,7 +720,7 @@ async def test_execute_pipeline_required_stage_fails(sample_config: Any) -> None
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pipeline.executor.execute_claude",
@@ -744,7 +744,7 @@ async def test_execute_pipeline_required_stage_fails(sample_config: Any) -> None
 
 
 @pytest.mark.asyncio
-async def test_maybe_create_pr_no_changes_no_branch(sample_config: Any) -> None:
+async def test_maybe_create_pr_no_changes_no_branch(sample_pipelines: Any) -> None:
     """No changes and not on agent branch => no PR created."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
@@ -754,7 +754,7 @@ async def test_maybe_create_pr_no_changes_no_branch(sample_config: Any) -> None:
     task.source_ref = None
     mock_tq.get_task = AsyncMock(return_value=task)
 
-    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pipeline.executor._run_git",
@@ -766,7 +766,7 @@ async def test_maybe_create_pr_no_changes_no_branch(sample_config: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_maybe_create_pr_with_changes_creates_branch(
-    sample_config: Any,
+    sample_pipelines: Any,
 ) -> None:
     """Changes on main branch => creates branch, commits, pushes, creates PR."""
     mock_db = AsyncMock(spec=Database)
@@ -784,7 +784,7 @@ async def test_maybe_create_pr_with_changes_creates_branch(
     task.title = "My feature"
     mock_tq.get_task = AsyncMock(return_value=task)
 
-    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
 
     git_responses = [
         "M file.py",  # status --porcelain => dirty
@@ -816,7 +816,7 @@ async def test_maybe_create_pr_with_changes_creates_branch(
 
 
 @pytest.mark.asyncio
-async def test_maybe_create_pr_review_posts_comment(sample_config: Any) -> None:
+async def test_maybe_create_pr_review_posts_comment(sample_pipelines: Any) -> None:
     """Review task with no changes posts comment to issue."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(
@@ -831,7 +831,7 @@ async def test_maybe_create_pr_review_posts_comment(sample_config: Any) -> None:
     task.source_ref = "42"
     mock_tq.get_task = AsyncMock(return_value=task)
 
-    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pipeline.executor._run_git",
@@ -854,20 +854,20 @@ async def test_maybe_create_pr_review_posts_comment(sample_config: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_maybe_create_pr_clone_dir_not_found_returns(
-    sample_config: Any,
+    sample_pipelines: Any,
 ) -> None:
     """If clone_dir not found, returns silently."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value=None)
     mock_tq = AsyncMock(spec=TaskQueue)
 
-    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
 
     await executor._maybe_create_single_stage_pr("task-1", "review", {})
 
 
 @pytest.mark.asyncio
-async def test_execute_pipeline_optional_stage_failure(sample_config: Any) -> None:
+async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) -> None:
     """When an optional stage fails, pipeline continues to next stage."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
@@ -887,7 +887,7 @@ async def test_execute_pipeline_optional_stage_failure(sample_config: Any) -> No
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     # Patch pipeline config to have an optional first stage
     optional_stages = [
@@ -940,13 +940,13 @@ async def test_execute_pipeline_optional_stage_failure(sample_config: Any) -> No
 
 
 @pytest.mark.asyncio
-async def test_execute_single_stage_task_not_found(sample_config: Any) -> None:
+async def test_execute_single_stage_task_not_found(sample_pipelines: Any) -> None:
     """Single-stage execution raises when task is not found."""
     mock_db = AsyncMock(spec=Database)
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_task = AsyncMock(return_value=None)
 
-    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_config)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
 
     with pytest.raises(PipelineError, match="not found"):
         await executor.execute_pipeline("", "missing-task", {})

@@ -13,7 +13,7 @@ from ..config import get_pipeline_config
 from ..database import Database
 from ..exceptions import NoAvailableAgentError, PipelineError, StageError
 from ..logging import get_logger
-from ..models import Complexity, SupervisorConfig
+from ..models import Complexity, PipelineConfig
 from ..task_queue import TaskQueue
 from ..utils import run_cmd as _run_cmd
 from ..utils import run_git as _run_git
@@ -36,12 +36,12 @@ class PipelineExecutor:
         db: Database,
         task_queue: TaskQueue,
         registry: AgentRegistry,
-        config: SupervisorConfig,
+        pipelines: list[PipelineConfig],
     ) -> None:
         self._db = db
         self._tq = task_queue
         self._registry = registry
-        self._config = config
+        self._pipelines = pipelines
 
     async def execute_pipeline(
         self,
@@ -66,7 +66,7 @@ class PipelineExecutor:
             await self._execute_single_stage(task_id, task.category, context)
             return
 
-        stages = get_pipeline_config(self._config, pipeline_name)
+        stages = get_pipeline_config(self._pipelines, pipeline_name)
         if not stages:
             raise PipelineError(f"Pipeline '{pipeline_name}' not found in config")
 
@@ -194,6 +194,7 @@ class PipelineExecutor:
             denied_tools=self._registry.get_denied_tools(agent_name),
             task_id=task_id,
             stage_num=stage_num,
+            extra_env=self._registry.get_agent_environment(agent_name),
         )
 
         output["_agent_name"] = agent_name
@@ -216,6 +217,10 @@ class PipelineExecutor:
         try:
             stage_output = await self._execute_stage(
                 category, task_id, context, {}, 0
+            )
+            agent_name = stage_output.get("_agent_name", "unknown")
+            await self._tq.store_stage_output(
+                task_id, 0, category, agent_name, stage_output
             )
             await self._maybe_create_single_stage_pr(
                 task_id, category, stage_output

@@ -10,14 +10,15 @@ import yaml
 from aifishtank_supervisor.config import (
     get_pipeline_config,
     get_poller_config,
-    get_repository_config,
     load_config,
+    load_pipelines,
     load_secrets,
 )
 from aifishtank_supervisor.exceptions import (
     ConfigFileNotFoundError,
     ConfigValidationError,
 )
+from aifishtank_supervisor.models import PipelineConfig
 
 
 def test_load_valid_config(sample_config_path: Path) -> None:
@@ -26,8 +27,6 @@ def test_load_valid_config(sample_config_path: Path) -> None:
     assert config.spec.database.url == "postgresql://test:test@localhost:5432/test"
     assert config.spec.database.max_connections == 2
     assert config.spec.global_limits.max_concurrent_agents == 2
-    assert len(config.spec.repositories) == 1
-    assert config.spec.repositories[0].name == "test-repo"
 
 
 def test_load_missing_file() -> None:
@@ -74,23 +73,35 @@ def test_get_poller_config(sample_config_path: Path) -> None:
     assert get_poller_config(config, "nonexistent") is None
 
 
-def test_get_repository_config(sample_config_path: Path) -> None:
-    config = load_config(sample_config_path)
-    repo_cfg = get_repository_config(config, "test-repo")
-    assert repo_cfg is not None
-    assert repo_cfg["url"] == "git@github.com:test/repo.git"
-
-    assert get_repository_config(config, "nonexistent") is None
-
-
-def test_get_pipeline_config(sample_config_path: Path) -> None:
-    config = load_config(sample_config_path)
-    stages = get_pipeline_config(config, "feature-pipeline")
+def test_get_pipeline_config(sample_pipelines: list[PipelineConfig]) -> None:
+    stages = get_pipeline_config(sample_pipelines, "feature-pipeline")
     assert stages is not None
     assert len(stages) == 5
     assert stages[0]["category"] == "analyze"
 
-    assert get_pipeline_config(config, "nonexistent") is None
+    assert get_pipeline_config(sample_pipelines, "nonexistent") is None
+
+
+def test_load_pipelines(tmp_path: Path) -> None:
+    pipelines_data = {
+        "pipelines": [
+            {
+                "name": "test-pipeline",
+                "trigger": {"labels": ["test"]},
+                "stages": [{"category": "analyze", "required": True}],
+            }
+        ]
+    }
+    path = tmp_path / "pipelines.yaml"
+    path.write_text(yaml.dump(pipelines_data))
+    pipelines = load_pipelines(path)
+    assert len(pipelines) == 1
+    assert pipelines[0].name == "test-pipeline"
+
+
+def test_load_pipelines_missing_file() -> None:
+    result = load_pipelines("/nonexistent/pipelines.yaml")
+    assert result == []
 
 
 def test_config_defaults(sample_config_path: Path) -> None:
@@ -158,8 +169,8 @@ def test_load_secrets_missing_files(sample_config_path: Path) -> None:
     assert "github_token" not in secrets or "anthropic_api_key" not in secrets
 
 
-def test_load_no_repositories_warns(tmp_path: Path) -> None:
-    """Config with no repositories should warn but not raise."""
+def test_load_minimal_config(tmp_path: Path) -> None:
+    """Config with no pollers should load without error."""
     config = {
         "apiVersion": "aifishtank.supervisor/v1",
         "metadata": {"name": "test"},
@@ -182,13 +193,10 @@ def test_load_no_repositories_warns(tmp_path: Path) -> None:
                 "anthropicKeyFile": "/tmp/a",
             },
             "health": {"enabled": False},
-            "repositories": [],
             "pollers": [],
-            "pipelines": [],
         },
     }
-    config_file = tmp_path / "no-repos.yaml"
+    config_file = tmp_path / "minimal.yaml"
     config_file.write_text(yaml.dump(config))
-    # Should not raise — just warns
     result = load_config(config_file)
-    assert len(result.spec.repositories) == 0
+    assert len(result.spec.pollers) == 0

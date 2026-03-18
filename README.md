@@ -234,9 +234,9 @@ the public key in the database for display in the UI.
 | Pull Worker       | agent:agent | in supervisor   | GITHUB_TOKEN env            | ~/repos/{name}/ (git pull)     |
 | Pollers           | agent:agent | in supervisor   | GH_TOKEN env                | DB (tasks table)               |
 
-## Supervisor Configuration
+## Configuration
 
-`supervisor/config/supervisor.yaml`:
+### Supervisor (`supervisor/config/supervisor.yaml`)
 
 ```yaml
 spec:
@@ -249,6 +249,9 @@ spec:
   secrets:
     githubTokenFile: /home/agent/.ssh/github-token
     anthropicKeyFile: /home/agent/.anthropic-key
+  pipelinesFile: /home/agent/ai-fishtank/config/pipelines.yaml
+  agentsDir: /home/agent/ai-fishtank/config/agents/definitions
+  promptsDir: /home/agent/ai-fishtank/config/agents/prompts
 ```
 
 Secrets are re-read from disk every loop iteration (~5s). When a token file
@@ -256,6 +259,27 @@ appears after the user logs in via web UI, the supervisor detects it
 automatically and logs `github_token_detected`.
 
 SIGHUP triggers a full config reload: `systemctl reload aifishtank-supervisor-python`
+
+### Agent Definitions (`config/agents/definitions/`)
+
+Kubernetes-style YAML files defining each agent's tools, environment variables,
+system prompt path, and output schema. Key fields under `spec`:
+
+- `tools.allowed` / `tools.denied` — tool access control for Claude CLI
+- `environment` — env vars passed to Claude CLI subprocess
+- `systemPrompt` — path to agent's markdown prompt template
+- `outputSchema` — structured output contract
+
+### Pipelines (`config/pipelines.yaml`)
+
+Standalone file with pipeline definitions. Each pipeline has ordered stages
+specifying which agent runs, what tools it uses, and what context it
+produces/consumes.
+
+### Repositories
+
+Repositories are managed **only via the database** (added through the web UI).
+Pollers query the DB for repos with `clone_status = 'ready'`.
 
 ## Claude Code Agent System
 
@@ -277,7 +301,8 @@ solution-architect  ←── coordinates all agents
      └── frontend        ── React + MUI + Next.js
 ```
 
-Agent definitions live in `.claude/agents/`. Slash commands:
+Agent definitions live in `config/agents/definitions/` (K8s-style YAML) and
+`.claude/agents/` (Claude Code agent system prompts). Slash commands:
 
 | Command                       | Description                                 |
 |-------------------------------|---------------------------------------------|

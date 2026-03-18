@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from aifishtank_supervisor.config import load_config
-from aifishtank_supervisor.models import SupervisorConfig
+from aifishtank_supervisor.config import load_config, load_pipelines
+from aifishtank_supervisor.models import PipelineConfig, SupervisorConfig
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -23,6 +23,7 @@ def sample_config_path(tmp_path: Path) -> Path:
             "workdir": "/tmp/test",
             "agentsDir": "/tmp/test/agents/definitions",
             "promptsDir": "/tmp/test/agents/prompts",
+            "pipelinesFile": str(tmp_path / "pipelines.yaml"),
             "database": {
                 "url": "postgresql://test:test@localhost:5432/test",
                 "maxConnections": 2,
@@ -38,16 +39,6 @@ def sample_config_path(tmp_path: Path) -> Path:
                 "anthropicKeyFile": "/tmp/test/anthropic-key",
             },
             "health": {"enabled": False},
-            "repositories": [
-                {
-                    "name": "test-repo",
-                    "url": "git@github.com:test/repo.git",
-                    "branch": "main",
-                    "cloneDir": "/tmp/test/repos/test-repo",
-                    "pollers": ["github-tasks", "github-source"],
-                    "auth": "ssh",
-                }
-            ],
             "pollers": [
                 {
                     "name": "github-tasks",
@@ -89,41 +80,58 @@ def sample_config_path(tmp_path: Path) -> Path:
                     },
                 },
             ],
-            "pipelines": [
-                {
-                    "name": "feature-pipeline",
-                    "trigger": {"labels": ["feature", "enhancement"]},
-                    "stages": [
-                        {"category": "analyze", "required": True},
-                        {
-                            "category": "design",
-                            "required": True,
-                            "conditions": [
-                                "analysis.estimated_complexity >= medium"
-                            ],
-                        },
-                        {"category": "implementation", "required": True},
-                        {"category": "test", "required": True},
-                        {"category": "review", "required": True},
-                    ],
-                },
-                {
-                    "name": "bugfix-pipeline",
-                    "trigger": {"labels": ["bug"]},
-                    "stages": [
-                        {"category": "analyze", "required": True},
-                        {"category": "implementation", "required": True},
-                        {"category": "test", "required": True},
-                        {"category": "review", "required": True},
-                    ],
-                },
-            ],
         },
     }
 
     config_file = tmp_path / "supervisor.yaml"
     config_file.write_text(yaml.dump(config, default_flow_style=False))
+
+    # Write pipelines file
+    pipelines = {
+        "apiVersion": "aifishtank.agents/v1",
+        "kind": "PipelineDefinition",
+        "pipelines": [
+            {
+                "name": "feature-pipeline",
+                "version": "1.0.0",
+                "trigger": {"labels": ["feature", "enhancement"]},
+                "stages": [
+                    {"category": "analyze", "required": True},
+                    {
+                        "category": "design",
+                        "required": True,
+                        "conditions": [
+                            "analysis.estimated_complexity >= medium"
+                        ],
+                    },
+                    {"category": "implementation", "required": True},
+                    {"category": "test", "required": True},
+                    {"category": "review", "required": True},
+                ],
+            },
+            {
+                "name": "bugfix-pipeline",
+                "version": "1.0.0",
+                "trigger": {"labels": ["bug"]},
+                "stages": [
+                    {"category": "analyze", "required": True},
+                    {"category": "implementation", "required": True},
+                    {"category": "test", "required": True},
+                    {"category": "review", "required": True},
+                ],
+            },
+        ],
+    }
+    pipelines_file = tmp_path / "pipelines.yaml"
+    pipelines_file.write_text(yaml.dump(pipelines, default_flow_style=False))
+
     return config_file
+
+
+@pytest.fixture
+def sample_pipelines(sample_config_path: Path, tmp_path: Path) -> list[PipelineConfig]:
+    """Load sample pipelines from the test pipelines file."""
+    return load_pipelines(tmp_path / "pipelines.yaml")
 
 
 @pytest.fixture

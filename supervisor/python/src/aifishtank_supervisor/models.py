@@ -210,6 +210,7 @@ class PipelineTrigger(BaseModel):
 
 class PipelineConfig(BaseModel):
     name: str
+    version: str = "0.0.0"
     trigger: PipelineTrigger
     stages: list[StageConfig]
 
@@ -282,9 +283,8 @@ class SupervisorSpec(BaseModel):
     global_limits: GlobalLimits = Field(default_factory=GlobalLimits, alias="globalLimits")
     config_reload: dict[str, Any] = Field(default_factory=dict, alias="configReload")
     repo_config: dict[str, Any] = Field(default_factory=dict, alias="repoConfig")
-    repositories: list[RepositoryConfig] = Field(default_factory=list)
+    pipelines_file: str = Field(default="", alias="pipelinesFile")
     pollers: list[PollerDefinition] = Field(default_factory=list)
-    pipelines: list[PipelineConfig] = Field(default_factory=list)
     health: HealthConfig = Field(default_factory=HealthConfig)
     secrets: SecretsConfig = Field(default_factory=SecretsConfig)
 

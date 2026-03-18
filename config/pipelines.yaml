@@ -1,0 +1,34 @@
+apiVersion: aifishtank.agents/v1
+kind: PipelineDefinition
+
+pipelines:
+  - name: feature-pipeline
+    version: "1.0.0"
+    trigger:
+      labels: [feature, enhancement]
+    stages:
+      - { category: analyze, required: true }
+      - { category: design, required: true, conditions: ["analysis.estimated_complexity >= medium"] }
+      - { category: implementation, required: true }
+      - { category: test, required: true }
+      - { category: docs, required: false }
+      - { category: review, required: true }
+
+  - name: bugfix-pipeline
+    version: "1.0.0"
+    trigger:
+      labels: [bug]
+    stages:
+      - { category: analyze, required: true }
+      - { category: implementation, required: true }
+      - { category: test, required: true }
+      - { category: review, required: true }
+
+  - name: pr-review-pipeline
+    version: "1.0.0"
+    trigger:
+      events: [pr_opened, pr_updated]
+    stages:
+      - { category: review, required: true }
+      - { category: implementation, required: true }
+      - { category: test, required: true }

@@ -7,11 +7,20 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from aifishtank_supervisor.database import Database
 from aifishtank_supervisor.pollers.github_source import (
     GitHubSourcePoller,
 )
 from aifishtank_supervisor.task_queue import TaskQueue
 from aifishtank_supervisor.utils import url_to_slug as _url_to_slug
+
+SAMPLE_REPO = {
+    "name": "test-repo",
+    "url": "git@github.com:test/repo.git",
+    "branch": "main",
+    "clone_dir": "/tmp/test/repos/test-repo",
+    "pollers": ["github-tasks", "github-source"],
+}
 
 
 def test_url_to_slug_https() -> None:
@@ -33,7 +42,8 @@ def test_url_to_slug_invalid() -> None:
 async def test_process_pr_skips_aifishtank_branches(sample_config: Any) -> None:
     """PRs from aifishtank/ branches are not processed."""
     mock_tq = AsyncMock(spec=TaskQueue)
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    mock_db = AsyncMock(spec=Database)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     pr = {
         "number": 42,
@@ -57,8 +67,8 @@ async def test_process_pr_skips_aifishtank_branches(sample_config: Any) -> None:
 async def test_process_pr_skips_when_no_triggers_for_event(sample_config: Any) -> None:
     """If the event type has no trigger categories, nothing is created."""
     mock_tq = AsyncMock(spec=TaskQueue)
-    poller = GitHubSourcePoller(sample_config, mock_tq)
-    # Overwrite triggers to have no entry for 'pr_merged'
+    mock_db = AsyncMock(spec=Database)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
     poller._triggers = {}
 
     pr = {
@@ -85,8 +95,9 @@ async def test_process_pr_creates_task_for_pr_opened(sample_config: Any) -> None
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.task_exists = AsyncMock(return_value=False)
     mock_tq.create_task = AsyncMock(return_value=True)
+    mock_db = AsyncMock(spec=Database)
 
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
     poller._triggers = {"pr_opened": ["review"]}
 
     pr = {
@@ -119,8 +130,9 @@ async def test_process_pr_skips_existing_task(sample_config: Any) -> None:
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.task_exists = AsyncMock(return_value=True)
     mock_tq.create_task = AsyncMock(return_value=False)
+    mock_db = AsyncMock(spec=Database)
 
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
     poller._triggers = {"pr_opened": ["review"]}
 
     pr = {
@@ -147,8 +159,9 @@ async def test_process_pr_updated_uses_timestamped_task_id(sample_config: Any) -
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.task_exists = AsyncMock(return_value=False)
     mock_tq.create_task = AsyncMock(return_value=True)
+    mock_db = AsyncMock(spec=Database)
 
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
     poller._triggers = {"pr_updated": ["review"]}
 
     pr = {
@@ -168,7 +181,6 @@ async def test_process_pr_updated_uses_timestamped_task_id(sample_config: Any) -
     assert result == 1
 
     call_kwargs = mock_tq.create_task.await_args.kwargs
-    # ID should include timestamp (not just the static pr_opened pattern)
     assert "github-pr-test-repo-9-review-" in call_kwargs["task_id"]
 
 
@@ -178,7 +190,8 @@ async def test_process_pr_updated_uses_timestamped_task_id(sample_config: Any) -
 async def test_poll_prs_filters_old_prs(sample_config: Any) -> None:
     """PRs with updatedAt and createdAt <= cursor are skipped."""
     mock_tq = AsyncMock(spec=TaskQueue)
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    mock_db = AsyncMock(spec=Database)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     cursor = "2024-06-01T00:00:00+00:00"
     old_prs = [
@@ -213,8 +226,9 @@ async def test_poll_prs_processes_new_prs(sample_config: Any) -> None:
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.task_exists = AsyncMock(return_value=False)
     mock_tq.create_task = AsyncMock(return_value=True)
+    mock_db = AsyncMock(spec=Database)
 
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
     poller._triggers = {"pr_opened": ["review"]}
 
     cursor = "2024-01-01T00:00:00+00:00"
@@ -249,7 +263,8 @@ async def test_poll_prs_processes_new_prs(sample_config: Any) -> None:
 async def test_poll_commits_skips_missing_clone_dir(sample_config: Any, tmp_path: Any) -> None:
     """If the .git directory does not exist, returns 0."""
     mock_tq = AsyncMock(spec=TaskQueue)
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    mock_db = AsyncMock(spec=Database)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     result = await poller._poll_commits(
         "test-repo",
@@ -265,22 +280,21 @@ async def test_poll_commits_creates_task_for_new_commit(
     sample_config: Any, tmp_path: Any
 ) -> None:
     """Creates a task for each new commit line in git log output."""
-    # Set up a fake .git directory
     git_dir = tmp_path / "repo" / ".git"
     git_dir.mkdir(parents=True)
 
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.task_exists = AsyncMock(return_value=False)
     mock_tq.create_task = AsyncMock(return_value=True)
+    mock_db = AsyncMock(spec=Database)
 
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     commit_line = "abc123def456\tAdd new feature\tJohn Doe\t2024-06-01T00:00:00+00:00"
 
     with patch(
         "aifishtank_supervisor.pollers.github_source._run_git",
         new_callable=AsyncMock,
-        # fetch -> "", rev-parse -> "origin/main", log -> commit_line
         side_effect=["", "origin/main", commit_line],
     ):
         result = await poller._poll_commits(
@@ -307,15 +321,15 @@ async def test_poll_commits_skips_existing_commit(
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.task_exists = AsyncMock(return_value=True)
     mock_tq.create_task = AsyncMock(return_value=False)
+    mock_db = AsyncMock(spec=Database)
 
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     commit_line = "abc123def456\tOld commit\tJane Doe\t2024-06-01T00:00:00+00:00"
 
     with patch(
         "aifishtank_supervisor.pollers.github_source._run_git",
         new_callable=AsyncMock,
-        # fetch -> "", rev-parse -> "origin/main", log -> commit_line
         side_effect=["", "origin/main", commit_line],
     ):
         result = await poller._poll_commits(
@@ -336,8 +350,10 @@ async def test_poll_uses_fallback_cursor_when_none(sample_config: Any) -> None:
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_poll_cursor = AsyncMock(return_value=None)
     mock_tq.update_poll_state = AsyncMock()
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_all = AsyncMock(return_value=[SAMPLE_REPO])
 
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     # Patch sub-methods to avoid real I/O
     poller._poll_prs = AsyncMock(return_value=0)
@@ -356,8 +372,10 @@ async def test_poll_accumulates_total_created(sample_config: Any) -> None:
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_poll_cursor = AsyncMock(return_value="2024-01-01T00:00:00Z")
     mock_tq.update_poll_state = AsyncMock()
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_all = AsyncMock(return_value=[SAMPLE_REPO])
 
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
     poller._poll_prs = AsyncMock(return_value=2)
     poller._poll_commits = AsyncMock(return_value=3)
 
@@ -372,14 +390,15 @@ async def test_poll_handles_pr_poll_exception(sample_config: Any) -> None:
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_poll_cursor = AsyncMock(return_value="2024-01-01T00:00:00Z")
     mock_tq.update_poll_state = AsyncMock()
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_all = AsyncMock(return_value=[SAMPLE_REPO])
 
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
     poller._poll_prs = AsyncMock(side_effect=RuntimeError("gh cli failed"))
     poller._poll_commits = AsyncMock(return_value=1)
 
     total = await poller.poll()
 
-    # commit poll still ran despite PR poll failure
     assert total == 1
     mock_tq.update_poll_state.assert_awaited_once()
 
@@ -390,8 +409,10 @@ async def test_poll_handles_commit_poll_exception(sample_config: Any) -> None:
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_poll_cursor = AsyncMock(return_value="2024-01-01T00:00:00Z")
     mock_tq.update_poll_state = AsyncMock()
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_all = AsyncMock(return_value=[SAMPLE_REPO])
 
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
     poller._poll_prs = AsyncMock(return_value=1)
     poller._poll_commits = AsyncMock(side_effect=RuntimeError("git error"))
 
@@ -412,8 +433,9 @@ async def test_poll_commits_falls_back_to_main(
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.task_exists = AsyncMock(return_value=False)
     mock_tq.create_task = AsyncMock(return_value=True)
+    mock_db = AsyncMock(spec=Database)
 
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     commit_line = "aaa111222333\tFix bug\tDev\t2024-06-01T00:00:00+00:00"
 
@@ -423,7 +445,6 @@ async def test_poll_commits_falls_back_to_main(
         if args[0] == "rev-parse":
             raise RuntimeError("not found")
         if args[0] == "log":
-            # Verify it uses "main" as fallback
             assert "origin/main" in args[1]
             return commit_line
         return ""
@@ -450,7 +471,8 @@ async def test_poll_commits_empty_output(
     git_dir.mkdir(parents=True)
 
     mock_tq = AsyncMock(spec=TaskQueue)
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    mock_db = AsyncMock(spec=Database)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     with patch(
         "aifishtank_supervisor.pollers.github_source._run_git",
@@ -473,7 +495,8 @@ async def test_poll_commits_malformed_line_skipped(
     git_dir.mkdir(parents=True)
 
     mock_tq = AsyncMock(spec=TaskQueue)
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    mock_db = AsyncMock(spec=Database)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     with patch(
         "aifishtank_supervisor.pollers.github_source._run_git",
@@ -489,16 +512,15 @@ async def test_poll_commits_malformed_line_skipped(
 
 
 @pytest.mark.asyncio
-async def test_poll_skips_repo_not_in_pollers(sample_config: Any) -> None:
-    """Repos that don't list this poller in their pollers field are skipped."""
+async def test_poll_no_repos_from_db(sample_config: Any) -> None:
+    """When DB returns no repos, nothing is polled."""
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_poll_cursor = AsyncMock(return_value="2024-01-01T00:00:00Z")
     mock_tq.update_poll_state = AsyncMock()
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_all = AsyncMock(return_value=[])
 
-    # Remove github-source from the repo's pollers list
-    sample_config.spec.repositories[0].pollers = ["github-tasks"]
-
-    poller = GitHubSourcePoller(sample_config, mock_tq)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
     poller._poll_prs = AsyncMock(return_value=0)
     poller._poll_commits = AsyncMock(return_value=0)
 

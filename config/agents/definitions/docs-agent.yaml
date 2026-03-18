@@ -7,9 +7,6 @@ metadata:
   labels:
     team: platform
     domain: documentation
-  annotations:
-    pipeline-position: "fifth"
-    docs: "agents/prompts/docs-agent.md"
 
 spec:
   categories:
@@ -35,17 +32,6 @@ spec:
   environment:
     AGENT_MODE: "docs"
 
-  capabilities:
-    canPush: true
-    canCreatePR: false
-    canCommentOnPR: false
-    canApprove: false
-    canMerge: false
-    canAccessDocker: false
-    canAccessK8s: false
-    canCreateIssues: false
-    canCloseIssues: false
-
   output:
     format: commit
     mustInclude:
@@ -66,12 +52,6 @@ spec:
       summary:
         type: string
         description: "Narrative description of what documentation was changed and why"
-
-  triggers:
-    produces:
-      - docs-complete
-    consumes:
-      - implementation-complete
 
   conditions:
     filePatterns:

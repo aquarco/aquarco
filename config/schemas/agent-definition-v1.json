@@ -43,13 +43,6 @@
             "type": "string"
           },
           "description": "Arbitrary string labels for filtering and selection"
-        },
-        "annotations": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Arbitrary string annotations for tooling metadata"
         }
       }
     },
@@ -133,57 +126,6 @@
           },
           "description": "Environment variables passed to the agent process"
         },
-        "capabilities": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "canPush": {
-              "type": "boolean",
-              "default": true,
-              "description": "May push commits to remote branches"
-            },
-            "canCreatePR": {
-              "type": "boolean",
-              "default": true,
-              "description": "May open pull requests"
-            },
-            "canCommentOnPR": {
-              "type": "boolean",
-              "default": true,
-              "description": "May post comments on pull requests"
-            },
-            "canApprove": {
-              "type": "boolean",
-              "default": false,
-              "description": "May submit PR approvals"
-            },
-            "canMerge": {
-              "type": "boolean",
-              "default": false,
-              "description": "May merge pull requests"
-            },
-            "canAccessDocker": {
-              "type": "boolean",
-              "default": false,
-              "description": "May interact with the Docker socket"
-            },
-            "canAccessK8s": {
-              "type": "boolean",
-              "default": false,
-              "description": "May interact with the Kubernetes/k3s API"
-            },
-            "canCreateIssues": {
-              "type": "boolean",
-              "default": true,
-              "description": "May open new GitHub issues"
-            },
-            "canCloseIssues": {
-              "type": "boolean",
-              "default": false,
-              "description": "May close GitHub issues"
-            }
-          }
-        },
         "output": {
           "type": "object",
           "required": ["format"],
@@ -211,24 +153,6 @@
               "items": { "type": "string" }
             },
             "properties": { "type": "object" }
-          }
-        },
-        "triggers": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "produces": {
-              "type": "array",
-              "items": { "type": "string" },
-              "uniqueItems": true,
-              "description": "Event names this agent emits upon completion"
-            },
-            "consumes": {
-              "type": "array",
-              "items": { "type": "string" },
-              "uniqueItems": true,
-              "description": "Event names this agent requires before it can run"
-            }
           }
         },
         "healthCheck": {

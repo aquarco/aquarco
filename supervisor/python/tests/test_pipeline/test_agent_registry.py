@@ -156,7 +156,7 @@ def test_get_allowed_denied_tools(tmp_path: Path) -> None:
     mock_db = AsyncMock(spec=Database)
     reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
     reg._agents = {
-        "agent1": {"allowedTools": ["Read"], "deniedTools": ["Bash"]},
+        "agent1": {"tools": {"allowed": ["Read"], "denied": ["Bash"]}},
         "agent2": {},
     }
     assert reg.get_allowed_tools("agent1") == ["Read"]

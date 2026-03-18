@@ -6,10 +6,19 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from aifishtank_supervisor.models import SupervisorConfig
+from aifishtank_supervisor.database import Database
+from aifishtank_supervisor.models import PipelineConfig, SupervisorConfig
 from aifishtank_supervisor.pollers.github_tasks import GitHubTasksPoller
 from aifishtank_supervisor.task_queue import TaskQueue
 from aifishtank_supervisor.utils import url_to_slug as _url_to_slug
+
+SAMPLE_REPO = {
+    "name": "test-repo",
+    "url": "git@github.com:test/repo.git",
+    "branch": "main",
+    "clone_dir": "/tmp/test/repos/test-repo",
+    "pollers": ["github-tasks", "github-source"],
+}
 
 
 def test_url_to_slug_https() -> None:
@@ -27,9 +36,12 @@ def test_url_to_slug_invalid() -> None:
     assert _url_to_slug("") is None
 
 
-def test_categorize(sample_config: SupervisorConfig) -> None:
+def test_categorize(
+    sample_config: SupervisorConfig, sample_pipelines: list[PipelineConfig],
+) -> None:
     tq = AsyncMock(spec=TaskQueue)
-    poller = GitHubTasksPoller(sample_config, tq)
+    db = AsyncMock(spec=Database)
+    poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
 
     assert poller._categorize(["bug"]) == "implementation"
     assert poller._categorize(["feature"]) == "analyze"
@@ -37,9 +49,12 @@ def test_categorize(sample_config: SupervisorConfig) -> None:
     assert poller._categorize([]) == "analyze"
 
 
-def test_select_pipeline(sample_config: SupervisorConfig) -> None:
+def test_select_pipeline(
+    sample_config: SupervisorConfig, sample_pipelines: list[PipelineConfig],
+) -> None:
     tq = AsyncMock(spec=TaskQueue)
-    poller = GitHubTasksPoller(sample_config, tq)
+    db = AsyncMock(spec=Database)
+    poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
 
     assert poller._select_pipeline(["feature"]) == "feature-pipeline"
     assert poller._select_pipeline(["enhancement"]) == "feature-pipeline"
@@ -48,11 +63,14 @@ def test_select_pipeline(sample_config: SupervisorConfig) -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_issue_creates_task(sample_config: SupervisorConfig) -> None:
+async def test_process_issue_creates_task(
+    sample_config: SupervisorConfig, sample_pipelines: list[PipelineConfig],
+) -> None:
     tq = AsyncMock(spec=TaskQueue)
     tq.task_exists = AsyncMock(return_value=False)
     tq.create_task = AsyncMock(return_value=True)
-    poller = GitHubTasksPoller(sample_config, tq)
+    db = AsyncMock(spec=Database)
+    poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
 
     issue = {
         "number": 42,
@@ -72,10 +90,13 @@ async def test_process_issue_creates_task(sample_config: SupervisorConfig) -> No
 
 
 @pytest.mark.asyncio
-async def test_process_issue_skips_existing(sample_config: SupervisorConfig) -> None:
+async def test_process_issue_skips_existing(
+    sample_config: SupervisorConfig, sample_pipelines: list[PipelineConfig],
+) -> None:
     tq = AsyncMock(spec=TaskQueue)
     tq.task_exists = AsyncMock(return_value=True)
-    poller = GitHubTasksPoller(sample_config, tq)
+    db = AsyncMock(spec=Database)
+    poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
 
     issue = {"number": 1, "title": "Test", "labels": []}
     result = await poller._process_issue(issue, "repo", "owner/repo")
@@ -84,13 +105,17 @@ async def test_process_issue_skips_existing(sample_config: SupervisorConfig) -> 
 
 
 @pytest.mark.asyncio
-async def test_poll_creates_tasks_from_issues(sample_config: SupervisorConfig) -> None:
+async def test_poll_creates_tasks_from_issues(
+    sample_config: SupervisorConfig, sample_pipelines: list[PipelineConfig],
+) -> None:
     tq = AsyncMock(spec=TaskQueue)
     tq.get_poll_cursor = AsyncMock(return_value=None)
     tq.task_exists = AsyncMock(return_value=False)
     tq.create_task = AsyncMock(return_value=True)
     tq.update_poll_state = AsyncMock()
-    poller = GitHubTasksPoller(sample_config, tq)
+    db = AsyncMock(spec=Database)
+    db.fetch_all = AsyncMock(return_value=[SAMPLE_REPO])
+    poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
 
     issues = [
         {"number": 10, "title": "Issue A", "body": "", "url": "", "labels": []},
@@ -112,11 +137,15 @@ async def test_poll_creates_tasks_from_issues(sample_config: SupervisorConfig) -
 
 
 @pytest.mark.asyncio
-async def test_poll_handles_gh_error(sample_config: SupervisorConfig) -> None:
+async def test_poll_handles_gh_error(
+    sample_config: SupervisorConfig, sample_pipelines: list[PipelineConfig],
+) -> None:
     tq = AsyncMock(spec=TaskQueue)
     tq.get_poll_cursor = AsyncMock(return_value="2026-01-01T00:00:00Z")
     tq.update_poll_state = AsyncMock()
-    poller = GitHubTasksPoller(sample_config, tq)
+    db = AsyncMock(spec=Database)
+    db.fetch_all = AsyncMock(return_value=[SAMPLE_REPO])
+    poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pollers.github_tasks._gh_list_issues",
@@ -129,15 +158,16 @@ async def test_poll_handles_gh_error(sample_config: SupervisorConfig) -> None:
 
 
 @pytest.mark.asyncio
-async def test_poll_skips_repos_without_poller(sample_config: SupervisorConfig) -> None:
-    # Remove github-tasks from repo pollers
-    for repo in sample_config.spec.repositories:
-        repo.pollers = ["github-source"]
-
+async def test_poll_no_repos_from_db(
+    sample_config: SupervisorConfig, sample_pipelines: list[PipelineConfig],
+) -> None:
+    """When DB returns no repos, no issues are fetched."""
     tq = AsyncMock(spec=TaskQueue)
     tq.get_poll_cursor = AsyncMock(return_value=None)
     tq.update_poll_state = AsyncMock()
-    poller = GitHubTasksPoller(sample_config, tq)
+    db = AsyncMock(spec=Database)
+    db.fetch_all = AsyncMock(return_value=[])
+    poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pollers.github_tasks._gh_list_issues",
@@ -151,15 +181,16 @@ async def test_poll_skips_repos_without_poller(sample_config: SupervisorConfig) 
 
 @pytest.mark.asyncio
 async def test_poll_skips_repo_with_invalid_url(
-    sample_config: SupervisorConfig,
+    sample_config: SupervisorConfig, sample_pipelines: list[PipelineConfig],
 ) -> None:
     """When url_to_slug returns None, repo is skipped."""
-    sample_config.spec.repositories[0].url = "not-a-valid-url"
-
     tq = AsyncMock(spec=TaskQueue)
     tq.get_poll_cursor = AsyncMock(return_value=None)
     tq.update_poll_state = AsyncMock()
-    poller = GitHubTasksPoller(sample_config, tq)
+    db = AsyncMock(spec=Database)
+    bad_repo = {**SAMPLE_REPO, "url": "not-a-valid-url"}
+    db.fetch_all = AsyncMock(return_value=[bad_repo])
+    poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
 
     with patch(
         "aifishtank_supervisor.pollers.github_tasks._gh_list_issues",

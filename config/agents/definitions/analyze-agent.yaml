@@ -7,9 +7,6 @@ metadata:
   labels:
     team: platform
     domain: analysis
-  annotations:
-    pipeline-position: "first"
-    docs: "agents/prompts/analyze-agent.md"
 
 spec:
   categories:
@@ -38,17 +35,6 @@ spec:
   environment:
     AGENT_MODE: "analyze"
     STRICT_MODE: "true"
-
-  capabilities:
-    canPush: false
-    canCreatePR: false
-    canCommentOnPR: true
-    canApprove: false
-    canMerge: false
-    canAccessDocker: false
-    canAccessK8s: false
-    canCreateIssues: true
-    canCloseIssues: false
 
   output:
     format: task-file
@@ -99,11 +85,6 @@ spec:
         items:
           type: string
         description: "Identified risks or blockers"
-
-  triggers:
-    produces:
-      - analysis-complete
-    consumes: []
 
   healthCheck:
     enabled: true

@@ -7,9 +7,6 @@ metadata:
   labels:
     team: platform
     domain: implementation
-  annotations:
-    pipeline-position: "third"
-    docs: "agents/prompts/implementation-agent.md"
 
 spec:
   categories:
@@ -35,17 +32,6 @@ spec:
 
   environment:
     AGENT_MODE: "implementation"
-
-  capabilities:
-    canPush: true
-    canCreatePR: true
-    canCommentOnPR: false
-    canApprove: false
-    canMerge: false
-    canAccessDocker: true
-    canAccessK8s: false
-    canCreateIssues: false
-    canCloseIssues: false
 
   output:
     format: commit
@@ -76,12 +62,6 @@ spec:
           - failed
           - skipped
         description: "Result of running the test suite after implementation"
-
-  triggers:
-    produces:
-      - implementation-complete
-    consumes:
-      - design-complete
 
   conditions:
     filePatterns:
