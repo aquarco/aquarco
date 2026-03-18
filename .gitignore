@@ -32,6 +32,12 @@ pgdata/
 *.log
 .claude/logs/
 
+# Python
+__pycache__/
+*.pyc
+.coverage
+*.egg-info/
+
 # Test coverage
 coverage/
 
