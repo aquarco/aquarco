@@ -56,6 +56,7 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: ${PORT:-4000}
       REPOS_BASE: ${REPOS_BASE:-/home/agent/repos}
+      CHOKIDAR_USEPOLLING: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,5 +81,6 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000/graphql}
       NODE_ENV: ${NODE_ENV:-development}
+      WATCHPACK_POLLING: "true"
     depends_on:
       - api

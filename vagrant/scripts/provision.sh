@@ -120,14 +120,14 @@ fi
 
 if ! id "${AGENT_USER}" &>/dev/null; then
   log "Creating agent user..."
-  useradd -m -s /bin/bash -G docker "${AGENT_USER}"
+  useradd -m -s /bin/bash -G docker,vboxsf "${AGENT_USER}"
   # Restrict passwordless sudo to specific commands needed by the supervisor
   echo "${AGENT_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart aifishtank-supervisor, /usr/bin/systemctl status aifishtank-supervisor, /usr/bin/docker, /usr/bin/docker-compose" > "/etc/sudoers.d/${AGENT_USER}"
   chmod 440 "/etc/sudoers.d/${AGENT_USER}"
 else
   log "User '${AGENT_USER}' already exists"
   # Ensure group memberships are correct (sudo group not needed — sudoers.d controls access)
-  usermod -aG docker "${AGENT_USER}" 2>/dev/null || true
+  usermod -aG docker,vboxsf "${AGENT_USER}" 2>/dev/null || true
 fi
 
 # ─── 8. Directory structure ───────────────────────────────────────────────────
@@ -147,6 +147,7 @@ mkdir -p \
   "${AGENT_HOME}/config" \
   "${AGENT_HOME}/system" \
   "${AGENT_HOME}/.docker" \
+  "${AGENT_HOME}/.claude" \
   "/etc/aifishtank"
 
 chown -R "${AGENT_USER}:${AGENT_USER}" \
@@ -156,10 +157,12 @@ chown -R "${AGENT_USER}:${AGENT_USER}" \
   "${AGENT_HOME}/repos" \
   "${AGENT_HOME}/config" \
   "${AGENT_HOME}/system" \
-  "${AGENT_HOME}/.docker"
+  "${AGENT_HOME}/.docker" \
+  "${AGENT_HOME}/.claude"
 
 chmod 755 "${DATA_DIR}" "${LOG_DIR}"
 chmod 700 "/etc/aifishtank"
+chmod 700 "${AGENT_HOME}/.claude"
 
 # ─── 9. Docker configuration ──────────────────────────────────────────────────
 
@@ -179,8 +182,9 @@ log "Configuring git for agent user..."
 mkdir -p "${AGENT_HOME}/.ssh"
 chmod 700 "${AGENT_HOME}/.ssh"
 ssh-keyscan github.com >> "${AGENT_HOME}/.ssh/known_hosts" 2>/dev/null
-chown "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}/.ssh/known_hosts"
 chmod 644 "${AGENT_HOME}/.ssh/known_hosts"
+# Ensure .ssh and all contents are owned by agent (this script runs as root)
+chown -R "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}/.ssh"
 
 if [[ ! -f "${AGENT_HOME}/.gitconfig" ]]; then
   cat > "${AGENT_HOME}/.gitconfig" <<'GITCFG'
@@ -206,18 +210,32 @@ log "Setting up network tracking..."
 # Use the mounted path since Vagrant uploads provisioners to /tmp
 bash "${AGENT_HOME}/ai-fishtank/vagrant/scripts/setup-network-tracking.sh"
 
+# ─── 11b. Install Python supervisor package ──────────────────────────────────
+
+log "Installing aifishtank-supervisor Python package..."
+apt-get install -y -qq python3-pip python3-venv
+python3 -m venv "${AGENT_HOME}/.venv"
+chown -R "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}/.venv"
+su - "${AGENT_USER}" -c "${AGENT_HOME}/.venv/bin/pip install -e /home/agent/ai-fishtank/supervisor/python/" || {
+  log "WARNING: pip install failed; supervisor CLI may not be available"
+}
+
 # ─── 12. Systemd service for supervisor ───────────────────────────────────────
 
-log "Installing aifishtank-supervisor systemd service..."
-SYSTEMD_SRC="${AGENT_HOME}/ai-fishtank/supervisor/systemd/aifishtank-supervisor.service"
-SYSTEMD_DEST="/etc/systemd/system/aifishtank-supervisor.service"
+log "Installing aifishtank-supervisor (Python) systemd service..."
+SYSTEMD_SRC="${AGENT_HOME}/ai-fishtank/supervisor/systemd/aifishtank-supervisor-python.service"
+SYSTEMD_DEST="/etc/systemd/system/aifishtank-supervisor-python.service"
+
+# Disable the old bash supervisor service if it exists
+systemctl disable --now aifishtank-supervisor.service 2>/dev/null || true
+rm -f /etc/systemd/system/aifishtank-supervisor.service
 
 if [[ -f "${SYSTEMD_SRC}" ]]; then
   cp "${SYSTEMD_SRC}" "${SYSTEMD_DEST}"
   systemctl daemon-reload
-  systemctl enable aifishtank-supervisor.service
-  systemctl start aifishtank-supervisor.service || true
-  log "Supervisor service enabled and started"
+  systemctl enable aifishtank-supervisor-python.service
+  systemctl start aifishtank-supervisor-python.service || true
+  log "Supervisor (Python) service enabled and started"
 else
   log "WARNING: ${SYSTEMD_SRC} not found; skipping service install"
 fi
@@ -231,7 +249,8 @@ CLAUDE_AUTH_DEST="/etc/systemd/system/aifishtank-claude-auth.service"
 if [[ -f "${CLAUDE_AUTH_SRC}" ]]; then
   cp "${CLAUDE_AUTH_SRC}" "${CLAUDE_AUTH_DEST}"
   mkdir -p /var/lib/aifishtank/claude-ipc
-  chown vagrant:vagrant /var/lib/aifishtank/claude-ipc
+  chown agent:agent /var/lib/aifishtank/claude-ipc
+  chmod 0770 /var/lib/aifishtank/claude-ipc
   systemctl daemon-reload
   systemctl enable aifishtank-claude-auth.service
   systemctl start aifishtank-claude-auth.service || true
@@ -322,19 +341,11 @@ log "==========================================================="
 log "  AI Fishtank provisioning complete."
 log "==========================================================="
 log ""
-log "NEXT STEPS:"
-log "  1. Run the secrets setup script (inside the VM):"
-log "       sudo /home/agent/ai-fishtank/vagrant/scripts/setup-secrets.sh"
+log "Access the Web UI to log in to GitHub and Claude:"
+log "  http://localhost:8080"
 log ""
-log "  2. After secrets are set, start the supervisor:"
-log "       sudo systemctl start aifishtank-supervisor"
-log ""
-log "  3. Verify network tracking is active:"
-log "       sudo systemctl status dnsmasq"
-log "       sudo tail -f /var/log/aifishtank/dns-queries.log"
-log ""
-log "  4. Access services from the host browser:"
-log "       http://localhost:8080  — Web UI dashboard"
-log "       http://localhost:3000  — Grafana"
-log "       http://localhost:9090  — Prometheus"
+log "Other services:"
+log "  http://localhost:13000 — Grafana"
+log "  http://localhost:9090  — Prometheus"
+log "  http://localhost:8081  — Adminer (DB UI)"
 log ""

@@ -68,7 +68,11 @@ try:
 except:
     print(json.dumps({'loggedIn':False}))
 " 2>/dev/null)"
-        status_json="${has_token:-{\"loggedIn\":false}}"
+        if [[ -n "$has_token" ]]; then
+          status_json="$has_token"
+        else
+          status_json='{"loggedIn":false}'
+        fi
       else
         status_json='{"loggedIn":false}'
       fi

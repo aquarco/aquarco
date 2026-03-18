@@ -2,13 +2,13 @@
 Description=AI Fishtank Claude Auth Helper
 Documentation=https://github.com/owner/ai-fishtank
 After=network.target
-PartOf=aifishtank-supervisor.service
 
 [Service]
 Type=simple
-User=vagrant
-Group=vagrant
+User=agent
+Group=agent
 
+ExecStartPre=+/bin/bash -c "mkdir -p /home/agent/.claude && chown -R agent:agent /home/agent/.claude && chmod 700 /home/agent/.claude"
 ExecStart=/home/agent/ai-fishtank/supervisor/scripts/claude-auth-helper.sh
 
 Restart=on-failure
