@@ -18,6 +18,7 @@ type Query {
 
   # GitHub auth
   githubAuthStatus: GithubAuthStatus!
+  githubRepositories: [GithubRepo!]!
 
   # Claude auth
   claudeAuthStatus: ClaudeAuthStatus!
@@ -277,6 +278,14 @@ type ClaudeLoginResult {
   success: Boolean!
   email: String
   error: String
+}
+
+type GithubRepo {
+  nameWithOwner: String!
+  url: String!
+  defaultBranch: String!
+  isPrivate: Boolean!
+  description: String
 }
 
 enum CloneStatus {

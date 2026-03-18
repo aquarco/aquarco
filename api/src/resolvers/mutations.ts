@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import { Context } from '../context.js'
 import { mapRepository, mapStage } from './queries.js'
 
@@ -106,12 +107,14 @@ export const Mutation = {
     }
 
     try {
+      const id = `${input.source}-${crypto.randomUUID()}`
       const result = await ctx.pool.query<Record<string, unknown>>(
         `INSERT INTO tasks
-           (title, category, repository, source, source_ref, pipeline, priority, initial_context, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
+           (id, title, category, repository, source, source_ref, pipeline, priority, initial_context, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
          RETURNING *`,
         [
+          id,
           input.title,
           toDbEnum(input.category),
           input.repository,

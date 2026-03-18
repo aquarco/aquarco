@@ -17,9 +17,9 @@ pool.on('error', (err) => {
   console.error('Unexpected PostgreSQL pool error:', err.message)
 })
 
-pool.on('connect', () => {
+pool.on('connect', (client) => {
   // Set the search_path for every new connection so aifishtank schema is default
-  pool.query("SET search_path TO aifishtank, public").catch((err) => {
+  client.query("SET search_path TO aifishtank, public").catch((err: Error) => {
     console.error('Failed to set search_path on new connection:', err.message)
   })
 })

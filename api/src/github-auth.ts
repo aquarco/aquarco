@@ -72,6 +72,10 @@ export async function pollDeviceFlow(): Promise<{
     return { success: false, username: null, error: 'Login flow expired. Please start again.' }
   }
 
+  // Respect GitHub's required poll interval to avoid slow_down errors
+  const waitMs = pendingFlow.interval * 1000
+  await new Promise(r => setTimeout(r, waitMs))
+
   const res = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: {
@@ -100,6 +104,8 @@ export async function pollDeviceFlow(): Promise<{
   }
 
   if (data.error === 'slow_down') {
+    // GitHub wants us to increase the polling interval by 5 seconds
+    pendingFlow.interval = (data as { interval?: number }).interval ?? pendingFlow.interval + 5
     return { success: false, username: null, error: null }
   }
 
@@ -145,6 +151,67 @@ export async function logout(): Promise<boolean> {
     // file may not exist
   }
   return true
+}
+
+export async function listUserRepos(): Promise<
+  Array<{
+    nameWithOwner: string
+    url: string
+    defaultBranch: string
+    isPrivate: boolean
+    description: string | null
+  }>
+> {
+  const fs = await import('node:fs/promises')
+
+  let token: string
+  try {
+    token = (await fs.readFile(TOKEN_FILE, 'utf-8')).trim()
+  } catch {
+    return []
+  }
+  if (!token) return []
+
+  const repos: Array<{
+    nameWithOwner: string
+    url: string
+    defaultBranch: string
+    isPrivate: boolean
+    description: string | null
+  }> = []
+
+  let page = 1
+  const perPage = 100
+  while (true) {
+    const res = await fetch(
+      `https://api.github.com/user/repos?per_page=${perPage}&page=${page}&sort=updated&affiliation=owner,collaborator,organization_member`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    if (!res.ok) break
+
+    const data = (await res.json()) as Array<{
+      full_name: string
+      clone_url: string
+      default_branch: string
+      private: boolean
+      description: string | null
+    }>
+
+    for (const r of data) {
+      repos.push({
+        nameWithOwner: r.full_name,
+        url: r.clone_url,
+        defaultBranch: r.default_branch,
+        isPrivate: r.private,
+        description: r.description,
+      })
+    }
+
+    if (data.length < perPage) break
+    page++
+  }
+
+  return repos
 }
 
 export async function getAuthStatus(): Promise<{

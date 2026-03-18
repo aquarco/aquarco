@@ -150,6 +150,11 @@ export const Query = {
     return getAuthStatus()
   },
 
+  async githubRepositories() {
+    const { listUserRepos } = await import('../github-auth.js')
+    return listUserRepos()
+  },
+
   async claudeAuthStatus() {
     const { getClaudeAuthStatus } = await import('../claude-auth.js')
     return getClaudeAuthStatus()

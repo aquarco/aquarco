@@ -54,7 +54,7 @@ export function createLoaders(pool: Pool): Loaders {
   const repositoryLoader = new DataLoader<string, RepositoryRow | null>(
     async (names) => {
       const result = await pool.query<RepositoryRow>(
-        'SET search_path TO aifishtank, public; SELECT * FROM repositories WHERE name = ANY($1)',
+        'SELECT * FROM repositories WHERE name = ANY($1)',
         [names as string[]]
       )
       const byName = new Map<string, RepositoryRow>()
@@ -69,7 +69,7 @@ export function createLoaders(pool: Pool): Loaders {
   const stagesByTaskLoader = new DataLoader<string, StageRow[]>(
     async (taskIds) => {
       const result = await pool.query<StageRow>(
-        'SET search_path TO aifishtank, public; SELECT * FROM stages WHERE task_id = ANY($1) ORDER BY task_id, stage_number ASC',
+        'SELECT * FROM stages WHERE task_id = ANY($1) ORDER BY task_id, stage_number ASC',
         [taskIds as string[]]
       )
       const byTaskId = new Map<string, StageRow[]>()
@@ -86,7 +86,7 @@ export function createLoaders(pool: Pool): Loaders {
   const contextByTaskLoader = new DataLoader<string, ContextRow[]>(
     async (taskIds) => {
       const result = await pool.query<ContextRow>(
-        'SET search_path TO aifishtank, public; SELECT * FROM context WHERE task_id = ANY($1) ORDER BY task_id, created_at ASC',
+        'SELECT * FROM context WHERE task_id = ANY($1) ORDER BY task_id, created_at ASC',
         [taskIds as string[]]
       )
       const byTaskId = new Map<string, ContextRow[]>()

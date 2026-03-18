@@ -124,6 +124,15 @@ export type GithubLoginResult = {
   username?: Maybe<Scalars['String']['output']>;
 };
 
+export type GithubRepo = {
+  __typename?: 'GithubRepo';
+  defaultBranch: Scalars['String']['output'];
+  description?: Maybe<Scalars['String']['output']>;
+  isPrivate: Scalars['Boolean']['output'];
+  nameWithOwner: Scalars['String']['output'];
+  url: Scalars['String']['output'];
+};
+
 export type Mutation = {
   __typename?: 'Mutation';
   cancelTask: TaskPayload;
@@ -206,6 +215,7 @@ export type Query = {
   claudeAuthStatus: ClaudeAuthStatus;
   dashboardStats: DashboardStats;
   githubAuthStatus: GithubAuthStatus;
+  githubRepositories: Array<GithubRepo>;
   pipelineStatus?: Maybe<PipelineStatus>;
   repositories: Array<Repository>;
   repository?: Maybe<Repository>;
@@ -458,6 +468,7 @@ export type ResolversTypes = ResolversObject<{
   GithubAuthStatus: ResolverTypeWrapper<GithubAuthStatus>;
   GithubDeviceCode: ResolverTypeWrapper<GithubDeviceCode>;
   GithubLoginResult: ResolverTypeWrapper<GithubLoginResult>;
+  GithubRepo: ResolverTypeWrapper<GithubRepo>;
   ID: ResolverTypeWrapper<Scalars['ID']['output']>;
   Int: ResolverTypeWrapper<Scalars['Int']['output']>;
   JSON: ResolverTypeWrapper<Scalars['JSON']['output']>;
@@ -495,6 +506,7 @@ export type ResolversParentTypes = ResolversObject<{
   GithubAuthStatus: GithubAuthStatus;
   GithubDeviceCode: GithubDeviceCode;
   GithubLoginResult: GithubLoginResult;
+  GithubRepo: GithubRepo;
   ID: Scalars['ID']['output'];
   Int: Scalars['Int']['output'];
   JSON: Scalars['JSON']['output'];
@@ -606,6 +618,15 @@ export type GithubLoginResultResolvers<ContextType = Context, ParentType extends
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
 
+export type GithubRepoResolvers<ContextType = Context, ParentType extends ResolversParentTypes['GithubRepo'] = ResolversParentTypes['GithubRepo']> = ResolversObject<{
+  defaultBranch?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  description?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  isPrivate?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
+  nameWithOwner?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  url?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
 export interface JsonScalarConfig extends GraphQLScalarTypeConfig<ResolversTypes['JSON'], any> {
   name: 'JSON';
 }
@@ -643,6 +664,7 @@ export type QueryResolvers<ContextType = Context, ParentType extends ResolversPa
   claudeAuthStatus?: Resolver<ResolversTypes['ClaudeAuthStatus'], ParentType, ContextType>;
   dashboardStats?: Resolver<ResolversTypes['DashboardStats'], ParentType, ContextType>;
   githubAuthStatus?: Resolver<ResolversTypes['GithubAuthStatus'], ParentType, ContextType>;
+  githubRepositories?: Resolver<Array<ResolversTypes['GithubRepo']>, ParentType, ContextType>;
   pipelineStatus?: Resolver<Maybe<ResolversTypes['PipelineStatus']>, ParentType, ContextType, RequireFields<QueryPipelineStatusArgs, 'taskId'>>;
   repositories?: Resolver<Array<ResolversTypes['Repository']>, ParentType, ContextType>;
   repository?: Resolver<Maybe<ResolversTypes['Repository']>, ParentType, ContextType, RequireFields<QueryRepositoryArgs, 'name'>>;
@@ -758,6 +780,7 @@ export type Resolvers<ContextType = Context> = ResolversObject<{
   GithubAuthStatus?: GithubAuthStatusResolvers<ContextType>;
   GithubDeviceCode?: GithubDeviceCodeResolvers<ContextType>;
   GithubLoginResult?: GithubLoginResultResolvers<ContextType>;
+  GithubRepo?: GithubRepoResolvers<ContextType>;
   JSON?: GraphQLScalarType;
   Mutation?: MutationResolvers<ContextType>;
   PipelineStatus?: PipelineStatusResolvers<ContextType>;
