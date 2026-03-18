@@ -38,11 +38,11 @@ spec:
 
   repositories:
     - name: quantvise.com
-      url: git@github.com:borissuska/quantvise.com.git
+      url: https://github.com/borissuska/quantvise.com.git
       branch: main
       cloneDir: /home/agent/repos/quantvise.com
       pollers: [github-tasks, github-source]
-      auth: ssh
+      auth: token
       ports:
         web: 3000
         graphql: 8000
@@ -79,7 +79,7 @@ spec:
           - type: pull_request
             states: [open]
         triggers:
-          pr_opened: [review, test]
+          pr_opened: [review]
           pr_updated: [review]
 
     - name: external-triggers
@@ -116,6 +116,7 @@ spec:
         events: [pr_opened, pr_updated]
       stages:
         - { category: review, required: true }
+        - { category: implementation, required: true }
         - { category: test, required: true }
 
   health:
@@ -125,5 +126,5 @@ spec:
     issueNumber: 1
 
   secrets:
-    githubTokenFile: /home/agent/.github-token
+    githubTokenFile: /home/agent/.ssh/github-token
     anthropicKeyFile: /home/agent/.anthropic-key

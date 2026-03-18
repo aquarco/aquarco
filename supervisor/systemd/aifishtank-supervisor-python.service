@@ -1,0 +1,51 @@
+[Unit]
+Description=AI Fishtank Agent Supervisor (Python)
+Documentation=https://github.com/owner/ai-fishtank
+After=aifishtank-stack.service docker.service network.target
+Wants=aifishtank-stack.service
+
+[Service]
+Type=simple
+User=agent
+Group=agent
+
+# Python entry point. Uses the installed package CLI.
+ExecStart=/home/agent/.venv/bin/aifishtank-supervisor run --config /home/agent/ai-fishtank/supervisor/config/supervisor.yaml
+
+# On SIGHUP the supervisor re-reads its config file without restarting.
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy: restart on unexpected failures, not on clean exit (code 0).
+Restart=on-failure
+RestartSec=10
+
+# Give the process up to 60 seconds to drain in-flight tasks on SIGTERM.
+TimeoutStopSec=60
+
+WorkingDirectory=/home/agent/ai-fishtank
+
+# Standard PATH for finding gh, git, psql, claude, python, etc.
+Environment=PATH=/home/agent/.venv/bin:/usr/local/bin:/usr/bin:/bin:/home/agent/.npm-global/bin
+Environment=PYTHONUNBUFFERED=1
+
+# Optional: load secrets from /etc/aifishtank/secrets.env if it exists.
+EnvironmentFile=-/etc/aifishtank/secrets.env
+
+# Resource constraints. Python uses slightly less memory than shell+subprocesses.
+MemoryMax=1G
+TasksMax=64
+
+# Security hardening.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/agent /var/log/aifishtank /var/lib/aifishtank /var/run/aifishtank /tmp
+
+# Logging: structlog writes JSON to stderr; journalctl -u aifishtank-supervisor-python follows.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aifishtank-supervisor-python
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,99 @@
+"""YAML configuration loading and validation."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from .exceptions import ConfigError, ConfigFileNotFoundError, ConfigValidationError
+from .logging import get_logger
+from .models import SupervisorConfig
+
+log = get_logger("config")
+
+EXPECTED_API_VERSION = "aifishtank.supervisor/v1"
+
+
+def load_config(config_file: str | Path) -> SupervisorConfig:
+    """Load and validate supervisor configuration from a YAML file."""
+    path = Path(config_file)
+    if not path.exists():
+        raise ConfigFileNotFoundError(f"Config file not found: {path}")
+
+    try:
+        raw = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as e:
+        raise ConfigError(f"Failed to parse YAML: {e}") from e
+
+    if not isinstance(raw, dict):
+        raise ConfigValidationError("Config file must contain a YAML mapping")
+
+    api_version = raw.get("apiVersion", "")
+    if api_version != EXPECTED_API_VERSION:
+        raise ConfigValidationError(
+            f"Expected apiVersion '{EXPECTED_API_VERSION}', got '{api_version}'"
+        )
+
+    try:
+        config = SupervisorConfig.model_validate(raw)
+    except Exception as e:
+        raise ConfigValidationError(f"Config validation failed: {e}") from e
+
+    _validate_config(config)
+    return config
+
+
+def _validate_config(config: SupervisorConfig) -> None:
+    """Run additional validation beyond Pydantic field types."""
+    if not config.spec.database.url:
+        raise ConfigValidationError("Database URL must not be empty")
+
+    if not config.spec.repositories:
+        log.warning("No repositories configured")
+
+
+def load_secrets(config: SupervisorConfig) -> dict[str, str]:
+    """Load secret values from files referenced in config."""
+    secrets: dict[str, str] = {}
+
+    github_token_path = Path(config.spec.secrets.github_token_file)
+    if github_token_path.exists():
+        secrets["github_token"] = github_token_path.read_text().strip()
+    else:
+        log.warning("github_token_file_missing", path=str(github_token_path))
+
+    anthropic_key_path = Path(config.spec.secrets.anthropic_key_file)
+    if anthropic_key_path.exists():
+        secrets["anthropic_api_key"] = anthropic_key_path.read_text().strip()
+    else:
+        log.warning("anthropic_key_file_missing", path=str(anthropic_key_path))
+
+    return secrets
+
+
+def get_poller_config(config: SupervisorConfig, poller_name: str) -> dict[str, Any] | None:
+    """Get configuration for a named poller."""
+    for poller in config.spec.pollers:
+        if poller.name == poller_name:
+            return poller.config
+    return None
+
+
+def get_repository_config(config: SupervisorConfig, repo_name: str) -> dict[str, Any] | None:
+    """Get configuration for a named repository."""
+    for repo in config.spec.repositories:
+        if repo.name == repo_name:
+            return repo.model_dump()
+    return None
+
+
+def get_pipeline_config(
+    config: SupervisorConfig, pipeline_name: str,
+) -> list[dict[str, Any]] | None:
+    """Get stage configs for a named pipeline."""
+    for pipeline in config.spec.pipelines:
+        if pipeline.name == pipeline_name:
+            return [s.model_dump() for s in pipeline.stages]
+    return None

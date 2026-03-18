@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aifishtank-supervisor"
+version = "1.0.0"
+requires-python = ">=3.10"
+description = "AI Fishtank supervisor - manages autonomous AI agent pipelines"
+dependencies = [
+    "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.1",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "structlog>=23.0",
+    "typer>=0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.1",
+    "mypy>=1.5",
+    "ruff>=0.1",
+]
+
+[project.scripts]
+aifishtank-supervisor = "aifishtank_supervisor.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aifishtank_supervisor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: marks tests requiring a real database",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
