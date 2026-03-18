@@ -112,6 +112,34 @@ def _parse_output(raw_output: str, task_id: str, stage_num: int) -> dict[str, An
     except json.JSONDecodeError:
         return {"_raw_output": raw_output, "_no_structured_output": True}
 
+    # Claude CLI --output-format json may return a list of message objects
+    # instead of a single dict. Normalise to a dict before proceeding.
+    if isinstance(parsed, list):
+        # Try to find the assistant result in the message list
+        result_text = ""
+        for msg in parsed:
+            if isinstance(msg, dict) and msg.get("type") == "result":
+                result_text = msg.get("result", "")
+                break
+        if not result_text:
+            # Fallback: concatenate all assistant text content
+            texts = []
+            for msg in parsed:
+                if isinstance(msg, dict) and msg.get("role") == "assistant":
+                    content = msg.get("content", [])
+                    if isinstance(content, list):
+                        for block in content:
+                            if isinstance(block, dict) and block.get("type") == "text":
+                                texts.append(block.get("text", ""))
+                    elif isinstance(content, str):
+                        texts.append(content)
+            result_text = "\n".join(texts)
+        if result_text:
+            structured = _extract_json(result_text)
+            if structured is not None:
+                return structured
+        return {"_raw_output": raw_output, "_parsed_messages": parsed}
+
     # Extract the result text from the JSON output
     result_text = parsed.get("result", "")
     if not result_text:
