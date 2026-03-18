@@ -29,6 +29,20 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get upgrade -y -qq
 
+# ─── 1b. DNS — use public resolvers so Docker containers can reach the internet
+#     VirtualBox NAT DNS (192.168.12.1) is unreliable; configure systemd-resolved
+#     to use Google and Cloudflare DNS directly.
+
+log "Configuring DNS resolvers..."
+mkdir -p /etc/systemd/resolved.conf.d
+cat > /etc/systemd/resolved.conf.d/public-dns.conf <<'DNS'
+[Resolve]
+DNS=8.8.8.8 1.1.1.1
+FallbackDNS=8.8.4.4 1.0.0.1
+DNS
+
+systemctl restart systemd-resolved
+
 # ─── 2. Core packages (without Docker — added in step 2b) ────────────────────
 
 log "Installing core packages..."
