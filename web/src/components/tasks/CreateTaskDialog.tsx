@@ -19,13 +19,10 @@ import Typography from '@mui/material/Typography'
 import Box from '@mui/material/Box'
 import { CREATE_TASK } from '@/lib/graphql/queries'
 
-const TASK_CATEGORIES = [
-  { value: 'ANALYZE', label: 'Analyze' },
-  { value: 'REVIEW', label: 'Review' },
-  { value: 'IMPLEMENTATION', label: 'Implementation' },
-  { value: 'TEST', label: 'Test' },
-  { value: 'DESIGN', label: 'Design' },
-  { value: 'DOCS', label: 'Docs' },
+const PIPELINES = [
+  { value: 'feature-pipeline', label: 'Feature Pipeline' },
+  { value: 'bugfix-pipeline', label: 'Bugfix Pipeline' },
+  { value: 'pr-review-pipeline', label: 'PR Review Pipeline' },
 ] as const
 
 interface Repository {
@@ -34,16 +31,16 @@ interface Repository {
 
 interface CreateTaskFormState {
   title: string
-  category: string
   repository: string
+  pipeline: string
   priority: number
   initialContext: string
 }
 
 const EMPTY_FORM: CreateTaskFormState = {
   title: '',
-  category: 'ANALYZE',
   repository: '',
+  pipeline: 'feature-pipeline',
   priority: 5,
   initialContext: '',
 }
@@ -135,9 +132,9 @@ export function CreateTaskDialog({
       variables: {
         input: {
           title: form.title.trim(),
-          category: form.category,
           repository: form.repository,
           source: 'web-ui',
+          pipeline: form.pipeline,
           priority: form.priority,
           initialContext,
         },
@@ -175,22 +172,6 @@ export function CreateTaskDialog({
           />
 
           <FormControl fullWidth required>
-            <InputLabel>Category</InputLabel>
-            <Select
-              value={form.category}
-              label="Category"
-              onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-              data-testid="task-form-category"
-            >
-              {TASK_CATEGORIES.map((cat) => (
-                <MenuItem key={cat.value} value={cat.value}>
-                  {cat.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <FormControl fullWidth required>
             <InputLabel>Repository</InputLabel>
             <Select
               value={form.repository}
@@ -209,6 +190,22 @@ export function CreateTaskDialog({
                   </MenuItem>
                 ))
               )}
+            </Select>
+          </FormControl>
+
+          <FormControl fullWidth required>
+            <InputLabel>Pipeline</InputLabel>
+            <Select
+              value={form.pipeline}
+              label="Pipeline"
+              onChange={(e) => setForm((f) => ({ ...f, pipeline: e.target.value }))}
+              data-testid="task-form-pipeline"
+            >
+              {PIPELINES.map((p) => (
+                <MenuItem key={p.value} value={p.value}>
+                  {p.label}
+                </MenuItem>
+              ))}
             </Select>
           </FormControl>
 

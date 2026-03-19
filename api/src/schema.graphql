@@ -3,7 +3,7 @@ scalar JSON
 
 type Query {
   # Tasks
-  tasks(status: TaskStatus, category: TaskCategory, repository: String, limit: Int, offset: Int): TaskConnection!
+  tasks(status: TaskStatus, repository: String, limit: Int, offset: Int): TaskConnection!
   task(id: ID!): Task
 
   # Repositories
@@ -66,12 +66,11 @@ type Subscription {
 type Task {
   id: ID!
   title: String!
-  category: TaskCategory!
   status: TaskStatus!
   priority: Int!
   source: String!
   sourceRef: String
-  pipeline: String
+  pipeline: String!
   repository: Repository!
   initialContext: JSON
   createdAt: DateTime!
@@ -90,7 +89,7 @@ type Stage {
   id: ID!
   taskId: ID!
   stageNumber: Int!
-  category: TaskCategory!
+  category: String!
   agent: String
   agentVersion: String
   status: StageStatus!
@@ -157,12 +156,12 @@ type DashboardStats {
   blockedTasks: Int!
   activeAgents: Int!
   totalTokensToday: Int!
-  tasksByCategory: [CategoryCount!]!
+  tasksByPipeline: [PipelineCount!]!
   tasksByRepository: [RepositoryCount!]!
 }
 
-type CategoryCount {
-  category: TaskCategory!
+type PipelineCount {
+  pipeline: String!
   count: Int!
 }
 
@@ -197,7 +196,6 @@ type Error {
 
 input CreateTaskInput {
   title: String!
-  category: TaskCategory!
   repository: String!
   source: String!
   sourceRef: String
@@ -224,15 +222,6 @@ enum TaskStatus {
   FAILED
   TIMEOUT
   BLOCKED
-}
-
-enum TaskCategory {
-  REVIEW
-  IMPLEMENTATION
-  TEST
-  DESIGN
-  DOCS
-  ANALYZE
 }
 
 enum StageStatus {

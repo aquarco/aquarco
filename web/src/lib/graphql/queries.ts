@@ -13,8 +13,8 @@ export const DASHBOARD_STATS = gql`
       blockedTasks
       activeAgents
       totalTokensToday
-      tasksByCategory {
-        category
+      tasksByPipeline {
+        pipeline
         count
       }
       tasksByRepository {
@@ -32,20 +32,17 @@ export const GET_TASKS = gql`
     $limit: Int
     $offset: Int
     $status: TaskStatus
-    $category: TaskCategory
     $repository: String
   ) {
     tasks(
       limit: $limit
       offset: $offset
       status: $status
-      category: $category
       repository: $repository
     ) {
       nodes {
         id
         title
-        category
         status
         repository {
           name
@@ -65,7 +62,6 @@ export const GET_TASK = gql`
     task(id: $id) {
       id
       title
-      category
       status
       priority
       source
@@ -299,7 +295,7 @@ export const CREATE_TASK = gql`
         id
         title
         status
-        category
+        pipeline
         createdAt
       }
       errors {

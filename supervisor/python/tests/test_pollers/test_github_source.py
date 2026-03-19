@@ -119,7 +119,7 @@ async def test_process_pr_creates_task_for_pr_opened(sample_config: Any) -> None
 
     call_kwargs = mock_tq.create_task.await_args.kwargs
     assert call_kwargs["task_id"] == "github-pr-test-repo-7-review"
-    assert call_kwargs["category"] == "review"
+    assert call_kwargs["pipeline"] == "review"
     assert call_kwargs["source"] == "github-prs"
     assert call_kwargs["source_ref"] == "7"
 
@@ -306,7 +306,7 @@ async def test_poll_commits_creates_task_for_new_commit(
     assert result == 1
     call_kwargs = mock_tq.create_task.await_args.kwargs
     assert call_kwargs["task_id"] == "github-commit-test-repo-abc123def456"
-    assert call_kwargs["category"] == "review"
+    assert call_kwargs["pipeline"] == "pr-review-pipeline"
     assert call_kwargs["source"] == "github-commits"
 
 

@@ -303,41 +303,61 @@ async def test_execute_pipeline_unknown_pipeline_raises(sample_pipelines: Any) -
 
 
 @pytest.mark.asyncio
-async def test_execute_pipeline_no_pipeline_name_uses_task_category(
+async def test_execute_pipeline_no_pipeline_name_uses_task_pipeline(
     sample_pipelines: Any,
 ) -> None:
-    """When pipeline_name is empty, falls back to single-stage execution."""
+    """When pipeline_name is empty, reads pipeline from the task record."""
     mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_checkpoint = AsyncMock(return_value=None)
+    mock_tq.get_task_context = AsyncMock(return_value={})
+    mock_tq.get_open_validation_items = AsyncMock(return_value=[])
 
     mock_task = MagicMock()
-    mock_task.category = "review"
+    mock_task.pipeline = "feature-pipeline"
+    mock_task.title = "Review something"
+    mock_task.initial_context = {}
+    mock_task.source_ref = None
     mock_tq.get_task = AsyncMock(return_value=mock_task)
-    mock_tq.complete_task = AsyncMock()
-    mock_tq.record_stage_executing = AsyncMock()
-    mock_tq.record_stage_failed = AsyncMock()
-    mock_tq.store_stage_output = AsyncMock()
-    mock_tq.get_task_context = AsyncMock(return_value={})
 
     mock_registry = AsyncMock()
     mock_registry.select_agent = AsyncMock(return_value="review-agent")
-    mock_registry.increment_agent_instances = AsyncMock()
-    mock_registry.decrement_agent_instances = AsyncMock()
-    mock_registry.get_agent_prompt_file = MagicMock(return_value=MagicMock(exists=lambda: False))
+    mock_registry.get_agent_prompt_file = MagicMock(return_value="/p.md")
     mock_registry.get_agent_timeout = MagicMock(return_value=30)
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
+    mock_registry.get_agent_environment = MagicMock(return_value={})
+    # Sync methods
+    mock_registry.should_skip_planning = MagicMock(return_value=True)
+    mock_registry.get_agents_for_category = MagicMock(return_value=["review-agent"])
 
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
-    # _execute_agent calls execute_claude which raises AgentExecutionError (no prompt file)
-    # -> _execute_stage wraps it as StageError
-    # -> _execute_single_stage catches StageError and returns silently
-    await executor.execute_pipeline("", "task-001", {})
+    with patch(
+        "aifishtank_supervisor.pipeline.executor.execute_claude",
+        new_callable=AsyncMock,
+        return_value={"result": "ok"},
+    ), patch("aifishtank_supervisor.pipeline.executor.Path"), patch(
+        "aifishtank_supervisor.pipeline.executor._run_git",
+        new_callable=AsyncMock,
+        return_value="0",
+    ), patch(
+        "aifishtank_supervisor.pipeline.executor._git_checkout",
+        new_callable=AsyncMock,
+    ), patch(
+        "aifishtank_supervisor.pipeline.executor._auto_commit",
+        new_callable=AsyncMock,
+    ), patch(
+        "aifishtank_supervisor.pipeline.executor._get_ahead_count",
+        new_callable=AsyncMock,
+        return_value=0,
+    ):
+        await executor.execute_pipeline("", "task-001", {})
 
+    # Used task.pipeline = 'pr-review-pipeline' → runs full pipeline
     mock_tq.get_task.assert_awaited()
-    mock_registry.select_agent.assert_awaited_once_with("review")
+    mock_tq.complete_task.assert_awaited_once_with("task-001")
 
 
 # --- git helper module-level functions ---
@@ -534,69 +554,6 @@ async def test_execute_stage_failure_records_and_raises(sample_pipelines: Any) -
     mock_registry.decrement_agent_instances.assert_awaited_once()
 
 
-# --- _execute_single_stage ---
-
-
-@pytest.mark.asyncio
-async def test_execute_single_stage_success(sample_pipelines: Any) -> None:
-    """Successful single-stage completes the task."""
-    mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
-    mock_tq = AsyncMock(spec=TaskQueue)
-    mock_registry = AsyncMock()
-    mock_registry.select_agent = AsyncMock(return_value="review-agent")
-    mock_registry.get_agent_prompt_file = MagicMock(return_value="/prompts/r.md")
-    mock_registry.get_agent_timeout = MagicMock(return_value=30)
-    mock_registry.get_allowed_tools = MagicMock(return_value=[])
-    mock_registry.get_denied_tools = MagicMock(return_value=[])
-
-    task = MagicMock()
-    task.source_ref = None
-    task.title = "Review stuff"
-    mock_tq.get_task = AsyncMock(return_value=task)
-
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
-
-    with patch(
-        "aifishtank_supervisor.pipeline.executor.execute_claude",
-        new_callable=AsyncMock,
-        return_value={"summary": "looks good"},
-    ), patch("aifishtank_supervisor.pipeline.executor.Path"), patch(
-        "aifishtank_supervisor.pipeline.executor._run_git",
-        new_callable=AsyncMock,
-        return_value="",
-    ):
-        await executor._execute_single_stage("task-1", "review", {})
-
-    mock_tq.complete_task.assert_awaited_once_with("task-1")
-
-
-@pytest.mark.asyncio
-async def test_execute_single_stage_fails_task_on_stage_error(sample_pipelines: Any) -> None:
-    """StageError causes the task to be failed via fail_task."""
-    mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
-    mock_tq = AsyncMock(spec=TaskQueue)
-    mock_registry = AsyncMock()
-    mock_registry.select_agent = AsyncMock(return_value="agent")
-    mock_registry.get_agent_prompt_file = MagicMock(return_value="/p.md")
-    mock_registry.get_agent_timeout = MagicMock(return_value=30)
-    mock_registry.get_allowed_tools = MagicMock(return_value=[])
-    mock_registry.get_denied_tools = MagicMock(return_value=[])
-
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
-
-    with patch(
-        "aifishtank_supervisor.pipeline.executor.execute_claude",
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("boom"),
-    ):
-        await executor._execute_single_stage("task-1", "review", {})
-
-    mock_tq.complete_task.assert_not_called()
-    mock_tq.fail_task.assert_awaited_once()
-
-
 # --- execute_pipeline full flow ---
 
 
@@ -608,6 +565,7 @@ async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_checkpoint = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
+    mock_tq.get_open_validation_items = AsyncMock(return_value=[])
 
     task = MagicMock()
     task.title = "Add widget"
@@ -621,6 +579,10 @@ async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
     mock_registry.get_agent_timeout = MagicMock(return_value=30)
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
+    mock_registry.get_agent_environment = MagicMock(return_value={})
+    # Sync methods must use MagicMock, not AsyncMock
+    mock_registry.should_skip_planning = MagicMock(return_value=True)
+    mock_registry.get_agents_for_category = MagicMock(return_value=["impl-agent"])
 
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
@@ -657,11 +619,17 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_checkpoint = AsyncMock(return_value={"last_completed_stage": 0})
     mock_tq.get_task_context = AsyncMock(return_value={})
+    mock_tq.get_open_validation_items = AsyncMock(return_value=[])
 
     task = MagicMock()
     task.title = "Resume task"
     task.initial_context = {}
     task.source_ref = None
+    # Resuming requires planned_stages on the task
+    task.planned_stages = [
+        {"category": "analyze", "agents": ["agent"], "parallel": False, "validation": []},
+        {"category": "implementation", "agents": ["agent"], "parallel": False, "validation": []},
+    ]
     mock_tq.get_task = AsyncMock(return_value=task)
 
     mock_registry = AsyncMock()
@@ -670,6 +638,7 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
     mock_registry.get_agent_timeout = MagicMock(return_value=30)
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
+    mock_registry.get_agent_environment = MagicMock(return_value={})
 
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
@@ -694,8 +663,8 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
     ):
         await executor.execute_pipeline("feature-pipeline", "task-1", {})
 
-    # Should NOT call create_pending_stages since resuming
-    mock_tq.create_pending_stages.assert_not_awaited()
+    # Should NOT call create_planned_pending_stages since resuming
+    mock_tq.create_planned_pending_stages.assert_not_awaited()
     mock_tq.complete_task.assert_awaited_once()
 
 
@@ -707,6 +676,7 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_checkpoint = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
+    mock_tq.get_open_validation_items = AsyncMock(return_value=[])
 
     task = MagicMock()
     task.title = "Failing task"
@@ -719,6 +689,10 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
     mock_registry.get_agent_timeout = MagicMock(return_value=30)
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
+    mock_registry.get_agent_environment = MagicMock(return_value={})
+    # Sync methods
+    mock_registry.should_skip_planning = MagicMock(return_value=True)
+    mock_registry.get_agents_for_category = MagicMock(return_value=["agent"])
 
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
@@ -733,137 +707,11 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
     ), patch(
         "aifishtank_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,
-    ):
+    ), patch("aifishtank_supervisor.pipeline.executor.Path"):
         await executor.execute_pipeline("feature-pipeline", "task-1", {})
 
     mock_tq.fail_task.assert_awaited_once()
     mock_tq.complete_task.assert_not_called()
-
-
-# --- _maybe_create_single_stage_pr ---
-
-
-@pytest.mark.asyncio
-async def test_maybe_create_pr_no_changes_no_branch(sample_pipelines: Any) -> None:
-    """No changes and not on agent branch => no PR created."""
-    mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
-    mock_tq = AsyncMock(spec=TaskQueue)
-
-    task = MagicMock()
-    task.source_ref = None
-    mock_tq.get_task = AsyncMock(return_value=task)
-
-    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
-
-    with patch(
-        "aifishtank_supervisor.pipeline.executor._run_git",
-        new_callable=AsyncMock,
-        side_effect=["", "main"],  # status=clean, branch=main
-    ):
-        await executor._maybe_create_single_stage_pr("task-1", "implementation", {})
-
-
-@pytest.mark.asyncio
-async def test_maybe_create_pr_with_changes_creates_branch(
-    sample_pipelines: Any,
-) -> None:
-    """Changes on main branch => creates branch, commits, pushes, creates PR."""
-    mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(
-        side_effect=[
-            {"clone_dir": "/repos/test"},  # _resolve_clone_dir
-            {"branch": "main"},  # _get_repo_branch
-            {"url": "https://github.com/owner/repo.git"},  # _get_repo_slug
-        ]
-    )
-    mock_tq = AsyncMock(spec=TaskQueue)
-
-    task = MagicMock()
-    task.source_ref = None
-    task.title = "My feature"
-    mock_tq.get_task = AsyncMock(return_value=task)
-
-    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
-
-    git_responses = [
-        "M file.py",  # status --porcelain => dirty
-        "main",  # rev-parse --abbrev-ref HEAD => on main
-        "",  # checkout -b aifishtank/task-1
-        "aifishtank/task-1",  # rev-parse --abbrev-ref HEAD
-        "",  # push
-    ]
-
-    with patch(
-        "aifishtank_supervisor.pipeline.executor._run_git",
-        new_callable=AsyncMock,
-        side_effect=git_responses,
-    ), patch(
-        "aifishtank_supervisor.pipeline.executor._auto_commit",
-        new_callable=AsyncMock,
-    ), patch(
-        "aifishtank_supervisor.pipeline.executor._get_ahead_count",
-        new_callable=AsyncMock,
-        return_value=1,
-    ), patch(
-        "aifishtank_supervisor.pipeline.executor._run_cmd",
-        new_callable=AsyncMock,
-        return_value="",
-    ):
-        await executor._maybe_create_single_stage_pr(
-            "task-1", "implementation", {"summary": "done"}
-        )
-
-
-@pytest.mark.asyncio
-async def test_maybe_create_pr_review_posts_comment(sample_pipelines: Any) -> None:
-    """Review task with no changes posts comment to issue."""
-    mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(
-        side_effect=[
-            {"clone_dir": "/repos/test"},
-            {"url": "https://github.com/owner/repo.git"},
-        ]
-    )
-    mock_tq = AsyncMock(spec=TaskQueue)
-
-    task = MagicMock()
-    task.source_ref = "42"
-    mock_tq.get_task = AsyncMock(return_value=task)
-
-    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
-
-    with patch(
-        "aifishtank_supervisor.pipeline.executor._run_git",
-        new_callable=AsyncMock,
-        side_effect=["", "main"],  # clean, on main
-    ), patch(
-        "aifishtank_supervisor.pipeline.executor._run_cmd",
-        new_callable=AsyncMock,
-        return_value="",
-    ) as mock_cmd:
-        await executor._maybe_create_single_stage_pr(
-            "task-1", "review", {"summary": "Looks good"}
-        )
-
-    mock_cmd.assert_awaited_once()
-    call_args = mock_cmd.await_args[0]
-    assert "gh" in call_args
-    assert "comment" in call_args
-
-
-@pytest.mark.asyncio
-async def test_maybe_create_pr_clone_dir_not_found_returns(
-    sample_pipelines: Any,
-) -> None:
-    """If clone_dir not found, returns silently."""
-    mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value=None)
-    mock_tq = AsyncMock(spec=TaskQueue)
-
-    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
-
-    await executor._maybe_create_single_stage_pr("task-1", "review", {})
 
 
 @pytest.mark.asyncio
@@ -874,6 +722,7 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_checkpoint = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
+    mock_tq.get_open_validation_items = AsyncMock(return_value=[])
 
     task = MagicMock()
     task.title = "Optional stage task"
@@ -886,6 +735,10 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
     mock_registry.get_agent_timeout = MagicMock(return_value=30)
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
+    mock_registry.get_agent_environment = MagicMock(return_value={})
+    # Sync methods
+    mock_registry.should_skip_planning = MagicMock(return_value=True)
+    mock_registry.get_agents_for_category = MagicMock(return_value=["agent"])
 
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
@@ -895,23 +748,14 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
         {"category": "implementation", "required": True},
     ]
 
-    call_count = 0
-
-    async def mock_execute_stage(
-        category: str, task_id: str, context: Any,
-        previous_output: Any, stage_num: int,
-    ) -> dict[str, Any]:
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            raise StageError("optional stage exploded")
-        return {"summary": "ok", "_agent_name": "agent"}
-
     with patch(
         "aifishtank_supervisor.pipeline.executor.get_pipeline_config",
         return_value=optional_stages,
-    ), patch.object(
-        executor, "_execute_stage", side_effect=mock_execute_stage,
+    ), patch(
+        "aifishtank_supervisor.pipeline.executor.execute_claude",
+        new_callable=AsyncMock,
+    ) as mock_claude, patch(
+        "aifishtank_supervisor.pipeline.executor.Path",
     ), patch(
         "aifishtank_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
@@ -930,13 +774,18 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
         "aifishtank_supervisor.pipeline.executor._run_cmd",
         new_callable=AsyncMock,
     ):
+        # First call (analyze) fails, second call (implementation) succeeds
+        mock_claude.side_effect = [
+            RuntimeError("optional stage exploded"),
+            {"summary": "ok"},
+        ]
         await executor.execute_pipeline("feature-pipeline", "task-1", {})
 
     # Task should be completed (not failed)
     mock_tq.complete_task.assert_awaited_once()
     mock_tq.fail_task.assert_not_called()
     # Optional stage should be recorded as skipped
-    mock_tq.record_stage_skipped.assert_awaited_once()
+    mock_tq.record_stage_skipped.assert_awaited()
 
 
 @pytest.mark.asyncio

@@ -1,10 +1,12 @@
-"""Pipeline stage execution engine."""
+"""Pipeline stage execution engine with planning phase and iteration loops."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import re
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +15,7 @@ from ..config import get_pipeline_config
 from ..database import Database
 from ..exceptions import NoAvailableAgentError, PipelineError, StageError
 from ..logging import get_logger
-from ..models import Complexity, PipelineConfig
+from ..models import Complexity, PipelineConfig, TaskPhase
 from ..task_queue import TaskQueue
 from ..utils import run_cmd as _run_cmd
 from ..utils import run_git as _run_git
@@ -26,6 +28,9 @@ log = get_logger("pipeline")
 # Branch names from external sources (GitHub webhooks, DB) must match this pattern
 # before being passed to git subprocesses to prevent flag injection.
 _SAFE_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]*$")
+
+# Maximum number of iteration re-runs per stage to prevent infinite loops
+_MAX_ITERATIONS = 5
 
 
 class PipelineExecutor:
@@ -43,13 +48,21 @@ class PipelineExecutor:
         self._registry = registry
         self._pipelines = pipelines
 
+    # -----------------------------------------------------------------------
+    # Main entry point
+    # -----------------------------------------------------------------------
+
     async def execute_pipeline(
         self,
         pipeline_name: str,
         task_id: str,
         context: dict[str, Any],
     ) -> None:
-        """Execute a full pipeline for a task."""
+        """Execute a full pipeline for a task using three phases:
+        1. Trigger (already done by poller)
+        2. Planning — AI agent assigns agents to categories
+        3. Running — execute planned stages with iteration loops
+        """
         # Check for resume checkpoint
         checkpoint = await self._tq.get_checkpoint(task_id)
         start_stage = 0
@@ -57,70 +70,278 @@ class PipelineExecutor:
             start_stage = checkpoint["last_completed_stage"] + 1
             log.info("resuming_pipeline", task_id=task_id, from_stage=start_stage)
 
-        # Get pipeline stages from config
+        # Pipeline is required; task.pipeline has a default of 'feature-pipeline'.
         if not pipeline_name:
-            # Single-stage execution based on task category
             task = await self._tq.get_task(task_id)
             if not task:
                 raise PipelineError(f"Task {task_id} not found")
-            await self._execute_single_stage(task_id, task.category, context)
-            return
+            pipeline_name = task.pipeline
+            log.info(
+                "pipeline_from_task",
+                task_id=task_id,
+                pipeline=pipeline_name,
+            )
 
         stages = get_pipeline_config(self._pipelines, pipeline_name)
         if not stages:
             raise PipelineError(f"Pipeline '{pipeline_name}' not found in config")
 
-        stage_count = len(stages)
+        categories = [s["category"] for s in stages]
 
-        # Create all stage records on first run
+        # --- Phase 2: Planning (or fast-path) ---
         if start_stage == 0:
-            await self._tq.create_pending_stages(task_id, stages)
+            if self._registry.should_skip_planning(categories):
+                planned_stages = self._build_default_plan(stages)
+                log.info("planning_skipped_fast_path", task_id=task_id)
+            else:
+                await self._tq.update_task_phase(task_id, TaskPhase.PLANNING)
+                planned_stages = await self._execute_planning_phase(
+                    task_id, pipeline_name, stages, context
+                )
 
-        # Setup branch
+            await self._tq.store_planned_stages(task_id, planned_stages)
+            await self._tq.create_planned_pending_stages(task_id, planned_stages)
+        else:
+            # Resuming: load planned_stages from DB
+            task = await self._tq.get_task(task_id)
+            if not task or not task.planned_stages:
+                raise PipelineError(
+                    f"Cannot resume task {task_id}: no planned_stages found"
+                )
+            planned_stages = task.planned_stages
+
+        # --- Phase 3: Running with iteration loops ---
+        await self._tq.update_task_phase(task_id, TaskPhase.RUNNING)
         clone_dir = await self._resolve_clone_dir(task_id)
         branch_name = await self._setup_branch(task_id, context, clone_dir)
 
+        failed = await self._execute_running_phase(
+            task_id, planned_stages, stages, context, clone_dir, branch_name,
+            start_stage=start_stage,
+        )
+
+        if failed:
+            return
+
+        # Pipeline completed successfully
+        await self._tq.update_task_phase(task_id, TaskPhase.COMPLETED)
+        await self._create_pipeline_pr(task_id, branch_name, clone_dir, {})
+        await self._tq.complete_task(task_id)
+        await self._tq.delete_checkpoint(task_id)
+        log.info("pipeline_completed", task_id=task_id, pipeline=pipeline_name)
+
+    # -----------------------------------------------------------------------
+    # Phase 2: Planning
+    # -----------------------------------------------------------------------
+
+    def _build_default_plan(
+        self, stages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Fast path: each category has exactly one agent, no planning needed."""
+        planned: list[dict[str, Any]] = []
+        for stage_def in stages:
+            category = stage_def["category"]
+            agents = self._registry.get_agents_for_category(category)
+            planned.append({
+                "category": category,
+                "agents": agents[:1],
+                "parallel": False,
+                "validation": [],
+            })
+        return planned
+
+    async def _execute_planning_phase(
+        self,
+        task_id: str,
+        pipeline_name: str,
+        stages: list[dict[str, Any]],
+        context: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Run the planner agent to assign agents to pipeline categories."""
+        log.info("planning_phase_start", task_id=task_id, pipeline=pipeline_name)
+
+        agent_defs = await self._registry.get_all_agent_definitions_json()
+        categories = [s["category"] for s in stages]
+
+        planner_context = {
+            "task_id": task_id,
+            "pipeline_name": pipeline_name,
+            "pipeline_categories": categories,
+            "pipeline_stages": stages,
+            "task_context": context,
+            "available_agents": agent_defs,
+        }
+
+        # Create a planning stage at stage_number = -1
+        planning_stage_key = "-1:planning:planner-agent"
+        await self._tq.record_stage_executing(
+            task_id, -1, "planning", "planner-agent",
+            stage_key=planning_stage_key, iteration=1,
+        )
+
+        try:
+            output = await self._execute_agent(
+                "planner-agent", task_id, planner_context, {}, -1
+            )
+        except Exception as e:
+            await self._tq.record_stage_failed(
+                task_id, -1, str(e), stage_key=planning_stage_key,
+            )
+            raise PipelineError(f"Planning phase failed: {e}") from e
+
+        await self._tq.store_stage_output(
+            task_id, -1, "planning", "planner-agent", output,
+            stage_key=planning_stage_key, iteration=1,
+        )
+
+        planned_stages = output.get("planned_stages", [])
+        if not planned_stages:
+            raise PipelineError("Planner returned empty planned_stages")
+
+        # Validate: every required category has agents assigned
+        planned_categories = {p["category"] for p in planned_stages}
+        for stage_def in stages:
+            if stage_def.get("required", True):
+                cat = stage_def["category"]
+                if cat not in planned_categories:
+                    raise PipelineError(
+                        f"Planner did not assign agents for required category '{cat}'"
+                    )
+
+        log.info(
+            "planning_phase_complete",
+            task_id=task_id,
+            stages_planned=len(planned_stages),
+        )
+        return planned_stages
+
+    # -----------------------------------------------------------------------
+    # Phase 3: Running with iteration loops
+    # -----------------------------------------------------------------------
+
+    async def _execute_running_phase(
+        self,
+        task_id: str,
+        planned_stages: list[dict[str, Any]],
+        stage_defs: list[dict[str, Any]],
+        context: dict[str, Any],
+        clone_dir: str,
+        branch_name: str,
+        *,
+        start_stage: int = 0,
+    ) -> bool:
+        """Execute planned stages with validation-driven iteration loops.
+
+        Returns True if the pipeline failed and should not continue.
+        """
         previous_output: dict[str, Any] = {}
 
-        for stage_num in range(start_stage, stage_count):
-            stage_def = stages[stage_num]
-            category = stage_def["category"]
+        for stage_num, plan in enumerate(planned_stages):
+            if stage_num < start_stage:
+                continue
+
+            category = plan["category"]
+            agents = plan.get("agents", [])
+            parallel = plan.get("parallel", False)
+
+            # Find matching stage def for conditions/required
+            stage_def = (
+                stage_defs[stage_num] if stage_num < len(stage_defs) else {}
+            )
             required = stage_def.get("required", True)
             conditions = stage_def.get("conditions", [])
 
             # Check conditions
             if conditions and not check_conditions(conditions, previous_output):
                 log.info("stage_skipped_conditions", task_id=task_id, stage=stage_num)
-                await self._tq.record_stage_skipped(task_id, stage_num, category)
+                for agent_name in agents:
+                    sk = f"{stage_num}:{category}:{agent_name}"
+                    await self._tq.record_stage_skipped(
+                        task_id, stage_num, category, stage_key=sk,
+                    )
                 continue
 
             # Ensure we're on the right branch
             await _git_checkout(clone_dir, branch_name)
 
-            # Build context
-            task_context = await self._tq.get_task_context(task_id) or {}
-            accumulated = build_accumulated_context(task_context, stage_num, previous_output)
-
             try:
-                stage_output = await self._execute_stage(
-                    category, task_id, accumulated, previous_output, stage_num
-                )
+                if parallel and len(agents) > 1:
+                    stage_output = await self._execute_parallel_agents(
+                        task_id, stage_num, category, agents,
+                        context, previous_output, clone_dir, branch_name,
+                    )
+                else:
+                    # Sequential execution (single or multiple agents)
+                    stage_output = {}
+                    for agent_name in agents:
+                        task_context = await self._tq.get_task_context(task_id) or {}
+                        accumulated = build_accumulated_context(
+                            task_context, stage_num, previous_output,
+                        )
+                        out = await self._execute_planned_stage(
+                            task_id, stage_num, category, agent_name,
+                            accumulated, previous_output, iteration=1,
+                        )
+                        stage_output.update(out)
+
                 previous_output = stage_output
 
-                # Store output and checkpoint
-                agent_name = stage_output.get("_agent_name", "unknown")
-                await self._tq.store_stage_output(
-                    task_id, stage_num, category, agent_name, stage_output
-                )
-                await self._tq.checkpoint_pipeline(task_id, stage_num)
+                # Process validation items from agent output
+                for agent_name in agents:
+                    sk = f"{stage_num}:{category}:{agent_name}"
+                    await self._process_validation_items(task_id, sk, stage_output)
 
-                # Auto-commit any changes
+                # Iteration loop: re-run if open validation items target this category
+                current_iteration = 1
+                while await self._should_iterate(task_id, category, current_iteration):
+                    current_iteration += 1
+                    log.info(
+                        "iteration_rerun",
+                        task_id=task_id,
+                        stage=stage_num,
+                        category=category,
+                        iteration=current_iteration,
+                    )
+
+                    open_items = await self._tq.get_open_validation_items(
+                        task_id, category,
+                    )
+                    vi_in = [
+                        {"id": vi.id, "description": vi.description}
+                        for vi in open_items
+                    ]
+
+                    for agent_name in agents:
+                        sk = f"{stage_num}:{category}:{agent_name}"
+                        await self._tq.create_iteration_stage(
+                            task_id, stage_num, category, agent_name,
+                            current_iteration,
+                        )
+                        task_context = await self._tq.get_task_context(task_id) or {}
+                        accumulated = build_accumulated_context(
+                            task_context, stage_num, previous_output,
+                            validation_items=vi_in,
+                        )
+                        out = await self._execute_planned_stage(
+                            task_id, stage_num, category, agent_name,
+                            accumulated, previous_output,
+                            iteration=current_iteration,
+                            validation_items_in=vi_in,
+                        )
+                        stage_output.update(out)
+                        await self._process_validation_items(task_id, sk, out)
+
+                    previous_output = stage_output
+
+                # Checkpoint and auto-commit
+                await self._tq.checkpoint_pipeline(task_id, stage_num)
                 await _auto_commit(clone_dir, task_id, stage_num, category)
 
             except (StageError, NoAvailableAgentError) as e:
                 if required:
+                    await self._tq.update_task_phase(task_id, TaskPhase.FAILED)
                     await self._tq.fail_task(task_id, str(e))
-                    return
+                    return True
                 else:
                     log.warning(
                         "optional_stage_failed",
@@ -128,13 +349,229 @@ class PipelineExecutor:
                         stage=stage_num,
                         error=str(e),
                     )
-                    await self._tq.record_stage_skipped(task_id, stage_num, category)
+                    for agent_name in agents:
+                        sk = f"{stage_num}:{category}:{agent_name}"
+                        await self._tq.record_stage_skipped(
+                            task_id, stage_num, category, stage_key=sk,
+                        )
 
-        # Pipeline completed successfully
-        await self._create_pipeline_pr(task_id, branch_name, clone_dir, previous_output)
-        await self._tq.complete_task(task_id)
-        await self._tq.delete_checkpoint(task_id)
-        log.info("pipeline_completed", task_id=task_id, pipeline=pipeline_name)
+        return False
+
+    async def _execute_planned_stage(
+        self,
+        task_id: str,
+        stage_num: int,
+        category: str,
+        agent_name: str,
+        context: dict[str, Any],
+        previous_output: dict[str, Any],
+        *,
+        iteration: int = 1,
+        validation_items_in: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Execute a single planned stage with a specific agent."""
+        stage_key = f"{stage_num}:{category}:{agent_name}"
+
+        await self._tq.record_stage_executing(
+            task_id, stage_num, category, agent_name,
+            stage_key=stage_key, iteration=iteration,
+            input_context=context,
+        )
+        await self._registry.increment_agent_instances(agent_name)
+
+        try:
+            output = await self._execute_agent(
+                agent_name, task_id, context, previous_output, stage_num,
+            )
+            await self._tq.store_stage_output(
+                task_id, stage_num, category, agent_name, output,
+                stage_key=stage_key, iteration=iteration,
+                validation_items_in=validation_items_in,
+                validation_items_out=output.get("validation_items_new"),
+            )
+            return output
+        except StageError:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            await self._tq.record_stage_failed(
+                task_id, stage_num, str(e),
+                stage_key=stage_key, iteration=iteration,
+            )
+            raise StageError(
+                f"Stage {stage_num} ({category}/{agent_name}) failed: {e}"
+            ) from e
+        finally:
+            await self._registry.decrement_agent_instances(agent_name)
+
+    async def _execute_parallel_agents(
+        self,
+        task_id: str,
+        stage_num: int,
+        category: str,
+        agents: list[str],
+        context: dict[str, Any],
+        previous_output: dict[str, Any],
+        clone_dir: str,
+        branch_name: str,
+    ) -> dict[str, Any]:
+        """Run multiple agents in parallel using git worktrees."""
+        log.info(
+            "parallel_execution_start",
+            task_id=task_id,
+            stage=stage_num,
+            agents=agents,
+        )
+
+        worktree_dirs: list[str] = []
+        safe_task_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)
+
+        try:
+            # Create a worktree per agent
+            for agent_name in agents:
+                safe_agent = re.sub(r"[^a-zA-Z0-9._-]", "-", agent_name)
+                wt_dir = tempfile.mkdtemp(
+                    prefix=f"wt-{safe_task_id}-{safe_agent}-"
+                )
+                await _run_git(
+                    clone_dir, "worktree", "add", wt_dir, branch_name,
+                )
+                worktree_dirs.append(wt_dir)
+
+            # Run all agents in parallel
+            async def _run_in_worktree(
+                agent_name: str, wt_dir: str
+            ) -> dict[str, Any]:
+                task_context = await self._tq.get_task_context(task_id) or {}
+                accumulated = build_accumulated_context(
+                    task_context, stage_num, previous_output,
+                )
+                return await self._execute_planned_stage(
+                    task_id, stage_num, category, agent_name,
+                    accumulated, previous_output, iteration=1,
+                )
+
+            results = await asyncio.gather(
+                *[
+                    _run_in_worktree(agent, wt_dir)
+                    for agent, wt_dir in zip(agents, worktree_dirs)
+                ],
+                return_exceptions=True,
+            )
+
+            # Merge worktrees back
+            merged_output: dict[str, Any] = {}
+            for i, (agent_name, result) in enumerate(zip(agents, results)):
+                if isinstance(result, Exception):
+                    log.error(
+                        "parallel_agent_failed",
+                        agent=agent_name,
+                        error=str(result),
+                    )
+                    continue
+                merged_output[agent_name] = result
+                # Merge changes from worktree into main branch
+                wt_dir = worktree_dirs[i]
+                try:
+                    await _run_git(wt_dir, "add", "-A")
+                    status = await _run_git(wt_dir, "status", "--porcelain")
+                    if status.strip():
+                        await _run_git(
+                            wt_dir, "commit", "-m",
+                            f"chore(aifishtank): {category} by {agent_name} "
+                            f"for {task_id}",
+                        )
+                except Exception:
+                    log.warning(
+                        "worktree_commit_failed",
+                        agent=agent_name,
+                        worktree=wt_dir,
+                    )
+
+            # Merge all worktree branches back to main branch
+            await _git_checkout(clone_dir, branch_name)
+            for wt_dir in worktree_dirs:
+                try:
+                    wt_branch = await _run_git(
+                        wt_dir, "rev-parse", "--abbrev-ref", "HEAD",
+                    )
+                    wt_branch = wt_branch.strip()
+                    if wt_branch and wt_branch != branch_name:
+                        await _run_git(
+                            clone_dir, "merge", wt_branch,
+                            "--no-edit", check=False,
+                        )
+                except Exception:
+                    log.warning("worktree_merge_failed", worktree=wt_dir)
+
+            # Check if any agent actually failed
+            errors = [
+                r for r in results if isinstance(r, Exception)
+            ]
+            if errors and len(errors) == len(agents):
+                raise StageError(
+                    f"All parallel agents failed for stage {stage_num} "
+                    f"({category}): {errors[0]}"
+                )
+
+            return merged_output
+
+        finally:
+            # Clean up worktrees
+            for wt_dir in worktree_dirs:
+                try:
+                    await _run_git(clone_dir, "worktree", "remove", wt_dir, "--force")
+                except Exception:
+                    # Fallback: manual cleanup
+                    shutil.rmtree(wt_dir, ignore_errors=True)
+
+    # -----------------------------------------------------------------------
+    # Validation items
+    # -----------------------------------------------------------------------
+
+    async def _process_validation_items(
+        self,
+        task_id: str,
+        stage_key: str,
+        agent_output: dict[str, Any],
+    ) -> None:
+        """Extract and store validation items from agent output."""
+        # Resolve items the agent claims to have fixed
+        resolved_ids = agent_output.get("validation_items_resolved", [])
+        for item_id in resolved_ids:
+            if isinstance(item_id, int):
+                await self._tq.resolve_validation_item(item_id, stage_key)
+
+        # Add new validation items
+        new_items = agent_output.get("validation_items_new", [])
+        for item in new_items:
+            if isinstance(item, dict) and "category" in item and "description" in item:
+                await self._tq.add_validation_item(
+                    task_id, stage_key, item["category"], item["description"],
+                )
+
+    async def _should_iterate(
+        self,
+        task_id: str,
+        category: str,
+        current_iteration: int,
+    ) -> bool:
+        """Check if a stage should re-run based on open validation items."""
+        if current_iteration >= _MAX_ITERATIONS:
+            log.warning(
+                "max_iterations_reached",
+                task_id=task_id,
+                category=category,
+                max=_MAX_ITERATIONS,
+            )
+            return False
+        open_items = await self._tq.get_open_validation_items(task_id, category)
+        return len(open_items) > 0
+
+    # -----------------------------------------------------------------------
+    # Legacy: single-stage execution (no pipeline)
+    # -----------------------------------------------------------------------
 
     async def _execute_stage(
         self,
@@ -144,7 +581,7 @@ class PipelineExecutor:
         previous_output: dict[str, Any],
         stage_num: int,
     ) -> dict[str, Any]:
-        """Execute a single pipeline stage."""
+        """Execute a single pipeline stage (legacy path, dynamic agent selection)."""
         agent_name = await self._registry.select_agent(category)
         await self._tq.record_stage_executing(task_id, stage_num, category, agent_name)
         await self._registry.increment_agent_instances(agent_name)
@@ -171,11 +608,13 @@ class PipelineExecutor:
         context: dict[str, Any],
         previous_output: dict[str, Any],
         stage_num: int,
+        *,
+        work_dir: str | None = None,
     ) -> dict[str, Any]:
         """Invoke the Claude CLI for an agent."""
         prompt_file = self._registry.get_agent_prompt_file(agent_name)
         timeout_minutes = self._registry.get_agent_timeout(agent_name)
-        clone_dir = await self._resolve_clone_dir(task_id)
+        clone_dir = work_dir or await self._resolve_clone_dir(task_id)
 
         agent_context = {
             "task_id": task_id,
@@ -207,95 +646,9 @@ class PipelineExecutor:
 
         return output
 
-    async def _execute_single_stage(
-        self,
-        task_id: str,
-        category: str,
-        context: dict[str, Any],
-    ) -> None:
-        """Execute a task as a single stage (no pipeline)."""
-        try:
-            stage_output = await self._execute_stage(
-                category, task_id, context, {}, 0
-            )
-            agent_name = stage_output.get("_agent_name", "unknown")
-            await self._tq.store_stage_output(
-                task_id, 0, category, agent_name, stage_output
-            )
-            await self._maybe_create_single_stage_pr(
-                task_id, category, stage_output
-            )
-            await self._tq.complete_task(task_id)
-        except (StageError, NoAvailableAgentError) as e:
-            await self._tq.fail_task(task_id, str(e))
-
-    async def _maybe_create_single_stage_pr(
-        self,
-        task_id: str,
-        category: str,
-        stage_output: dict[str, Any],
-    ) -> None:
-        """Create a PR after single-stage execution if there are code changes."""
-        try:
-            clone_dir = await self._resolve_clone_dir(task_id)
-        except PipelineError:
-            return
-
-        task = await self._tq.get_task(task_id)
-        if not task:
-            return
-
-        # Check for uncommitted changes or agent-created branch
-        status = await _run_git(clone_dir, "status", "--porcelain")
-        branch = await _run_git(clone_dir, "rev-parse", "--abbrev-ref", "HEAD")
-
-        has_changes = bool(status.strip())
-        on_agent_branch = branch.startswith("aifishtank/")
-
-        if not has_changes and not on_agent_branch:
-            # No code changes — for review tasks, post output as comment
-            if category == "review" and task.source_ref:
-                repo_slug = await self._get_repo_slug(task_id)
-                if repo_slug:
-                    summary = stage_output.get("summary", "Review completed")
-                    if isinstance(summary, dict):
-                        summary = json.dumps(summary, indent=2)
-                    await _run_cmd(
-                        "gh", "issue", "comment", task.source_ref,
-                        "--repo", repo_slug,
-                        "--body", str(summary),
-                    )
-            return
-
-        # Create branch if needed
-        if has_changes and not on_agent_branch:
-            branch_name = f"aifishtank/{task_id}"
-            await _run_git(clone_dir, "checkout", "-b", branch_name)
-            on_agent_branch = True
-
-        # Commit, push, create PR
-        if has_changes:
-            await _auto_commit(clone_dir, task_id, 0, category)
-
-        if on_agent_branch:
-            current_branch = await _run_git(
-                clone_dir, "rev-parse", "--abbrev-ref", "HEAD"
-            )
-            base = await self._get_repo_branch(task_id)
-            ahead = await _get_ahead_count(clone_dir, current_branch, base)
-            if ahead > 0:
-                await _run_git(
-                    clone_dir, "push", "origin", current_branch, "--force-with-lease"
-                )
-                repo_slug = await self._get_repo_slug(task_id)
-                if repo_slug:
-                    await _run_cmd(
-                        "gh", "pr", "create",
-                        "--repo", repo_slug,
-                        "--head", current_branch,
-                        "--title", f"feat: {task.title}",
-                        "--body", f"Automated PR for task {task_id}",
-                    )
+    # -----------------------------------------------------------------------
+    # Repository / branch helpers
+    # -----------------------------------------------------------------------
 
     async def _resolve_clone_dir(self, task_id: str) -> str:
         """Get the clone directory for a task's repository."""
@@ -416,6 +769,11 @@ class PipelineExecutor:
         return url_to_slug(row["url"])
 
 
+# -----------------------------------------------------------------------
+# Free functions (conditions, git helpers)
+# -----------------------------------------------------------------------
+
+
 def check_conditions(
     conditions: list[str], previous_output: dict[str, Any]
 ) -> bool:
@@ -488,7 +846,7 @@ def _compare_complexity(actual: str, operator: str, expected: str) -> bool:
 
 async def _git_checkout(clone_dir: str, branch: str) -> None:
     """Checkout a branch in the clone directory."""
-    await _run_git(clone_dir, "checkout", "--", branch)
+    await _run_git(clone_dir, "checkout", branch)
 
 
 async def _auto_commit(

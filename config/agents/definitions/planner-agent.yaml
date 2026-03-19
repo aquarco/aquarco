@@ -1,0 +1,83 @@
+apiVersion: aifishtank.agents/v1
+kind: AgentDefinition
+metadata:
+  name: planner-agent
+  version: "1.0.0"
+  description: "Analyzes codebase and request to assign agents to pipeline categories"
+  labels:
+    team: platform
+    domain: planning
+
+spec:
+  categories:
+    - planning
+
+  # Priority 0 — runs before all other agents
+  priority: 0
+
+  promptFile: planner-agent.md
+
+  tools:
+    allowed:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+    denied:
+      - Write
+      - Edit
+
+  resources:
+    maxTokens: 100000
+    timeoutMinutes: 20
+    maxConcurrent: 2
+
+  environment:
+    AGENT_MODE: "planning"
+    STRICT_MODE: "true"
+
+  output:
+    format: json
+    mustInclude:
+      - planned_stages
+      - reasoning
+
+  outputSchema:
+    type: object
+    required:
+      - planned_stages
+      - reasoning
+    properties:
+      planned_stages:
+        type: array
+        description: "Ordered list of stage assignments"
+        items:
+          type: object
+          required:
+            - category
+            - agents
+            - parallel
+          properties:
+            category:
+              type: string
+              description: "Pipeline category name"
+            agents:
+              type: array
+              items:
+                type: string
+              description: "Agent names assigned to this category"
+            parallel:
+              type: boolean
+              description: "Whether agents in this category run in parallel"
+            validation:
+              type: array
+              items:
+                type: string
+              description: "Initial validation criteria for this category"
+      reasoning:
+        type: string
+        description: "Explanation of agent selection decisions"
+
+  healthCheck:
+    enabled: true
+    intervalSeconds: 300

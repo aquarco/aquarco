@@ -38,7 +38,6 @@ function makeCtx(pool: { query: jest.Mock }): Context {
 const baseTaskRow: Record<string, unknown> = {
   id: 'task-1',
   title: 'Add feature X',
-  category: 'implementation',
   status: 'pending',
   priority: 5,
   source: 'github-issue',
@@ -73,7 +72,6 @@ const baseRepoRow: Record<string, unknown> = {
 describe('Mutation.createTask', () => {
   const validInput = {
     title: 'Add feature X',
-    category: 'IMPLEMENTATION',
     repository: 'my-repo',
     source: 'github-issue',
     sourceRef: '99',
@@ -94,22 +92,7 @@ describe('Mutation.createTask', () => {
     expect(result.errors).toHaveLength(0)
     expect(result.task).not.toBeNull()
     expect(result.task!.id).toBe('task-1')
-    expect(result.task!.category).toBe('IMPLEMENTATION')
     expect(result.task!.status).toBe('PENDING')
-  })
-
-  it('should lowercase category when inserting', async () => {
-    const pool = mockPool([
-      { rows: [{ name: 'my-repo' }] },
-      { rows: [baseTaskRow] },
-    ])
-    const ctx = makeCtx(pool)
-
-    await Mutation.createTask(null, { input: validInput }, ctx)
-
-    // Second call is the INSERT — params[1] is the category value
-    const insertParams = pool.query.mock.calls[1][1] as unknown[]
-    expect(insertParams[1]).toBe('implementation')
   })
 
   it('should return error payload when repository does not exist', async () => {

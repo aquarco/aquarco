@@ -92,21 +92,22 @@ async def test_poll_invalid_yaml(
 
 
 @pytest.mark.asyncio
-async def test_poll_missing_category(
+async def test_poll_no_category_still_creates_task(
     poller: ExternalTriggersPoller, watch_dir: Path
 ) -> None:
+    """Category is no longer required on triggers; pipeline defaults to feature-pipeline."""
     trigger = {"title": "No category", "repository": "test-repo"}
     (watch_dir / "no-cat.yaml").write_text(yaml.dump(trigger))
 
     created = await poller.poll()
-    assert created == 0
+    assert created == 1
 
 
 @pytest.mark.asyncio
 async def test_poll_missing_title(
     poller: ExternalTriggersPoller, watch_dir: Path
 ) -> None:
-    trigger = {"category": "analyze", "repository": "test-repo"}
+    trigger = {"repository": "test-repo"}
     (watch_dir / "no-title.yaml").write_text(yaml.dump(trigger))
 
     created = await poller.poll()
@@ -117,23 +118,8 @@ async def test_poll_missing_title(
 async def test_poll_missing_repository(
     poller: ExternalTriggersPoller, watch_dir: Path
 ) -> None:
-    trigger = {"category": "analyze", "title": "Test"}
+    trigger = {"title": "Test"}
     (watch_dir / "no-repo.yaml").write_text(yaml.dump(trigger))
-
-    created = await poller.poll()
-    assert created == 0
-
-
-@pytest.mark.asyncio
-async def test_poll_invalid_category(
-    poller: ExternalTriggersPoller, watch_dir: Path
-) -> None:
-    trigger = {
-        "category": "invalid-cat",
-        "title": "Test",
-        "repository": "test-repo",
-    }
-    (watch_dir / "bad-cat.yaml").write_text(yaml.dump(trigger))
 
     created = await poller.poll()
     assert created == 0

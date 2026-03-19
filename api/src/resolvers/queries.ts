@@ -10,12 +10,11 @@ function mapTask(row: Record<string, unknown>) {
   return {
     id: row.id,
     title: row.title,
-    category: (row.category as string).toUpperCase(),
     status: (row.status as string).toUpperCase(),
     priority: row.priority,
     source: row.source,
     sourceRef: row.source_ref ?? null,
-    pipeline: row.pipeline ?? null,
+    pipeline: row.pipeline ?? 'feature-pipeline',
     // repository is resolved by the Task field resolver via DataLoader
     _repositoryName: row.repository,
     initialContext: row.initial_context ?? null,
@@ -35,7 +34,6 @@ export const Query = {
     _: unknown,
     args: {
       status?: string | null
-      category?: string | null
       repository?: string | null
       limit?: number | null
       offset?: number | null
@@ -49,10 +47,6 @@ export const Query = {
     if (args.status) {
       conditions.push(`status = $${idx++}`)
       params.push(toDbEnum(args.status))
-    }
-    if (args.category) {
-      conditions.push(`category = $${idx++}`)
-      params.push(toDbEnum(args.category))
     }
     if (args.repository) {
       conditions.push(`repository = $${idx++}`)
@@ -161,7 +155,7 @@ export const Query = {
   },
 
   async dashboardStats(_: unknown, __: unknown, ctx: Context) {
-    const [totals, byCat, byRepo, agents, tokens] = await Promise.all([
+    const [totals, byPipeline, byRepo, agents, tokens] = await Promise.all([
       ctx.pool.query<Record<string, unknown>>(`
         SELECT
           COUNT(*) FILTER (WHERE TRUE) AS total,
@@ -173,7 +167,7 @@ export const Query = {
         FROM tasks
       `),
       ctx.pool.query<Record<string, unknown>>(
-        'SELECT category, COUNT(*) AS count FROM tasks GROUP BY category'
+        `SELECT COALESCE(pipeline, 'feature-pipeline') AS pipeline, COUNT(*) AS count FROM tasks GROUP BY COALESCE(pipeline, 'feature-pipeline')`
       ),
       ctx.pool.query<Record<string, unknown>>(
         'SELECT repository, COUNT(*) AS count FROM tasks GROUP BY repository'
@@ -198,8 +192,8 @@ export const Query = {
       blockedTasks: parseInt(t.blocked as string, 10),
       activeAgents: parseInt(agents.rows[0].count, 10),
       totalTokensToday: parseInt(tokens.rows[0].total, 10),
-      tasksByCategory: byCat.rows.map((r) => ({
-        category: (r.category as string).toUpperCase(),
+      tasksByPipeline: byPipeline.rows.map((r) => ({
+        pipeline: r.pipeline as string,
         count: parseInt(r.count as string, 10),
       })),
       tasksByRepository: byRepo.rows.map((r) => ({

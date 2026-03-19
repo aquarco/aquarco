@@ -51,8 +51,8 @@ function StatCard({ label, value, color, loading }: StatCardProps) {
 interface TaskRow {
   id: string
   title: string
-  category: string
   status: string
+  pipeline: string
   repository: { name: string }
   createdAt: string
 }
@@ -109,13 +109,13 @@ export default function DashboardPage() {
         ))}
       </Grid>
 
-      {/* Tasks by Category + Tasks by Repository */}
+      {/* Tasks by Pipeline + Tasks by Repository */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} md={6}>
           <Card variant="outlined" sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-                Tasks by Category
+                Tasks by Pipeline
               </Typography>
               <Divider sx={{ mb: 1 }} />
               {statsLoading ? (
@@ -124,15 +124,15 @@ export default function DashboardPage() {
                     <Skeleton key={i} variant="text" />
                   ))}
                 </Stack>
-              ) : stats?.tasksByCategory?.length ? (
+              ) : stats?.tasksByPipeline?.length ? (
                 <Stack spacing={0.5}>
-                  {stats.tasksByCategory.map(
-                    (entry: { category: string; count: number }) => (
+                  {stats.tasksByPipeline.map(
+                    (entry: { pipeline: string; count: number }) => (
                       <Box
-                        key={entry.category}
+                        key={entry.pipeline}
                         sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5 }}
                       >
-                        <Typography variant="body2">{entry.category}</Typography>
+                        <Typography variant="body2">{entry.pipeline}</Typography>
                         <Typography variant="body2" fontWeight={600}>
                           {entry.count}
                         </Typography>
@@ -204,7 +204,7 @@ export default function DashboardPage() {
           <TableHead>
             <TableRow>
               <TableCell>Title</TableCell>
-              <TableCell>Category</TableCell>
+              <TableCell>Pipeline</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Repository</TableCell>
               <TableCell>Created</TableCell>
@@ -230,7 +230,7 @@ export default function DashboardPage() {
                     data-testid={`task-row-${task.id}`}
                   >
                     <TableCell>{task.title}</TableCell>
-                    <TableCell>{task.category}</TableCell>
+                    <TableCell>{task.pipeline}</TableCell>
                     <TableCell>
                       <StatusChip status={task.status} />
                     </TableCell>

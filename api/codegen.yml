@@ -20,13 +20,6 @@ generates:
           FAILED: failed
           TIMEOUT: timeout
           BLOCKED: blocked
-        TaskCategory:
-          REVIEW: review
-          IMPLEMENTATION: implementation
-          TEST: test
-          DESIGN: design
-          DOCS: docs
-          ANALYZE: analyze
         StageStatus:
           PENDING: pending
           EXECUTING: executing

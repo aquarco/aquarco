@@ -132,7 +132,6 @@ class GitHubSourcePoller(BasePoller):
             if await self._tq.create_task(
                 task_id=task_id,
                 title=f"Review commit: {subject[:80]}",
-                category="review",
                 source="github-commits",
                 source_ref=sha,
                 repository=repo_name,
@@ -157,19 +156,19 @@ class GitHubSourcePoller(BasePoller):
         if head_branch.startswith("aifishtank/"):
             return 0
 
-        categories = self._triggers.get(event_type, [])
-        if not categories:
+        pipelines = self._triggers.get(event_type, [])
+        if not pipelines:
             return 0
 
         number = pr.get("number")
         created = 0
 
-        for category in categories:
+        for pipeline in pipelines:
             if event_type == "pr_opened":
-                task_id = f"github-pr-{repo_name}-{number}-{category}"
+                task_id = f"github-pr-{repo_name}-{number}-{pipeline}"
             else:
                 ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M")
-                task_id = f"github-pr-{repo_name}-{number}-{category}-{ts}"
+                task_id = f"github-pr-{repo_name}-{number}-{pipeline}-{ts}"
 
             if await self._tq.task_exists(task_id):
                 continue
@@ -189,11 +188,10 @@ class GitHubSourcePoller(BasePoller):
             if await self._tq.create_task(
                 task_id=task_id,
                 title=f"PR #{number}: {pr.get('title', '')}",
-                category=category,
                 source="github-prs",
                 source_ref=str(number),
                 repository=repo_name,
-                pipeline="pr-review-pipeline",
+                pipeline=pipeline,
                 context=context,
             ):
                 created += 1

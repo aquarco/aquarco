@@ -20,7 +20,6 @@ import Select from '@mui/material/Select'
 import MenuItem from '@mui/material/MenuItem'
 import FormControl from '@mui/material/FormControl'
 import InputLabel from '@mui/material/InputLabel'
-import Chip from '@mui/material/Chip'
 import Button from '@mui/material/Button'
 import AddIcon from '@mui/icons-material/Add'
 import { GET_TASKS, GET_REPOSITORIES } from '@/lib/graphql/queries'
@@ -30,12 +29,10 @@ import { monoStyle } from '@/lib/theme'
 import { formatDate, formatElapsed } from '@/lib/format'
 
 const TASK_STATUSES = ['PENDING', 'QUEUED', 'EXECUTING', 'COMPLETED', 'FAILED', 'TIMEOUT', 'BLOCKED']
-const TASK_CATEGORIES = ['REVIEW', 'IMPLEMENTATION', 'TEST', 'DESIGN', 'DOCS', 'ANALYZE']
 
 interface Task {
   id: string
   title: string
-  category: string
   status: string
   repository: { name: string }
   createdAt: string
@@ -51,7 +48,6 @@ interface Repository {
 export default function TasksPage() {
   const router = useRouter()
   const [statusFilter, setStatusFilter] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('')
   const [repoFilter, setRepoFilter] = useState('')
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
@@ -66,7 +62,6 @@ export default function TasksPage() {
       limit: rowsPerPage,
       offset: page * rowsPerPage,
       status: statusFilter || undefined,
-      category: categoryFilter || undefined,
       repository: repoFilter || undefined,
     },
     pollInterval: 5000,
@@ -113,21 +108,6 @@ export default function TasksPage() {
           </Select>
         </FormControl>
 
-        <FormControl size="small" sx={{ minWidth: 160 }}>
-          <InputLabel>Category</InputLabel>
-          <Select
-            value={categoryFilter}
-            label="Category"
-            onChange={(e) => { setCategoryFilter(e.target.value); setPage(0) }}
-            data-testid="filter-category"
-          >
-            <MenuItem value="">All</MenuItem>
-            {TASK_CATEGORIES.map((c) => (
-              <MenuItem key={c} value={c}>{c}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
         <FormControl size="small" sx={{ minWidth: 180 }}>
           <InputLabel>Repository</InputLabel>
           <Select
@@ -156,7 +136,6 @@ export default function TasksPage() {
             <TableRow>
               <TableCell>ID</TableCell>
               <TableCell>Title</TableCell>
-              <TableCell>Category</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Repository</TableCell>
               <TableCell>Pipeline</TableCell>
@@ -168,7 +147,7 @@ export default function TasksPage() {
             {loading
               ? [...Array(rowsPerPage > 10 ? 10 : rowsPerPage)].map((_, i) => (
                   <TableRow key={i}>
-                    {[...Array(8)].map((_, j) => (
+                    {[...Array(7)].map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton variant="text" />
                       </TableCell>
@@ -189,9 +168,6 @@ export default function TasksPage() {
                       </Typography>
                     </TableCell>
                     <TableCell>{task.title}</TableCell>
-                    <TableCell>
-                      <Chip label={task.category} variant="outlined" size="small" />
-                    </TableCell>
                     <TableCell>
                       <StatusChip status={task.status} />
                     </TableCell>

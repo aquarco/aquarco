@@ -30,10 +30,6 @@ class GitHubTasksPoller(BasePoller):
         pipelines: list[PipelineConfig] | None = None,
     ) -> None:
         super().__init__(config, task_queue, db)
-        poller_cfg = self._get_poller_config()
-        categorization = poller_cfg.get("categorization", {})
-        self._label_mapping: dict[str, str] = categorization.get("labelMapping", {})
-        self._default_category: str = categorization.get("defaultCategory", "analyze")
         self._pipelines = pipelines or []
 
     async def poll(self) -> int:
@@ -82,7 +78,6 @@ class GitHubTasksPoller(BasePoller):
             return False
 
         labels = [lbl.get("name", "") for lbl in issue.get("labels", [])]
-        category = self._categorize(labels)
         pipeline = self._select_pipeline(labels)
 
         context = {
@@ -97,20 +92,12 @@ class GitHubTasksPoller(BasePoller):
         return await self._tq.create_task(
             task_id=task_id,
             title=issue.get("title", f"Issue #{number}"),
-            category=category,
             source="github-issues",
             source_ref=str(number),
             repository=repo_name,
             pipeline=pipeline,
             context=context,
         )
-
-    def _categorize(self, labels: list[str]) -> str:
-        """Map issue labels to a task category."""
-        for label in labels:
-            if label in self._label_mapping:
-                return self._label_mapping[label]
-        return self._default_category
 
     def _select_pipeline(self, labels: list[str]) -> str:
         """Select a pipeline based on issue labels."""

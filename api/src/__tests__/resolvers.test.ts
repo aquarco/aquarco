@@ -157,7 +157,6 @@ describe('Query.task', () => {
   const dbRow: Record<string, unknown> = {
     id: 'task-1',
     title: 'Fix bug',
-    category: 'implementation',
     status: 'pending',
     priority: 5,
     source: 'github-issue',
@@ -183,7 +182,6 @@ describe('Query.task', () => {
 
     expect(result).not.toBeNull()
     expect(result!.id).toBe('task-1')
-    expect(result!.category).toBe('IMPLEMENTATION')
     expect(result!.status).toBe('PENDING')
     expect(result!._repositoryName).toBe('my-repo')
   })
@@ -215,7 +213,6 @@ describe('Query.tasks', () => {
   const dbRow: Record<string, unknown> = {
     id: 'task-1',
     title: 'Fix bug',
-    category: 'implementation',
     status: 'pending',
     priority: 5,
     source: 'github-issue',
@@ -262,20 +259,6 @@ describe('Query.tasks', () => {
     expect(pool.query.mock.calls[0][1]).toContain('pending')
   })
 
-  it('should apply category filter when provided', async () => {
-    const pool = mockPool([
-      { rows: [{ count: '0' }] },
-      { rows: [] },
-    ])
-    const ctx = makeCtx(pool)
-
-    await Query.tasks(null, { category: 'IMPLEMENTATION' }, ctx)
-
-    const countCallSql = pool.query.mock.calls[0][0] as string
-    expect(countCallSql).toContain('category = $1')
-    expect(pool.query.mock.calls[0][1]).toContain('implementation')
-  })
-
   it('should apply repository filter when provided', async () => {
     const pool = mockPool([
       { rows: [{ count: '0' }] },
@@ -297,7 +280,7 @@ describe('Query.tasks', () => {
     ])
     const ctx = makeCtx(pool)
 
-    await Query.tasks(null, { status: 'PENDING', category: 'REVIEW' }, ctx)
+    await Query.tasks(null, { status: 'PENDING', repository: 'my-repo' }, ctx)
 
     const countCallSql = pool.query.mock.calls[0][0] as string
     expect(countCallSql).toContain('WHERE')
@@ -435,8 +418,8 @@ describe('Query.dashboardStats', () => {
           blocked: '0',
         }],
       },
-      // byCat
-      { rows: [{ category: 'implementation', count: '6' }, { category: 'review', count: '4' }] },
+      // byPipeline
+      { rows: [{ pipeline: 'feature-pipeline', count: '6' }, { pipeline: 'bugfix-pipeline', count: '4' }] },
       // byRepo
       { rows: [{ repository: 'my-repo', count: '10' }] },
       // agents
@@ -458,10 +441,10 @@ describe('Query.dashboardStats', () => {
     expect(result.totalTokensToday).toBe(15000)
   })
 
-  it('should uppercase category labels in tasksByCategory', async () => {
+  it('should return pipeline counts in tasksByPipeline', async () => {
     const pool = mockPool([
       { rows: [{ total: '2', pending: '1', executing: '0', completed: '1', failed: '0', blocked: '0' }] },
-      { rows: [{ category: 'review', count: '2' }] },
+      { rows: [{ pipeline: 'feature-pipeline', count: '2' }] },
       { rows: [] },
       { rows: [{ count: '0' }] },
       { rows: [{ total: '0' }] },
@@ -469,7 +452,8 @@ describe('Query.dashboardStats', () => {
     const ctx = makeCtx(pool)
 
     const result = await Query.dashboardStats(null, null, ctx)
-    expect(result.tasksByCategory[0].category).toBe('REVIEW')
+    expect(result.tasksByPipeline[0].pipeline).toBe('feature-pipeline')
+    expect(result.tasksByPipeline[0].count).toBe(2)
   })
 })
 

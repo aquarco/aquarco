@@ -191,3 +191,62 @@ class AgentRegistry:
         resources: dict[str, Any] = spec.get("resources", {})
         max_conc: int = resources.get("maxConcurrent", 1)
         return max_conc
+
+    async def get_all_agent_definitions_json(self) -> list[dict[str, Any]]:
+        """Return all active agent definitions as serializable dicts.
+
+        Tries the database first (agent_definitions table), falls back to
+        in-memory registry loaded from YAML files.
+        """
+        try:
+            rows = await self._db.fetch_all(
+                """
+                SELECT name, version, description, spec
+                FROM agent_definitions
+                WHERE is_active = TRUE
+                ORDER BY name
+                """
+            )
+            if rows:
+                result: list[dict[str, Any]] = []
+                for row in rows:
+                    spec = row["spec"] if isinstance(row["spec"], dict) else json.loads(row["spec"])
+                    result.append({
+                        "name": row["name"],
+                        "version": row["version"],
+                        "description": row["description"],
+                        "categories": spec.get("categories", []),
+                        "conditions": spec.get("conditions", {}),
+                        "resources": spec.get("resources", {}),
+                        "outputSchema": spec.get("outputSchema", {}),
+                        "priority": spec.get("priority", 50),
+                    })
+                return result
+        except Exception:
+            log.debug("agent_definitions_db_fallback", reason="DB query failed, using in-memory")
+
+        # Fallback: in-memory registry
+        return [
+            {
+                "name": name,
+                "version": spec.get("version", "0.0.0"),
+                "description": spec.get("description", ""),
+                "categories": spec.get("categories", []),
+                "conditions": spec.get("conditions", {}),
+                "resources": spec.get("resources", {}),
+                "outputSchema": spec.get("outputSchema", {}),
+                "priority": spec.get("priority", 50),
+            }
+            for name, spec in self._agents.items()
+        ]
+
+    def should_skip_planning(self, categories: list[str]) -> bool:
+        """Return True if every category has exactly one registered agent.
+
+        Fast path: no decision needed when there's only one option per category.
+        """
+        for category in categories:
+            agents = self.get_agents_for_category(category)
+            if len(agents) != 1:
+                return False
+        return True

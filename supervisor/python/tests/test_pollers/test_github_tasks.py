@@ -36,19 +36,6 @@ def test_url_to_slug_invalid() -> None:
     assert _url_to_slug("") is None
 
 
-def test_categorize(
-    sample_config: SupervisorConfig, sample_pipelines: list[PipelineConfig],
-) -> None:
-    tq = AsyncMock(spec=TaskQueue)
-    db = AsyncMock(spec=Database)
-    poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
-
-    assert poller._categorize(["bug"]) == "implementation"
-    assert poller._categorize(["feature"]) == "analyze"
-    assert poller._categorize(["unknown-label"]) == "analyze"
-    assert poller._categorize([]) == "analyze"
-
-
 def test_select_pipeline(
     sample_config: SupervisorConfig, sample_pipelines: list[PipelineConfig],
 ) -> None:
@@ -84,7 +71,6 @@ async def test_process_issue_creates_task(
     tq.create_task.assert_called_once()
     call_kwargs = tq.create_task.call_args[1]
     assert call_kwargs["task_id"] == "github-issue-my-repo-42"
-    assert call_kwargs["category"] == "implementation"  # bug -> implementation
     assert call_kwargs["pipeline"] == "bugfix-pipeline"
     assert call_kwargs["source"] == "github-issues"
 

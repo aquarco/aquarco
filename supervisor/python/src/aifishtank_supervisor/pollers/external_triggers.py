@@ -13,22 +13,11 @@ import yaml
 
 from ..database import Database
 from ..logging import get_logger
-from ..models import SupervisorConfig, TaskCategory
+from ..models import SupervisorConfig
 from ..task_queue import TaskQueue
 from .base import BasePoller
 
 log = get_logger("external-triggers")
-
-VALID_CATEGORIES = {c.value for c in TaskCategory}
-
-PIPELINE_FOR_CATEGORY = {
-    "analyze": "feature-pipeline",
-    "design": "feature-pipeline",
-    "implementation": "feature-pipeline",
-    "docs": "feature-pipeline",
-    "test": "pr-review-pipeline",
-    "review": "pr-review-pipeline",
-}
 
 
 class ExternalTriggersPoller(BasePoller):
@@ -94,22 +83,15 @@ class ExternalTriggersPoller(BasePoller):
             return False
 
         # Validate required fields
-        category = data.get("category")
         title = data.get("title")
         repository = data.get("repository")
+        pipeline = data.get("pipeline", "feature-pipeline")
 
-        if not category:
-            self._move_to_failed(trigger_file, "missing-category")
-            return False
         if not title:
             self._move_to_failed(trigger_file, "missing-title")
             return False
         if not repository:
             self._move_to_failed(trigger_file, "missing-repository")
-            return False
-
-        if category not in VALID_CATEGORIES:
-            self._move_to_failed(trigger_file, f"invalid-category-{category}")
             return False
 
         # Validate repository exists in DB
@@ -137,13 +119,11 @@ class ExternalTriggersPoller(BasePoller):
         if "labels" in data:
             context["_labels"] = data["labels"]
 
-        pipeline = data.get("pipeline", PIPELINE_FOR_CATEGORY.get(category, "feature-pipeline"))
         source_ref = data.get("source_ref", "")
 
         created = await self._tq.create_task(
             task_id=task_id,
             title=title,
-            category=category,
             source="external-trigger",
             source_ref=source_ref,
             repository=repository,

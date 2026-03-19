@@ -35,13 +35,18 @@ class CloneStatus(str, enum.Enum):
     ERROR = "error"
 
 
-class TaskCategory(str, enum.Enum):
-    REVIEW = "review"
-    IMPLEMENTATION = "implementation"
-    TEST = "test"
-    DESIGN = "design"
-    DOCS = "docs"
-    ANALYZE = "analyze"
+class TaskPhase(str, enum.Enum):
+    TRIGGER = "trigger"
+    PLANNING = "planning"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ValidationItemStatus(str, enum.Enum):
+    OPEN = "open"
+    RESOLVED = "resolved"
+    WONT_FIX = "wont_fix"
 
 
 class Complexity(str, enum.Enum):
@@ -82,14 +87,15 @@ class Complexity(str, enum.Enum):
 class Task(BaseModel):
     id: str
     title: str
-    category: str
     status: TaskStatus = TaskStatus.PENDING
+    phase: TaskPhase = TaskPhase.TRIGGER
     priority: int = 50
     source: str | None = ""
     source_ref: str | None = ""
-    pipeline: str | None = ""
+    pipeline: str = "feature-pipeline"
     repository: str | None = ""
     initial_context: dict[str, Any] | None = Field(default_factory=dict)
+    planned_stages: list[dict[str, Any]] | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     started_at: datetime | None = None
@@ -106,7 +112,12 @@ class Stage(BaseModel):
     category: str
     agent: str | None = None
     status: StageStatus = StageStatus.PENDING
+    stage_key: str | None = None
+    iteration: int = 1
+    input: dict[str, Any] | None = None
     structured_output: dict[str, Any] | None = None
+    validation_items_in: list[dict[str, Any]] | None = None
+    validation_items_out: list[dict[str, Any]] | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error_message: str | None = None
@@ -145,6 +156,25 @@ class PipelineCheckpoint(BaseModel):
     last_completed_stage: int
     checkpoint_data: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
+
+
+class ValidationItem(BaseModel):
+    id: int | None = None
+    task_id: str
+    stage_key: str | None = None
+    category: str
+    description: str
+    status: ValidationItemStatus = ValidationItemStatus.OPEN
+    resolved_by: str | None = None
+    resolved_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class PlannedStageAssignment(BaseModel):
+    category: str
+    agents: list[str]
+    parallel: bool = False
+    validation: list[str] = Field(default_factory=list)
 
 
 # --- Configuration Models ---
@@ -221,17 +251,9 @@ class PollerSourceConfig(BaseModel):
     states: list[str] = Field(default_factory=list)
 
 
-class CategorizationConfig(BaseModel):
-    default_category: str = Field(default="analyze", alias="defaultCategory")
-    label_mapping: dict[str, str] = Field(default_factory=dict, alias="labelMapping")
-
-    model_config = {"populate_by_name": True}
-
-
 class GitHubTasksPollerConfig(BaseModel):
     repositories: str = "all"
     sources: list[PollerSourceConfig] = Field(default_factory=list)
-    categorization: CategorizationConfig = Field(default_factory=CategorizationConfig)
 
 
 class GitHubSourceWatchConfig(BaseModel):

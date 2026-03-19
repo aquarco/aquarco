@@ -28,12 +28,6 @@ export type AgentInstance = {
   totalTokensUsed: Scalars['Int']['output'];
 };
 
-export type CategoryCount = {
-  __typename?: 'CategoryCount';
-  category: TaskCategory;
-  count: Scalars['Int']['output'];
-};
-
 export type ClaudeAuthStatus = {
   __typename?: 'ClaudeAuthStatus';
   authenticated: Scalars['Boolean']['output'];
@@ -74,7 +68,6 @@ export type ContextEntry = {
 };
 
 export type CreateTaskInput = {
-  category: TaskCategory;
   initialContext?: InputMaybe<Scalars['JSON']['input']>;
   pipeline?: InputMaybe<Scalars['String']['input']>;
   priority?: InputMaybe<Scalars['Int']['input']>;
@@ -92,7 +85,7 @@ export type DashboardStats = {
   executingTasks: Scalars['Int']['output'];
   failedTasks: Scalars['Int']['output'];
   pendingTasks: Scalars['Int']['output'];
-  tasksByCategory: Array<CategoryCount>;
+  tasksByPipeline: Array<PipelineCount>;
   tasksByRepository: Array<RepositoryCount>;
   totalTasks: Scalars['Int']['output'];
   totalTokensToday: Scalars['Int']['output'];
@@ -199,6 +192,12 @@ export type MutationUpdateTaskStatusArgs = {
   status: TaskStatus;
 };
 
+export type PipelineCount = {
+  __typename?: 'PipelineCount';
+  count: Scalars['Int']['output'];
+  pipeline: Scalars['String']['output'];
+};
+
 export type PipelineStatus = {
   __typename?: 'PipelineStatus';
   currentStage: Scalars['Int']['output'];
@@ -240,7 +239,6 @@ export type QueryTaskArgs = {
 
 
 export type QueryTasksArgs = {
-  category?: InputMaybe<TaskCategory>;
   limit?: InputMaybe<Scalars['Int']['input']>;
   offset?: InputMaybe<Scalars['Int']['input']>;
   repository?: InputMaybe<Scalars['String']['input']>;
@@ -287,7 +285,7 @@ export type Stage = {
   __typename?: 'Stage';
   agent?: Maybe<Scalars['String']['output']>;
   agentVersion?: Maybe<Scalars['String']['output']>;
-  category: TaskCategory;
+  category: Scalars['String']['output'];
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   errorMessage?: Maybe<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
@@ -329,7 +327,6 @@ export type SubscriptionTaskUpdatedArgs = {
 export type Task = {
   __typename?: 'Task';
   assignedAgent?: Maybe<Scalars['String']['output']>;
-  category: TaskCategory;
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   context: Array<ContextEntry>;
   createdAt: Scalars['DateTime']['output'];
@@ -337,7 +334,7 @@ export type Task = {
   errorMessage?: Maybe<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
   initialContext?: Maybe<Scalars['JSON']['output']>;
-  pipeline?: Maybe<Scalars['String']['output']>;
+  pipeline: Scalars['String']['output'];
   priority: Scalars['Int']['output'];
   repository: Repository;
   retryCount: Scalars['Int']['output'];
@@ -349,15 +346,6 @@ export type Task = {
   title: Scalars['String']['output'];
   updatedAt: Scalars['DateTime']['output'];
 };
-
-export enum TaskCategory {
-  Analyze = 'analyze',
-  Design = 'design',
-  Docs = 'docs',
-  Implementation = 'implementation',
-  Review = 'review',
-  Test = 'test'
-}
 
 export type TaskConnection = {
   __typename?: 'TaskConnection';
@@ -455,7 +443,6 @@ export type DirectiveResolverFn<TResult = {}, TParent = {}, TContext = {}, TArgs
 export type ResolversTypes = ResolversObject<{
   AgentInstance: ResolverTypeWrapper<AgentInstance>;
   Boolean: ResolverTypeWrapper<Scalars['Boolean']['output']>;
-  CategoryCount: ResolverTypeWrapper<CategoryCount>;
   ClaudeAuthStatus: ResolverTypeWrapper<ClaudeAuthStatus>;
   ClaudeLoginResult: ResolverTypeWrapper<ClaudeLoginResult>;
   ClaudeLoginStart: ResolverTypeWrapper<ClaudeLoginStart>;
@@ -473,6 +460,7 @@ export type ResolversTypes = ResolversObject<{
   Int: ResolverTypeWrapper<Scalars['Int']['output']>;
   JSON: ResolverTypeWrapper<Scalars['JSON']['output']>;
   Mutation: ResolverTypeWrapper<{}>;
+  PipelineCount: ResolverTypeWrapper<PipelineCount>;
   PipelineStatus: ResolverTypeWrapper<PipelineStatus>;
   Query: ResolverTypeWrapper<{}>;
   RegisterRepositoryInput: RegisterRepositoryInput;
@@ -484,7 +472,6 @@ export type ResolversTypes = ResolversObject<{
   String: ResolverTypeWrapper<Scalars['String']['output']>;
   Subscription: ResolverTypeWrapper<{}>;
   Task: ResolverTypeWrapper<Task>;
-  TaskCategory: null;
   TaskConnection: ResolverTypeWrapper<TaskConnection>;
   TaskPayload: ResolverTypeWrapper<TaskPayload>;
   TaskStatus: null;
@@ -494,7 +481,6 @@ export type ResolversTypes = ResolversObject<{
 export type ResolversParentTypes = ResolversObject<{
   AgentInstance: AgentInstance;
   Boolean: Scalars['Boolean']['output'];
-  CategoryCount: CategoryCount;
   ClaudeAuthStatus: ClaudeAuthStatus;
   ClaudeLoginResult: ClaudeLoginResult;
   ClaudeLoginStart: ClaudeLoginStart;
@@ -511,6 +497,7 @@ export type ResolversParentTypes = ResolversObject<{
   Int: Scalars['Int']['output'];
   JSON: Scalars['JSON']['output'];
   Mutation: {};
+  PipelineCount: PipelineCount;
   PipelineStatus: PipelineStatus;
   Query: {};
   RegisterRepositoryInput: RegisterRepositoryInput;
@@ -531,12 +518,6 @@ export type AgentInstanceResolvers<ContextType = Context, ParentType extends Res
   lastExecutionAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   totalExecutions?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   totalTokensUsed?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
-  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
-}>;
-
-export type CategoryCountResolvers<ContextType = Context, ParentType extends ResolversParentTypes['CategoryCount'] = ResolversParentTypes['CategoryCount']> = ResolversObject<{
-  category?: Resolver<ResolversTypes['TaskCategory'], ParentType, ContextType>;
-  count?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
 
@@ -581,7 +562,7 @@ export type DashboardStatsResolvers<ContextType = Context, ParentType extends Re
   executingTasks?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   failedTasks?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   pendingTasks?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
-  tasksByCategory?: Resolver<Array<ResolversTypes['CategoryCount']>, ParentType, ContextType>;
+  tasksByPipeline?: Resolver<Array<ResolversTypes['PipelineCount']>, ParentType, ContextType>;
   tasksByRepository?: Resolver<Array<ResolversTypes['RepositoryCount']>, ParentType, ContextType>;
   totalTasks?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   totalTokensToday?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
@@ -649,6 +630,12 @@ export type MutationResolvers<ContextType = Context, ParentType extends Resolver
   updateTaskStatus?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationUpdateTaskStatusArgs, 'id' | 'status'>>;
 }>;
 
+export type PipelineCountResolvers<ContextType = Context, ParentType extends ResolversParentTypes['PipelineCount'] = ResolversParentTypes['PipelineCount']> = ResolversObject<{
+  count?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  pipeline?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
 export type PipelineStatusResolvers<ContextType = Context, ParentType extends ResolversParentTypes['PipelineStatus'] = ResolversParentTypes['PipelineStatus']> = ResolversObject<{
   currentStage?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   pipeline?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
@@ -703,7 +690,7 @@ export type RepositoryPayloadResolvers<ContextType = Context, ParentType extends
 export type StageResolvers<ContextType = Context, ParentType extends ResolversParentTypes['Stage'] = ResolversParentTypes['Stage']> = ResolversObject<{
   agent?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   agentVersion?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
-  category?: Resolver<ResolversTypes['TaskCategory'], ParentType, ContextType>;
+  category?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   completedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   errorMessage?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
@@ -728,7 +715,6 @@ export type SubscriptionResolvers<ContextType = Context, ParentType extends Reso
 
 export type TaskResolvers<ContextType = Context, ParentType extends ResolversParentTypes['Task'] = ResolversParentTypes['Task']> = ResolversObject<{
   assignedAgent?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
-  category?: Resolver<ResolversTypes['TaskCategory'], ParentType, ContextType>;
   completedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   context?: Resolver<Array<ResolversTypes['ContextEntry']>, ParentType, ContextType>;
   createdAt?: Resolver<ResolversTypes['DateTime'], ParentType, ContextType>;
@@ -736,7 +722,7 @@ export type TaskResolvers<ContextType = Context, ParentType extends ResolversPar
   errorMessage?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
   initialContext?: Resolver<Maybe<ResolversTypes['JSON']>, ParentType, ContextType>;
-  pipeline?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  pipeline?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   priority?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   repository?: Resolver<ResolversTypes['Repository'], ParentType, ContextType>;
   retryCount?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
@@ -749,8 +735,6 @@ export type TaskResolvers<ContextType = Context, ParentType extends ResolversPar
   updatedAt?: Resolver<ResolversTypes['DateTime'], ParentType, ContextType>;
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
-
-export type TaskCategoryResolvers = { ANALYZE: 'analyze', DESIGN: 'design', DOCS: 'docs', IMPLEMENTATION: 'implementation', REVIEW: 'review', TEST: 'test' };
 
 export type TaskConnectionResolvers<ContextType = Context, ParentType extends ResolversParentTypes['TaskConnection'] = ResolversParentTypes['TaskConnection']> = ResolversObject<{
   nodes?: Resolver<Array<ResolversTypes['Task']>, ParentType, ContextType>;
@@ -768,7 +752,6 @@ export type TaskStatusResolvers = { BLOCKED: 'blocked', COMPLETED: 'completed', 
 
 export type Resolvers<ContextType = Context> = ResolversObject<{
   AgentInstance?: AgentInstanceResolvers<ContextType>;
-  CategoryCount?: CategoryCountResolvers<ContextType>;
   ClaudeAuthStatus?: ClaudeAuthStatusResolvers<ContextType>;
   ClaudeLoginResult?: ClaudeLoginResultResolvers<ContextType>;
   ClaudeLoginStart?: ClaudeLoginStartResolvers<ContextType>;
@@ -783,6 +766,7 @@ export type Resolvers<ContextType = Context> = ResolversObject<{
   GithubRepo?: GithubRepoResolvers<ContextType>;
   JSON?: GraphQLScalarType;
   Mutation?: MutationResolvers<ContextType>;
+  PipelineCount?: PipelineCountResolvers<ContextType>;
   PipelineStatus?: PipelineStatusResolvers<ContextType>;
   Query?: QueryResolvers<ContextType>;
   Repository?: RepositoryResolvers<ContextType>;
@@ -792,7 +776,6 @@ export type Resolvers<ContextType = Context> = ResolversObject<{
   StageStatus?: StageStatusResolvers;
   Subscription?: SubscriptionResolvers<ContextType>;
   Task?: TaskResolvers<ContextType>;
-  TaskCategory?: TaskCategoryResolvers;
   TaskConnection?: TaskConnectionResolvers<ContextType>;
   TaskPayload?: TaskPayloadResolvers<ContextType>;
   TaskStatus?: TaskStatusResolvers;

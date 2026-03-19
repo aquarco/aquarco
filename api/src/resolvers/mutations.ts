@@ -11,12 +11,11 @@ function mapTask(row: Record<string, unknown>) {
   return {
     id: row.id,
     title: row.title,
-    category: (row.category as string).toUpperCase(),
     status: (row.status as string).toUpperCase(),
     priority: row.priority,
     source: row.source,
     sourceRef: row.source_ref ?? null,
-    pipeline: row.pipeline ?? null,
+    pipeline: row.pipeline ?? 'feature-pipeline',
     _repositoryName: row.repository,
     initialContext: row.initial_context ?? null,
     createdAt: row.created_at,
@@ -84,7 +83,6 @@ export const Mutation = {
     args: {
       input: {
         title: string
-        category: string
         repository: string
         source: string
         sourceRef?: string | null
@@ -110,17 +108,16 @@ export const Mutation = {
       const id = `${input.source}-${crypto.randomUUID()}`
       const result = await ctx.pool.query<Record<string, unknown>>(
         `INSERT INTO tasks
-           (id, title, category, repository, source, source_ref, pipeline, priority, initial_context, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
+           (id, title, repository, source, source_ref, pipeline, priority, initial_context, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
          RETURNING *`,
         [
           id,
           input.title,
-          toDbEnum(input.category),
           input.repository,
           input.source,
           input.sourceRef ?? null,
-          input.pipeline ?? null,
+          input.pipeline ?? 'feature-pipeline',
           input.priority ?? 5,
           input.initialContext ? JSON.stringify(input.initialContext) : null,
         ]

@@ -61,12 +61,11 @@ interface ContextEntry {
 interface Task {
   id: string
   title: string
-  category: string
   status: string
   priority: number
   source: string
   sourceRef: string | null
-  pipeline: string | null
+  pipeline: string
   repository: { name: string }
   createdAt: string
   updatedAt: string
@@ -205,10 +204,6 @@ export default function TaskDetailPage() {
         <CardContent>
           <Grid container spacing={2}>
             <Grid item xs={12} sm={6} md={3}>
-              <Typography variant="caption" color="text.secondary">Category</Typography>
-              <Typography variant="body2">{task.category}</Typography>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
               <Typography variant="caption" color="text.secondary">Source</Typography>
               <Typography variant="body2">{task.source}</Typography>
             </Grid>
@@ -218,7 +213,7 @@ export default function TaskDetailPage() {
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <Typography variant="caption" color="text.secondary">Pipeline</Typography>
-              <Typography variant="body2">{task.pipeline ?? '—'}</Typography>
+              <Typography variant="body2">{task.pipeline}</Typography>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <Typography variant="caption" color="text.secondary">Assigned Agent</Typography>

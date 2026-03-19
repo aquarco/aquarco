@@ -30,7 +30,6 @@ async def test_create_task_success(task_queue: TaskQueue, mock_db: AsyncMock) ->
     result = await task_queue.create_task(
         task_id="test-1",
         title="Test Task",
-        category="analyze",
         source="github-issues",
         source_ref="42",
         repository="test-repo",
@@ -45,7 +44,6 @@ async def test_create_task_success(task_queue: TaskQueue, mock_db: AsyncMock) ->
     params = call_args[0][1]
     assert params["id"] == "test-1"
     assert params["title"] == "Test Task"
-    assert params["category"] == "analyze"
     assert json.loads(params["context"]) == {"key": "value"}
 
 
@@ -58,11 +56,10 @@ async def test_create_task_already_exists(
     result = await task_queue.create_task(
         task_id="dup-1",
         title="Dup",
-        category="analyze",
         source="test",
         source_ref="",
         repository="repo",
-        pipeline="",
+        pipeline="feature-pipeline",
     )
 
     assert result is False
@@ -75,7 +72,6 @@ async def test_get_next_task_found(
     mock_db.fetch_one.return_value = {
         "id": "task-1",
         "title": "Next Task",
-        "category": "review",
         "pipeline": "pr-review-pipeline",
         "repository": "test-repo",
         "source": "github-prs",
@@ -328,7 +324,6 @@ async def test_get_task_found(
     mock_db.fetch_one.return_value = {
         "id": "task-99",
         "title": "Test",
-        "category": "analyze",
         "status": "pending",
         "priority": 50,
         "source": "github-issues",
