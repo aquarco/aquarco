@@ -560,7 +560,7 @@ class PipelineExecutor:
                     if status.strip():
                         await _run_git(
                             wt_dir, "commit", "-m",
-                            f"chore(aifishtank): {category} by {agent_name} "
+                            f"chore(aquarco): {category} by {agent_name} "
                             f"for {task_id}",
                         )
                 except Exception:
@@ -725,7 +725,7 @@ class PipelineExecutor:
 
         # Save output log (sanitize task_id to prevent path traversal)
         safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)
-        output_log = Path(f"/var/log/aifishtank/agent-output-{safe_id}-stage{stage_num}.json")
+        output_log = Path(f"/var/log/aquarco/agent-output-{safe_id}-stage{stage_num}.json")
         output_log.parent.mkdir(parents=True, exist_ok=True)
         output_log.write_text(json.dumps(output, indent=2))
 
@@ -771,7 +771,7 @@ class PipelineExecutor:
             raise PipelineError(f"Task {task_id} not found")
 
         slug = re.sub(r"[^a-z0-9]+", "-", task.title.lower()).strip("-")[:50]
-        branch_name = f"aifishtank/{task_id}/{slug}"
+        branch_name = f"aquarco/{task_id}/{slug}"
 
         # Use the repo's configured default branch
         base_branch = await self._get_repo_branch(task_id)
@@ -949,7 +949,7 @@ async def _auto_commit(
     await _run_git(clone_dir, "add", "-A")
     await _run_git(
         clone_dir, "commit", "-m",
-        f"chore(aifishtank): {category} stage {stage_num} for {task_id}",
+        f"chore(aquarco): {category} stage {stage_num} for {task_id}",
     )
 
 

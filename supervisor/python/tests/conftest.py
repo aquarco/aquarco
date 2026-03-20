@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from aifishtank_supervisor.config import load_config, load_pipelines
-from aifishtank_supervisor.models import PipelineConfig, SupervisorConfig
+from aquarco_supervisor.config import load_config, load_pipelines
+from aquarco_supervisor.models import PipelineConfig, SupervisorConfig
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -17,7 +17,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 def sample_config_path(tmp_path: Path) -> Path:
     """Create a minimal valid supervisor config file."""
     config = {
-        "apiVersion": "aifishtank.supervisor/v1",
+        "apiVersion": "aquarco.supervisor/v1",
         "metadata": {"name": "test-supervisor", "version": "1.0.0"},
         "spec": {
             "workdir": "/tmp/test",
@@ -88,7 +88,7 @@ def sample_config_path(tmp_path: Path) -> Path:
 
     # Write pipelines file
     pipelines = {
-        "apiVersion": "aifishtank.agents/v1",
+        "apiVersion": "aquarco.agents/v1",
         "kind": "PipelineDefinition",
         "pipelines": [
             {

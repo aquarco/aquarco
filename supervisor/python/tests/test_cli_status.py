@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aifishtank_supervisor.cli.status import (
+from aquarco_supervisor.cli.status import (
     _get_registry_summary,
     _get_supervisor_process_status,
     _render_human,
@@ -235,7 +235,7 @@ class TestRenderHuman:
     def test_runs_without_error_when_empty(self, capsys: pytest.CaptureFixture) -> None:
         self._call()
         out = capsys.readouterr().out
-        assert "AI Fishtank" in out
+        assert "Aquarco" in out
 
     def test_shows_supervisor_status(self, capsys: pytest.CaptureFixture) -> None:
         self._call()

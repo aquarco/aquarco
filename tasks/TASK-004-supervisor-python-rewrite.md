@@ -7,7 +7,7 @@
 
 ## Context
 
-The AI Fishtank supervisor system is currently implemented as approximately 2,500 lines of bash scripts distributed across 11 files in `supervisor/`. The shell implementation has accumulated significant technical debt and has caused multiple production issues:
+The Aquarco supervisor system is currently implemented as approximately 2,500 lines of bash scripts distributed across 11 files in `supervisor/`. The shell implementation has accumulated significant technical debt and has caused multiple production issues:
 
 ### Known Problems with Shell Implementation
 
@@ -85,7 +85,7 @@ Incrementally rewrite the supervisor system from shell scripts to Python while:
 supervisor/
   python/
     src/
-      aifishtank_supervisor/
+      aquarco_supervisor/
         __init__.py
         main.py                 # Entry point, signal handling
         config.py               # YAML config loading/validation
@@ -267,7 +267,7 @@ supervisor/
 ### Python Packages (pyproject.toml)
 ```toml
 [project]
-name = "aifishtank-supervisor"
+name = "aquarco-supervisor"
 version = "1.0.0"
 requires-python = ">=3.11"
 dependencies = [
@@ -358,7 +358,7 @@ dev = [
 - `discover-agents.sh` (448 LOC) — should rewrite; Python agent_registry already does this
 - `validate-agent.sh` (210 LOC) — should rewrite; could be --validate flag on Python registry
 - `repo-manager.sh` (378 LOC) — should rewrite; Docker Compose stack management
-- `aifishtank-status.sh` (357 LOC) — should rewrite; status reporting with DB queries
+- `aquarco-status.sh` (357 LOC) — should rewrite; status reporting with DB queries
 - `network-report.sh` (296 LOC) — keep as bash; system admin log parser
 - `manage-ports.sh` (278 LOC) — keep as bash; VBoxManage CLI wrapper
 
@@ -380,14 +380,14 @@ dev = [
 - `discover-agents.sh` (448 LOC) → `cli/agents.py` discover command
 - `validate-agent.sh` (210 LOC) → `cli/agents.py` validate command
 - `repo-manager.sh` (378 LOC) → `cli/repo_manager.py` (setup/start/stop/restart/status/logs/destroy/list/alloc)
-- `aifishtank-status.sh` (357 LOC) → `cli/status.py` status command
+- `aquarco-status.sh` (357 LOC) → `cli/status.py` status command
 - `claude-auth-helper.sh` (96 LOC) → `cli/auth_helper.py` auth-watch command
 
 **CLI registration in main.py**:
-- `aifishtank-supervisor agents discover/validate`
-- `aifishtank-supervisor repo setup/start/stop/restart/status/logs/destroy/list/alloc`
-- `aifishtank-supervisor status`
-- `aifishtank-supervisor auth-watch`
+- `aquarco-supervisor agents discover/validate`
+- `aquarco-supervisor repo setup/start/stop/restart/status/logs/destroy/list/alloc`
+- `aquarco-supervisor status`
+- `aquarco-supervisor auth-watch`
 
 **Test coverage**:
 - 153 new tests for CLI modules (test_cli_agents.py, test_cli_repo_manager.py, test_cli_status.py, test_cli_auth_helper.py)

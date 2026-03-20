@@ -1,16 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aifishtank.agents/schemas/pipeline-definition-v1.json",
+  "$id": "https://aquarco.agents/schemas/pipeline-definition-v1.json",
   "title": "PipelineDefinition",
-  "description": "Schema for AI Fishtank pipeline definition YAML files (aifishtank.agents/v1)",
+  "description": "Schema for Aquarco pipeline definition YAML files (aquarco.agents/v1)",
   "type": "object",
   "required": ["apiVersion", "kind", "pipelines"],
   "additionalProperties": false,
   "properties": {
     "apiVersion": {
       "type": "string",
-      "const": "aifishtank.agents/v1",
-      "description": "API version — must be exactly aifishtank.agents/v1"
+      "const": "aquarco.agents/v1",
+      "description": "API version — must be exactly aquarco.agents/v1"
     },
     "kind": {
       "type": "string",

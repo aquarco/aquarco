@@ -436,8 +436,8 @@ assert_exit_code "empty-dir: poll exits 0 with no trigger files" 0 "$actual_exit
 actual_exit=0
 bash -c "
   set -euo pipefail
-  export CFG_TRIGGERS_WATCH_DIR='/tmp/this-directory-does-not-exist-aifishtank-test'
-  export CFG_TRIGGERS_PROCESSED_DIR='/tmp/this-directory-does-not-exist-aifishtank-test/processed'
+  export CFG_TRIGGERS_WATCH_DIR='/tmp/this-directory-does-not-exist-aquarco-test'
+  export CFG_TRIGGERS_PROCESSED_DIR='/tmp/this-directory-does-not-exist-aquarco-test/processed'
   task_exists() { return 1; }
   create_task() { return 0; }
   update_poll_state() { return 0; }

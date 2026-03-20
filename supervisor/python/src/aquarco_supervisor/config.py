@@ -13,7 +13,7 @@ from .models import PipelineConfig, PipelineTrigger, StageConfig, SupervisorConf
 
 log = get_logger("config")
 
-EXPECTED_API_VERSION = "aifishtank.supervisor/v1"
+EXPECTED_API_VERSION = "aquarco.supervisor/v1"
 
 
 def load_config(config_file: str | Path) -> SupervisorConfig:

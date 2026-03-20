@@ -16,8 +16,8 @@ log = get_logger("config-overlay")
 
 
 def load_overlay(config_path: Path) -> ConfigOverlay | None:
-    """Parse .aifishtank.yaml at the given path. Returns None if missing."""
-    yaml_file = config_path / ".aifishtank.yaml"
+    """Parse .aquarco.yaml at the given path. Returns None if missing."""
+    yaml_file = config_path / ".aquarco.yaml"
     if not yaml_file.exists():
         return None
     try:

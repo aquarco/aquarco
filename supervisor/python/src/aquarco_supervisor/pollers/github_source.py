@@ -153,7 +153,7 @@ class GitHubSourcePoller(BasePoller):
         head_branch = pr.get("headRefName", "")
 
         # Skip system-created PRs
-        if head_branch.startswith("aifishtank/"):
+        if head_branch.startswith("aquarco/"):
             return 0
 
         pipelines = self._triggers.get(event_type, [])

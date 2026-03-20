@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from aifishtank_supervisor.database import Database
-from aifishtank_supervisor.models import TaskStatus
-from aifishtank_supervisor.task_queue import TaskQueue
+from aquarco_supervisor.database import Database
+from aquarco_supervisor.models import TaskStatus
+from aquarco_supervisor.task_queue import TaskQueue
 
 
 @pytest.fixture

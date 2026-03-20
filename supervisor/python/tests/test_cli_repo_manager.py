@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from aifishtank_supervisor.cli.repo_manager import (
+from aquarco_supervisor.cli.repo_manager import (
     _FRONTEND_PORT_BASE,
     _API_PORT_BASE,
     _POSTGRES_PORT_BASE,
@@ -152,10 +152,10 @@ class TestAllocatePortsFromConfig:
         }
 
         with patch(
-            "aifishtank_supervisor.cli.repo_manager.load_config",
+            "aquarco_supervisor.cli.repo_manager.load_config",
             return_value=mock_cfg,
         ), patch(
-            "aifishtank_supervisor.cli.repo_manager.get_repository_config",
+            "aquarco_supervisor.cli.repo_manager.get_repository_config",
             return_value=mock_repo_cfg,
         ):
             ports = _allocate_ports("my-repo", repos_root, config_file="/fake/config.yaml")
@@ -170,10 +170,10 @@ class TestAllocatePortsFromConfig:
         mock_repo_cfg = {"ports": None}  # no ports configured
 
         with patch(
-            "aifishtank_supervisor.cli.repo_manager.load_config",
+            "aquarco_supervisor.cli.repo_manager.load_config",
             return_value=mock_cfg,
         ), patch(
-            "aifishtank_supervisor.cli.repo_manager.get_repository_config",
+            "aquarco_supervisor.cli.repo_manager.get_repository_config",
             return_value=mock_repo_cfg,
         ):
             ports = _allocate_ports("my-repo", repos_root, config_file="/fake/config.yaml")
@@ -188,10 +188,10 @@ class TestAllocatePortsFromConfig:
         mock_cfg = MagicMock()
 
         with patch(
-            "aifishtank_supervisor.cli.repo_manager.load_config",
+            "aquarco_supervisor.cli.repo_manager.load_config",
             return_value=mock_cfg,
         ), patch(
-            "aifishtank_supervisor.cli.repo_manager.get_repository_config",
+            "aquarco_supervisor.cli.repo_manager.get_repository_config",
             return_value=None,
         ):
             ports = _allocate_ports("unknown-repo", repos_root, config_file="/fake/config.yaml")
@@ -203,7 +203,7 @@ class TestAllocatePortsFromConfig:
         repos_root.mkdir()
 
         with patch(
-            "aifishtank_supervisor.cli.repo_manager.load_config",
+            "aquarco_supervisor.cli.repo_manager.load_config",
             side_effect=Exception("file not found"),
         ):
             ports = _allocate_ports("my-repo", repos_root, config_file="/fake/config.yaml")
@@ -215,7 +215,7 @@ class TestAllocatePortsFromConfig:
         repos_root.mkdir()
 
         with patch(
-            "aifishtank_supervisor.cli.repo_manager.load_config"
+            "aquarco_supervisor.cli.repo_manager.load_config"
         ) as mock_load:
             ports = _allocate_ports("my-repo", repos_root, config_file=None)
 
@@ -252,9 +252,9 @@ class TestCmdSetupTemplateSubstitution:
 
         ports = {"frontend": 3010, "api": 4010, "postgres": 5442}
 
-        from aifishtank_supervisor.cli.repo_manager import cmd_setup
+        from aquarco_supervisor.cli.repo_manager import cmd_setup
         from typer.testing import CliRunner
-        from aifishtank_supervisor.cli.repo_manager import repo_app
+        from aquarco_supervisor.cli.repo_manager import repo_app
 
         runner = CliRunner()
         result = runner.invoke(
@@ -282,7 +282,7 @@ class TestCmdSetupTemplateSubstitution:
 
     def test_setup_fails_if_clone_dir_missing(self, tmp_path: Path) -> None:
         from typer.testing import CliRunner
-        from aifishtank_supervisor.cli.repo_manager import repo_app
+        from aquarco_supervisor.cli.repo_manager import repo_app
 
         runner = CliRunner()
         result = runner.invoke(
@@ -302,7 +302,7 @@ class TestCmdSetupTemplateSubstitution:
         clone_dir.mkdir()
 
         from typer.testing import CliRunner
-        from aifishtank_supervisor.cli.repo_manager import repo_app
+        from aquarco_supervisor.cli.repo_manager import repo_app
 
         runner = CliRunner()
         result = runner.invoke(
@@ -325,7 +325,7 @@ class TestCmdSetupTemplateSubstitution:
         # No template files created
 
         from typer.testing import CliRunner
-        from aifishtank_supervisor.cli.repo_manager import repo_app
+        from aquarco_supervisor.cli.repo_manager import repo_app
 
         runner = CliRunner()
         result = runner.invoke(

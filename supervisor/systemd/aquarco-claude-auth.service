@@ -1,6 +1,6 @@
 [Unit]
-Description=AI Fishtank Claude Auth Helper
-Documentation=https://github.com/owner/ai-fishtank
+Description=Aquarco Claude Auth Helper
+Documentation=https://github.com/owner/aquarco
 After=network.target
 
 [Service]
@@ -9,12 +9,12 @@ User=agent
 Group=agent
 
 ExecStartPre=+/bin/bash -c "mkdir -p /home/agent/.claude && chown -R agent:agent /home/agent/.claude && chmod 700 /home/agent/.claude"
-ExecStart=/home/agent/ai-fishtank/supervisor/scripts/claude-auth-helper.sh
+ExecStart=/home/agent/aquarco/supervisor/scripts/claude-auth-helper.sh
 
 Restart=on-failure
 RestartSec=5
 
-WorkingDirectory=/home/agent/ai-fishtank
+WorkingDirectory=/home/agent/aquarco
 
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:/home/agent/.local/bin:/home/agent/.npm-global/bin
 
@@ -28,7 +28,7 @@ ProtectSystem=full
 
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=aifishtank-claude-auth
+SyslogIdentifier=aquarco-claude-auth
 
 [Install]
 WantedBy=multi-user.target

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aifishtank_supervisor.exceptions import (
+from aquarco_supervisor.exceptions import (
     AgentExecutionError,
     AgentTimeoutError,
     CloneError,

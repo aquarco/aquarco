@@ -1,15 +1,15 @@
 -- db/seed.sql
--- Purpose: Development seed data for the AI Fishtank agent system.
+-- Purpose: Development seed data for the Aquarco agent system.
 --
 -- This file is safe to run repeatedly; INSERT statements use
 -- ON CONFLICT DO NOTHING so re-seeding is idempotent.
 --
 -- Usage:
---   psql -d aifishtank -f db/seed.sql
+--   psql -d aquarco -f db/seed.sql
 -- Or via the Makefile target:
 --   make db-seed
 
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 
 -- ---------------------------------------------------------------------------
 -- Repositories
@@ -18,10 +18,10 @@ SET search_path TO aifishtank, public;
 INSERT INTO repositories (name, url, branch, clone_dir, pollers, clone_status, head_sha)
 VALUES
     (
-        'ai-fishtank',
-        'git@github.com:example-org/ai-fishtank.git',
+        'aquarco',
+        'git@github.com:example-org/aquarco.git',
         'main',
-        '/repos/ai-fishtank',
+        '/repos/aquarco',
         ARRAY['github-issues-poller', 'github-pr-poller'],
         'ready',
         'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
@@ -93,7 +93,7 @@ VALUES
         30,
         'github-issue', '101',
         'feature-pipeline',
-        'ai-fishtank',
+        'aquarco',
         '{"issue_number": 101, "issue_title": "Add rate limiting to GraphQL API", "body": "We need per-user rate limiting on the GraphQL endpoint.", "labels": ["enhancement", "backend"]}'::jsonb,
         NOW() - INTERVAL '10 minutes',
         NOW() - INTERVAL '10 minutes',
@@ -109,8 +109,8 @@ VALUES
         10,
         'github-pr', '42',
         'review-pipeline',
-        'ai-fishtank',
-        '{"pr_number": 42, "pr_title": "fix null pointer in task router", "diff_url": "https://github.com/example-org/ai-fishtank/pull/42.diff"}'::jsonb,
+        'aquarco',
+        '{"pr_number": 42, "pr_title": "fix null pointer in task router", "diff_url": "https://github.com/example-org/aquarco/pull/42.diff"}'::jsonb,
         NOW() - INTERVAL '20 minutes',
         NOW() - INTERVAL '2 minutes',
         0, 0
@@ -125,7 +125,7 @@ VALUES
         20,
         'github-issue', '95',
         'analysis-pipeline',
-        'ai-fishtank',
+        'aquarco',
         '{"issue_number": 95, "labels": ["performance", "regression"], "milestone": "v1.0"}'::jsonb,
         NOW() - INTERVAL '45 minutes',
         NOW() - INTERVAL '3 minutes',
@@ -141,7 +141,7 @@ VALUES
         50,
         'github-issue', '80',
         'test-pipeline',
-        'ai-fishtank',
+        'aquarco',
         '{"issue_number": 80, "labels": ["testing"]}'::jsonb,
         NOW() - INTERVAL '3 hours',
         NOW() - INTERVAL '1 hour',
@@ -173,7 +173,7 @@ VALUES
         60,
         'github-issue', '110',
         'docs-pipeline',
-        'ai-fishtank',
+        'aquarco',
         '{"issue_number": 110, "labels": ["documentation"], "blocked_by": "TASK-002 schema not finalised"}'::jsonb,
         NOW() - INTERVAL '1 hour',
         NOW() - INTERVAL '30 minutes',

@@ -49,20 +49,20 @@ def bench_python_import():
     importlib.invalidate_caches()
     # Force reimport by removing from sys.modules
     for key in list(sys.modules.keys()):
-        if key.startswith("aifishtank_supervisor"):
+        if key.startswith("aquarco_supervisor"):
             del sys.modules[key]
-    import aifishtank_supervisor  # noqa: F401
+    import aquarco_supervisor  # noqa: F401
 
 
 @bench("python: load config")
 def bench_python_config():
-    from aifishtank_supervisor.config import load_config
+    from aquarco_supervisor.config import load_config
     load_config(str(CONFIG_FILE))
 
 
 @bench("python: parse models (100 tasks)")
 def bench_python_models():
-    from aifishtank_supervisor.models import Task
+    from aquarco_supervisor.models import Task
     for i in range(100):
         Task(
             id=f"bench-{i}",
@@ -78,7 +78,7 @@ def bench_python_models():
 
 @bench("python: check 1000 conditions")
 def bench_python_conditions():
-    from aifishtank_supervisor.pipeline.executor import check_conditions
+    from aquarco_supervisor.pipeline.executor import check_conditions
     output = {"analysis": {"estimated_complexity": "high", "status": "pass"}}
     conditions = ["analysis.estimated_complexity >= medium"]
     for _ in range(1000):
@@ -87,7 +87,7 @@ def bench_python_conditions():
 
 @bench("python: build 100 accumulated contexts")
 def bench_python_context():
-    from aifishtank_supervisor.pipeline.context import build_accumulated_context
+    from aquarco_supervisor.pipeline.context import build_accumulated_context
     task_context = {
         "task": {"id": "bench-1"},
         "stages": [
@@ -109,7 +109,7 @@ def bench_python_context():
 
 @bench("python: JSON extract (100 iterations)")
 def bench_python_json_extract():
-    from aifishtank_supervisor.cli.claude import _extract_json
+    from aquarco_supervisor.cli.claude import _extract_json
     text = 'Some preamble\n```json\n{"result": "ok", "data": [1,2,3]}\n```\nEnd'
     for _ in range(100):
         _extract_json(text)
@@ -151,7 +151,7 @@ def bench_shell_source_all():
 
 def main():
     print("=" * 60)
-    print("  AI Fishtank Supervisor Performance Benchmarks")
+    print("  Aquarco Supervisor Performance Benchmarks")
     print("=" * 60)
     print()
 
@@ -182,7 +182,7 @@ def main():
         print(f"  {r['name']:<43} {r['ms']:>10.2f}")
 
     # Write JSON results
-    results_file = Path("/tmp/aifishtank-benchmark-results.json")
+    results_file = Path("/tmp/aquarco-benchmark-results.json")
     results_file.write_text(json.dumps(RESULTS, indent=2))
     print(f"\nResults saved to {results_file}")
 

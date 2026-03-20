@@ -7,7 +7,7 @@
 
 -- up
 
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 
 -- ---------------------------------------------------------------------------
 -- 1. update_updated_at
@@ -172,6 +172,6 @@ COMMENT ON FUNCTION get_task_context(TEXT) IS
 
 -- down
 
--- DROP TRIGGER IF EXISTS trg_tasks_updated_at ON aifishtank.tasks;
--- DROP FUNCTION IF EXISTS aifishtank.update_updated_at();
--- DROP FUNCTION IF EXISTS aifishtank.get_task_context(TEXT);
+-- DROP TRIGGER IF EXISTS trg_tasks_updated_at ON aquarco.tasks;
+-- DROP FUNCTION IF EXISTS aquarco.update_updated_at();
+-- DROP FUNCTION IF EXISTS aquarco.get_task_context(TEXT);

@@ -8,10 +8,10 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
-from aifishtank_supervisor.database import Database
-from aifishtank_supervisor.models import SupervisorConfig
-from aifishtank_supervisor.pollers.external_triggers import ExternalTriggersPoller
-from aifishtank_supervisor.task_queue import TaskQueue
+from aquarco_supervisor.database import Database
+from aquarco_supervisor.models import SupervisorConfig
+from aquarco_supervisor.pollers.external_triggers import ExternalTriggersPoller
+from aquarco_supervisor.task_queue import TaskQueue
 
 
 @pytest.fixture

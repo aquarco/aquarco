@@ -298,7 +298,7 @@ process_pr() {
   _gs_log "info" "Processing PR #$pr_number ($event_type): $pr_title"
 
   # Skip PRs created by the system itself to prevent recursion.
-  if [[ "$head_branch" == aifishtank/* ]]; then
+  if [[ "$head_branch" == aquarco/* ]]; then
     _gs_log "info" "Skipping PR #$pr_number: head branch '$head_branch' is system-created"
     return 1
   fi

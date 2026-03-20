@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from aifishtank_supervisor.main import Supervisor, _build_health_report
+from aquarco_supervisor.main import Supervisor, _build_health_report
 
 
 def test_build_health_report_with_stats() -> None:
@@ -289,8 +289,8 @@ async def test_reload_config_success(sample_config: Any, sample_config_path: Any
     supervisor = Supervisor(sample_config, {})
     supervisor._config_file = str(sample_config_path)
 
-    with patch("aifishtank_supervisor.main.load_config", return_value=sample_config) as mock_cfg, \
-         patch("aifishtank_supervisor.main.load_secrets", return_value={"key": "val"}) as mock_sec:
+    with patch("aquarco_supervisor.main.load_config", return_value=sample_config) as mock_cfg, \
+         patch("aquarco_supervisor.main.load_secrets", return_value={"key": "val"}) as mock_sec:
         await supervisor._reload_config()
 
     mock_cfg.assert_called_once_with(str(sample_config_path))
@@ -304,7 +304,7 @@ async def test_reload_config_failure_keeps_old(sample_config: Any) -> None:
     supervisor = Supervisor(sample_config, {"old": "secret"})
     supervisor._config_file = "/nonexistent.yaml"
 
-    with patch("aifishtank_supervisor.main.load_config", side_effect=FileNotFoundError("gone")):
+    with patch("aquarco_supervisor.main.load_config", side_effect=FileNotFoundError("gone")):
         await supervisor._reload_config()
 
     # Old secrets should be preserved since reload failed
@@ -510,7 +510,7 @@ async def test_start_initializes_components(sample_config: Any, tmp_path: Any) -
 
     config_path = tmp_path / "supervisor.yaml"
     config_data = {
-        "apiVersion": "aifishtank.supervisor/v1",
+        "apiVersion": "aquarco.supervisor/v1",
         "metadata": {"name": "test"},
         "spec": {
             "workdir": str(tmp_path),
@@ -533,9 +533,9 @@ async def test_start_initializes_components(sample_config: Any, tmp_path: Any) -
     supervisor = Supervisor(sample_config, {})
 
     with patch.object(supervisor, "_main_loop", new_callable=AsyncMock) as mock_loop, \
-         patch("aifishtank_supervisor.main.Database") as mock_db_cls, \
-         patch("aifishtank_supervisor.main.AgentRegistry") as mock_reg_cls, \
-         patch("aifishtank_supervisor.main.setup_logging"):
+         patch("aquarco_supervisor.main.Database") as mock_db_cls, \
+         patch("aquarco_supervisor.main.AgentRegistry") as mock_reg_cls, \
+         patch("aquarco_supervisor.main.setup_logging"):
         mock_db_inst = AsyncMock()
         mock_db_cls.return_value = mock_db_inst
         mock_reg_inst = AsyncMock()

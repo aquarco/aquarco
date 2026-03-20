@@ -76,7 +76,7 @@ async def execute_claude(
             args.extend(["--json-schema", json.dumps(output_schema)])
 
         safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)
-        debug_log = Path(f"/var/log/aifishtank/claude-{safe_id}-stage{stage_num}.log")
+        debug_log = Path(f"/var/log/aquarco/claude-{safe_id}-stage{stage_num}.log")
         debug_log.parent.mkdir(parents=True, exist_ok=True)
 
         log.info(

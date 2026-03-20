@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# network-report.sh — AI Fishtank network usage report
+# network-report.sh — Aquarco network usage report
 #
 # Parses DNS query logs and iptables connection logs to produce a
 # domain usage report. Supports JSON output and time filtering.
@@ -23,8 +23,8 @@
 
 set -euo pipefail
 
-DNS_LOG="/var/log/aifishtank/dns-queries.log"
-CONN_LOG="/var/log/aifishtank/connections.log"
+DNS_LOG="/var/log/aquarco/dns-queries.log"
+CONN_LOG="/var/log/aquarco/connections.log"
 
 # ─── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -153,7 +153,7 @@ parse_dns_log() {
 # ─── Connection log parsing ───────────────────────────────────────────────────
 #
 # iptables LOG format in syslog:
-#   Mar 14 10:30:01 aifishtank kernel: AIHOME_OUT: IN= OUT=eth0 ... DST=140.82.121.4 ...
+#   Mar 14 10:30:01 aquarco kernel: AIHOME_OUT: IN= OUT=eth0 ... DST=140.82.121.4 ...
 
 parse_conn_log() {
   local cutoff="$1"

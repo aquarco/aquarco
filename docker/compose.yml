@@ -1,7 +1,7 @@
-name: ai-fishtank
+name: aquarco
 
 networks:
-  ai-fishtank:
+  aquarco:
     driver: bridge
 
 volumes:
@@ -16,18 +16,18 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     networks:
-      - ai-fishtank
+      - aquarco
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ../db/migrations:/docker-entrypoint-initdb.d
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-aifishtank}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aifishtank}
-      POSTGRES_DB: ${POSTGRES_DB:-aifishtank}
+      POSTGRES_USER: ${POSTGRES_USER:-aquarco}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aquarco}
+      POSTGRES_DB: ${POSTGRES_DB:-aquarco}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aifishtank}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aquarco}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -39,7 +39,7 @@ services:
     working_dir: /app
     command: sh -c "npm install && npm run codegen && npm run dev"
     networks:
-      - ai-fishtank
+      - aquarco
     ports:
       - "4000:4000"
     volumes:
@@ -50,9 +50,9 @@ services:
       - api_modules:/app/node_modules
       - ${AGENT_SSH_DIR:-/home/agent/.ssh}:/agent-ssh
       - ${REPOS_BASE:-/home/agent/repos}:/repos
-      - /var/lib/aifishtank/claude-ipc:/claude-ipc
+      - /var/lib/aquarco/claude-ipc:/claude-ipc
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://aifishtank:aifishtank@postgres:5432/aifishtank}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://aquarco:aquarco@postgres:5432/aquarco}
       NODE_ENV: ${NODE_ENV:-development}
       PORT: ${PORT:-4000}
       REPOS_BASE: ${REPOS_BASE:-/home/agent/repos}
@@ -68,7 +68,7 @@ services:
     working_dir: /app
     command: sh -c "npm install && npm run dev"
     networks:
-      - ai-fishtank
+      - aquarco
     ports:
       - "8080:3000"
     volumes:

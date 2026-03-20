@@ -1,23 +1,23 @@
-apiVersion: aifishtank.supervisor/v1
+apiVersion: aquarco.supervisor/v1
 kind: SupervisorConfig
 
 metadata:
-  name: aifishtank-supervisor
+  name: aquarco-supervisor
   version: "1.0.0"
 
 spec:
-  workdir: /home/agent/ai-fishtank
-  agentsDir: /home/agent/ai-fishtank/config/agents/definitions
-  promptsDir: /home/agent/ai-fishtank/config/agents/prompts
-  pipelinesFile: /home/agent/ai-fishtank/config/pipelines.yaml
+  workdir: /home/agent/aquarco
+  agentsDir: /home/agent/aquarco/config/agents/definitions
+  promptsDir: /home/agent/aquarco/config/agents/prompts
+  pipelinesFile: /home/agent/aquarco/config/pipelines.yaml
 
   database:
-    url: postgresql://aifishtank:aifishtank@localhost:5432/aifishtank
+    url: postgresql://aquarco:aquarco@localhost:5432/aquarco
     maxConnections: 5
 
   logging:
     level: info
-    file: /var/log/aifishtank/supervisor.log
+    file: /var/log/aquarco/supervisor.log
     maxSizeMB: 100
     maxFiles: 5
     format: json
@@ -35,7 +35,7 @@ spec:
 
   repoConfig:
     autoReload: true
-    configFile: .aifishtank.yaml
+    configFile: .aquarco.yaml
 
   pollers:
     - name: github-tasks
@@ -76,8 +76,8 @@ spec:
       enabled: true
       intervalSeconds: 10
       config:
-        watchDir: /var/lib/aifishtank/triggers
-        processedDir: /var/lib/aifishtank/triggers/processed
+        watchDir: /var/lib/aquarco/triggers
+        processedDir: /var/lib/aquarco/triggers/processed
 
   health:
     enabled: true

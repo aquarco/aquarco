@@ -6,7 +6,7 @@
 # Idempotent: yes
 #
 # What this does:
-#   - Configures dnsmasq to log all DNS queries to /var/log/aifishtank/dns-queries.log
+#   - Configures dnsmasq to log all DNS queries to /var/log/aquarco/dns-queries.log
 #   - Adds iptables OUTPUT logging for new outbound connections (LOG only, no BLOCK)
 #   - Persists iptables rules via iptables-persistent
 #   - Installs log rotation for network logs
@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-LOG_DIR="/var/log/aifishtank"
+LOG_DIR="/var/log/aquarco"
 DNS_LOG="${LOG_DIR}/dns-queries.log"
 CONN_LOG="${LOG_DIR}/connections.log"
 
@@ -47,15 +47,15 @@ fi
 if [[ ! -L /etc/resolv.conf ]] || [[ "$(readlink /etc/resolv.conf)" != "/run/systemd/resolve/resolv.conf" ]]; then
   # Replace with a static file pointing to dnsmasq on localhost
   cat > /etc/resolv.conf <<'EOF'
-# Managed by aifishtank setup-network-tracking.sh
+# Managed by aquarco setup-network-tracking.sh
 # All DNS goes through dnsmasq (port 53) for logging
 nameserver 127.0.0.1
 EOF
 fi
 
 # dnsmasq tracking config
-cat > /etc/dnsmasq.d/aifishtank-tracking.conf <<'EOF'
-# AI Fishtank network tracking — DNS query logging
+cat > /etc/dnsmasq.d/aquarco-tracking.conf <<'EOF'
+# Aquarco network tracking — DNS query logging
 # All queries are logged; dnsmasq forwards them upstream unchanged.
 # This config is managed by vagrant/scripts/setup-network-tracking.sh
 
@@ -63,7 +63,7 @@ cat > /etc/dnsmasq.d/aifishtank-tracking.conf <<'EOF'
 log-queries=extra
 
 # Write DNS query log to dedicated file (separate from syslog)
-log-facility=/var/log/aifishtank/dns-queries.log
+log-facility=/var/log/aquarco/dns-queries.log
 
 # Use Google + Cloudflare as upstream resolvers
 server=8.8.8.8
@@ -112,10 +112,10 @@ log "iptables logging rule installed (OUTPUT NEW connections -> syslog with pref
 # ─── 4. rsyslog — route AIHOME_OUT kernel messages to dedicated log file ──────
 
 log "Configuring rsyslog to capture iptables AIHOME_OUT messages..."
-cat > /etc/rsyslog.d/49-aifishtank-connections.conf <<'EOF'
-# Route AI Fishtank iptables connection log messages to a dedicated file.
+cat > /etc/rsyslog.d/49-aquarco-connections.conf <<'EOF'
+# Route Aquarco iptables connection log messages to a dedicated file.
 # Matches kernel messages with the AIHOME_OUT: prefix.
-:msg, contains, "AIHOME_OUT:" /var/log/aifishtank/connections.log
+:msg, contains, "AIHOME_OUT:" /var/log/aquarco/connections.log
 & stop
 EOF
 
@@ -125,9 +125,9 @@ log "rsyslog configured — connection logs will appear in ${CONN_LOG}"
 # ─── 5. Log rotation for network logs ─────────────────────────────────────────
 
 log "Installing logrotate config for network logs..."
-cat > /etc/logrotate.d/aifishtank-network <<'EOF'
-/var/log/aifishtank/dns-queries.log
-/var/log/aifishtank/connections.log {
+cat > /etc/logrotate.d/aquarco-network <<'EOF'
+/var/log/aquarco/dns-queries.log
+/var/log/aquarco/connections.log {
     daily
     rotate 30
     compress
@@ -149,14 +149,14 @@ EOF
 
 log "Installing daily network summary cron job..."
 
-REPORT_SCRIPT="/usr/local/bin/aifishtank-network-daily-summary"
+REPORT_SCRIPT="/usr/local/bin/aquarco-network-daily-summary"
 cat > "${REPORT_SCRIPT}" <<'SUMMARY'
 #!/usr/bin/env bash
 # Daily summary: parse DNS query log and emit a domain usage report to syslog/log file.
 set -euo pipefail
 
-LOG_FILE="/var/log/aifishtank/dns-queries.log"
-SUMMARY_FILE="/var/log/aifishtank/network-summary-$(date +%Y%m%d).txt"
+LOG_FILE="/var/log/aquarco/dns-queries.log"
+SUMMARY_FILE="/var/log/aquarco/network-summary-$(date +%Y%m%d).txt"
 CUTOFF_EPOCH=$(date -d "yesterday 00:00:00" +%s 2>/dev/null || date -v-1d -j -f "%H:%M:%S" "00:00:00" +%s)
 
 {
@@ -194,21 +194,21 @@ CUTOFF_EPOCH=$(date -d "yesterday 00:00:00" +%s 2>/dev/null || date -v-1d -j -f 
   echo "Full logs: ${LOG_FILE}"
 } > "${SUMMARY_FILE}"
 
-echo "[aifishtank] Daily network summary written to ${SUMMARY_FILE}"
+echo "[aquarco] Daily network summary written to ${SUMMARY_FILE}"
 
 # Keep only the last 30 daily summaries
-find /var/log/aifishtank -name "network-summary-*.txt" -mtime +30 -delete 2>/dev/null || true
+find /var/log/aquarco -name "network-summary-*.txt" -mtime +30 -delete 2>/dev/null || true
 SUMMARY
 
 chmod +x "${REPORT_SCRIPT}"
 
 # Run daily at 00:05 so previous day's log is fully written
-cat > /etc/cron.d/aifishtank-network-summary <<'CRON'
-# AI Fishtank daily network domain usage summary
-5 0 * * * root /usr/local/bin/aifishtank-network-daily-summary
+cat > /etc/cron.d/aquarco-network-summary <<'CRON'
+# Aquarco daily network domain usage summary
+5 0 * * * root /usr/local/bin/aquarco-network-daily-summary
 CRON
 
-log "Daily summary cron installed — runs at 00:05, output in /var/log/aifishtank/network-summary-YYYYMMDD.txt"
+log "Daily summary cron installed — runs at 00:05, output in /var/log/aquarco/network-summary-YYYYMMDD.txt"
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
 
@@ -224,5 +224,5 @@ log "To view live connections:"
 log "  tail -f ${CONN_LOG}"
 log ""
 log "To generate an on-demand domain report:"
-log "  /home/agent/ai-fishtank/supervisor/scripts/network-report.sh"
+log "  /home/agent/aquarco/supervisor/scripts/network-report.sh"
 log ""

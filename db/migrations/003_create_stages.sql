@@ -13,7 +13,7 @@
 
 -- up
 
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 
 CREATE TABLE IF NOT EXISTS stages (
     -- Surrogate PK; stages are always queried via (task_id, stage_number).
@@ -90,4 +90,4 @@ CREATE INDEX IF NOT EXISTS idx_stages_status
 
 -- down
 
--- DROP TABLE IF EXISTS aifishtank.stages;
+-- DROP TABLE IF EXISTS aquarco.stages;

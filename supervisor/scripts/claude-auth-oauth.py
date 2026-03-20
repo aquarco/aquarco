@@ -19,7 +19,7 @@ import time
 import urllib.request
 import urllib.error
 
-IPC_DIR = sys.argv[1] if len(sys.argv) > 1 else "/var/lib/aifishtank/claude-ipc"
+IPC_DIR = sys.argv[1] if len(sys.argv) > 1 else "/var/lib/aquarco/claude-ipc"
 
 # Claude CLI OAuth constants
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"

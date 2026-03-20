@@ -39,8 +39,8 @@ _et_log() {
 #
 # Usage: poll_external_triggers
 poll_external_triggers() {
-  local watch_dir="${CFG_TRIGGERS_WATCH_DIR:-/var/lib/aifishtank/triggers}"
-  local processed_dir="${CFG_TRIGGERS_PROCESSED_DIR:-/var/lib/aifishtank/triggers/processed}"
+  local watch_dir="${CFG_TRIGGERS_WATCH_DIR:-/var/lib/aquarco/triggers}"
+  local processed_dir="${CFG_TRIGGERS_PROCESSED_DIR:-/var/lib/aquarco/triggers/processed}"
 
   _et_log "info" "Scanning trigger directory: $watch_dir"
 

@@ -33,7 +33,7 @@ Agents are defined in YAML files located in a dedicated directory. Each file des
 ### Directory Structure (Host)
 
 ```
-ai-fishtank/
+aquarco/
 ├── agents/
 │   ├── definitions/           # Agent definition files (YAML)
 │   │   ├── review-agent.yaml
@@ -52,7 +52,7 @@ ai-fishtank/
 
 ```yaml
 # agents/definitions/review-agent.yaml
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: review-agent
@@ -152,7 +152,7 @@ spec:
 
 ```yaml
 # Complete agent definition schema
-apiVersion: aifishtank.agents/v1   # Required, API version
+apiVersion: aquarco.agents/v1   # Required, API version
 kind: AgentDefinition          # Required, must be "AgentDefinition"
 
 metadata:
@@ -225,7 +225,7 @@ spec:
 
 ```yaml
 # agents/definitions/implementation-agent.yaml
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: implementation-agent
@@ -300,7 +300,7 @@ spec:
 
 ```yaml
 # agents/definitions/analyze-agent.yaml
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: analyze-agent
@@ -373,7 +373,7 @@ spec:
 
 ```yaml
 # agents/definitions/design-agent.yaml
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: design-agent
@@ -458,7 +458,7 @@ spec:
 
 ```yaml
 # agents/definitions/test-agent.yaml
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: test-agent
@@ -531,7 +531,7 @@ spec:
 
 ```yaml
 # agents/definitions/docs-agent.yaml
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: docs-agent
@@ -603,7 +603,7 @@ The agent discovery system runs at supervisor startup and watches for changes to
 |                                                                     |
 |  1. On Startup                                                      |
 |     +-------------------------------------------------------------+ |
-|     |  Scan /home/agent/ai-fishtank/agents/definitions/*.yaml         | |
+|     |  Scan /home/agent/aquarco/agents/definitions/*.yaml         | |
 |     |           |                                                 | |
 |     |           v                                                 | |
 |     |  Parse and validate each YAML against schema                | |
@@ -667,13 +667,13 @@ category_index = {
 
 ```bash
 #!/bin/bash
-# /usr/local/bin/aifishtank-discover-agents
+# /usr/local/bin/aquarco-discover-agents
 # Discovers and validates agent definitions
 
 set -euo pipefail
 
-AGENTS_DIR="/home/agent/ai-fishtank/agents/definitions"
-REGISTRY_FILE="/var/lib/aifishtank/agent-registry.json"
+AGENTS_DIR="/home/agent/aquarco/agents/definitions"
+REGISTRY_FILE="/var/lib/aquarco/agent-registry.json"
 
 discover_agents() {
     local agents=()
@@ -695,7 +695,7 @@ discover_agents() {
         local prompt_file=$(yq eval '.spec.promptFile' "$yaml_file")
 
         # Verify prompt file exists
-        local prompt_path="/home/agent/ai-fishtank/agents/prompts/$prompt_file"
+        local prompt_path="/home/agent/aquarco/agents/prompts/$prompt_file"
         if [[ ! -f "$prompt_path" ]]; then
             echo "WARN: Prompt file not found: $prompt_path" >&2
             continue
@@ -727,8 +727,8 @@ discover_agents
       "categories": ["review"],
       "priority": 10,
       "status": "available",
-      "file": "/home/agent/ai-fishtank/agents/definitions/review-agent.yaml",
-      "prompt_file": "/home/agent/ai-fishtank/agents/prompts/review-agent.md",
+      "file": "/home/agent/aquarco/agents/definitions/review-agent.yaml",
+      "prompt_file": "/home/agent/aquarco/agents/prompts/review-agent.md",
       "active_instances": 0
     },
     {
@@ -737,8 +737,8 @@ discover_agents
       "categories": ["implementation"],
       "priority": 10,
       "status": "available",
-      "file": "/home/agent/ai-fishtank/agents/definitions/implementation-agent.yaml",
-      "prompt_file": "/home/agent/ai-fishtank/agents/prompts/implementation-agent.md",
+      "file": "/home/agent/aquarco/agents/definitions/implementation-agent.yaml",
+      "prompt_file": "/home/agent/aquarco/agents/prompts/implementation-agent.md",
       "active_instances": 0
     }
   ],
@@ -766,7 +766,7 @@ The supervisor is a fixed systemd service that runs continuously, polling extern
 ```
 +---------------------------------------------------------------------+
 |                       SUPERVISOR SERVICE                             |
-|                    (aifishtank-supervisor.service)                       |
+|                    (aquarco-supervisor.service)                       |
 +---------------------------------------------------------------------+
 |                                                                     |
 |  +---------------------------------------------------------------+  |
@@ -814,21 +814,21 @@ The supervisor is a fixed systemd service that runs continuously, polling extern
 ### Supervisor Configuration File
 
 ```yaml
-# /etc/aifishtank/supervisor.yaml
-apiVersion: aifishtank.supervisor/v1
+# /etc/aquarco/supervisor.yaml
+apiVersion: aquarco.supervisor/v1
 kind: SupervisorConfig
 
 metadata:
-  name: aifishtank-supervisor
+  name: aquarco-supervisor
   version: "1.0.0"
 
 spec:
   # Working directory
-  workdir: /home/agent/ai-fishtank
+  workdir: /home/agent/aquarco
 
   # Agent definitions location
-  agentsDir: /home/agent/ai-fishtank/agents/definitions
-  promptsDir: /home/agent/ai-fishtank/agents/prompts
+  agentsDir: /home/agent/aquarco/agents/definitions
+  promptsDir: /home/agent/aquarco/agents/prompts
 
   # Task queue database (PostgreSQL)
   # Supervisor uses direct connections (runs one pipeline at a time, 3-4 connections max)
@@ -837,8 +837,8 @@ spec:
     driver: postgresql
     host: localhost
     port: 5432
-    database: aifishtank
-    user: aifishtank
+    database: aquarco
+    user: aquarco
     passwordFile: /home/agent/.postgres-password
     retentionDays: 30
 
@@ -850,13 +850,13 @@ spec:
 
   # Blob storage for large context items
   blobStorage:
-    path: /var/lib/aifishtank/blobs
+    path: /var/lib/aquarco/blobs
     maxSizeMB: 50  # Max size per blob
 
   # Logging
   logging:
     level: info
-    file: /var/log/aifishtank/supervisor.log
+    file: /var/log/aquarco/supervisor.log
     maxSizeMB: 100
     maxFiles: 5
 
@@ -933,8 +933,8 @@ spec:
       enabled: true
       intervalSeconds: 10
       config:
-        watchDir: /var/lib/aifishtank/triggers
-        processedDir: /var/lib/aifishtank/triggers/processed
+        watchDir: /var/lib/aquarco/triggers
+        processedDir: /var/lib/aquarco/triggers/processed
 
   # Pipeline definitions
   pipelines:
@@ -1006,7 +1006,7 @@ spec:
 
 ```bash
 #!/bin/bash
-# /usr/local/lib/aifishtank/pollers/github-tasks.sh
+# /usr/local/lib/aquarco/pollers/github-tasks.sh
 # Polls GitHub Issues and Project Board for new tasks
 
 poll_github_tasks() {
@@ -1058,7 +1058,7 @@ process_issue() {
 
 ```bash
 #!/bin/bash
-# /usr/local/lib/aifishtank/pollers/github-source.sh
+# /usr/local/lib/aquarco/pollers/github-source.sh
 # Polls for new commits and PRs
 
 poll_github_prs() {
@@ -1119,11 +1119,11 @@ process_pr() {
 
 ```bash
 #!/bin/bash
-# /usr/local/lib/aifishtank/pollers/external-triggers.sh
+# /usr/local/lib/aquarco/pollers/external-triggers.sh
 # Processes trigger files dropped into a directory
 
-WATCH_DIR="/var/lib/aifishtank/triggers"
-PROCESSED_DIR="/var/lib/aifishtank/triggers/processed"
+WATCH_DIR="/var/lib/aquarco/triggers"
+PROCESSED_DIR="/var/lib/aquarco/triggers/processed"
 
 process_trigger_files() {
     for trigger_file in "$WATCH_DIR"/*.yaml "$WATCH_DIR"/*.json; do
@@ -1160,7 +1160,7 @@ process_trigger_files() {
 ### External Trigger File Format
 
 ```yaml
-# /var/lib/aifishtank/triggers/custom-task-001.yaml
+# /var/lib/aquarco/triggers/custom-task-001.yaml
 category: implementation
 title: "Implement caching layer for API"
 priority: high
@@ -1413,7 +1413,7 @@ For large outputs (diffs, generated code, API specs), use file references:
 
 The supervisor:
 1. Detects `ref:blobs/*` values
-2. Stores the actual content in `/var/lib/aifishtank/blobs/`
+2. Stores the actual content in `/var/lib/aquarco/blobs/`
 3. Stores the reference in PostgreSQL
 4. When building context bundle, either:
    - Includes file content if small enough
@@ -1607,7 +1607,7 @@ Tasks flow through pipelines that define the sequence of agent categories needed
 
 ```bash
 #!/bin/bash
-# /usr/local/lib/aifishtank/pipeline-executor.sh
+# /usr/local/lib/aquarco/pipeline-executor.sh
 
 execute_pipeline() {
     local pipeline_name="$1"
@@ -1697,7 +1697,7 @@ select_agent_for_category() {
     # Get agents for category, sorted by priority
     local agents=$(jq -r \
         ".category_index[\"$category\"][]" \
-        /var/lib/aifishtank/agent-registry.json)
+        /var/lib/aquarco/agent-registry.json)
 
     for agent in $agents; do
         # Check if agent is available (not at max concurrent)
@@ -1744,7 +1744,7 @@ EOF
     # Execute Claude Code with agent prompt
     local output
     timeout "${timeout}m" claude \
-        --agent "/home/agent/ai-fishtank/agents/prompts/$prompt_file" \
+        --agent "/home/agent/aquarco/agents/prompts/$prompt_file" \
         --max-tokens "$max_tokens" \
         --print \
         < "$context_file" \
@@ -1772,10 +1772,10 @@ EOF
 
 ### Host Machine (Development)
 
-The host machine contains only the ai-fishtank repo (the system). Target repos are cloned inside the VM at runtime.
+The host machine contains only the aquarco repo (the system). Target repos are cloned inside the VM at runtime.
 
 ```
-ai-fishtank/                                    # AI Fishtank repo (the system)
+aquarco/                                    # Aquarco repo (the system)
 ├── agents/
 │   ├── definitions/                        # Agent definition YAML files
 │   │   ├── analyze-agent.yaml
@@ -1793,7 +1793,7 @@ ai-fishtank/                                    # AI Fishtank repo (the system)
 │   │   └── docs-agent.md
 │   └── schemas/                            # JSON Schema for validation
 │       ├── agent-definition-v1.json
-│       └── repo-config-v1.json             # Schema for .aifishtank.yaml
+│       └── repo-config-v1.json             # Schema for .aquarco.yaml
 ├── supervisor/
 │   ├── config/
 │   │   └── supervisor.yaml                 # Supervisor configuration
@@ -1826,17 +1826,17 @@ ai-fishtank/                                    # AI Fishtank repo (the system)
     ├── Vagrantfile
     ├── ansible/
     │   └── roles/
-    │       └── aifishtank-supervisor/
+    │       └── aquarco-supervisor/
     └── cloud-init.yaml
 ```
 
 ### VM Internal Structure
 
-The VM contains both the ai-fishtank repo (system) and target repos (work).
+The VM contains both the aquarco repo (system) and target repos (work).
 
 ```
 /home/agent/
-├── ai-fishtank/                                # AI Fishtank repo (the system)
+├── aquarco/                                # Aquarco repo (the system)
 │   ├── agents/
 │   │   ├── definitions/                    # Agent definitions
 │   │   └── prompts/                        # Agent prompts
@@ -1847,7 +1847,7 @@ The VM contains both the ai-fishtank repo (system) and target repos (work).
 │
 ├── repos/                                  # Target repos (cloned by supervisor)
 │   ├── my-saas-app/                        # Each repo in its own directory
-│   │   ├── .aifishtank.yaml                    # Optional per-repo config
+│   │   ├── .aquarco.yaml                    # Optional per-repo config
 │   │   └── ...                             # Actual repo contents
 │   ├── internal-api/
 │   │   └── ...
@@ -1859,7 +1859,7 @@ The VM contains both the ai-fishtank repo (system) and target repos (work).
 ├── .postgres-password                      # PostgreSQL password
 └── .gitconfig                              # Git configuration
 
-/var/lib/aifishtank/
+/var/lib/aquarco/
 ├── agent-registry.json                     # Discovered agents
 ├── blobs/                                  # Large context blobs
 │   ├── abc123.patch
@@ -1875,7 +1875,7 @@ The VM contains both the ai-fishtank repo (system) and target repos (work).
 │           └── stage-N-checkpoint.json
 └── cache/                                  # Temporary files
 
-/var/log/aifishtank/
+/var/log/aquarco/
 ├── supervisor.log                          # Main supervisor log
 ├── agents/                                 # Per-agent logs
 │   ├── analyze-agent/
@@ -1890,17 +1890,17 @@ The VM contains both the ai-fishtank repo (system) and target repos (work).
 └── pipelines/                              # Pipeline execution logs
     └── <task-id>.log
 
-/etc/aifishtank/
+/etc/aquarco/
 ├── supervisor.yaml                         # Supervisor config (symlink to repo)
 └── secrets.env                             # Environment secrets
 
 /usr/local/bin/
-├── aifishtank-supervisor                       # Main supervisor binary/script
-├── aifishtank-discover-agents                  # Agent discovery script
-├── aifishtank-create-task                      # Task creation utility
-└── aifishtank-status                           # Status reporting utility
+├── aquarco-supervisor                       # Main supervisor binary/script
+├── aquarco-discover-agents                  # Agent discovery script
+├── aquarco-create-task                      # Task creation utility
+└── aquarco-status                           # Status reporting utility
 
-/usr/local/lib/aifishtank/
+/usr/local/lib/aquarco/
 ├── pollers/                                # Poller scripts
 ├── pipeline-executor.sh                    # Pipeline engine
 ├── context-builder.sh                      # Builds accumulated context
@@ -1915,18 +1915,18 @@ The VM contains both the ai-fishtank repo (system) and target repos (work).
 ### Main Supervisor Configuration
 
 ```yaml
-# /etc/aifishtank/supervisor.yaml (or supervisor/config/supervisor.yaml)
-apiVersion: aifishtank.supervisor/v1
+# /etc/aquarco/supervisor.yaml (or supervisor/config/supervisor.yaml)
+apiVersion: aquarco.supervisor/v1
 kind: SupervisorConfig
 
 metadata:
-  name: aifishtank-supervisor
+  name: aquarco-supervisor
   version: "1.0.0"
 
 spec:
-  workdir: /home/agent/ai-fishtank
-  agentsDir: /home/agent/ai-fishtank/agents/definitions
-  promptsDir: /home/agent/ai-fishtank/agents/prompts
+  workdir: /home/agent/aquarco
+  agentsDir: /home/agent/aquarco/agents/definitions
+  promptsDir: /home/agent/aquarco/agents/prompts
 
   # Supervisor uses direct connections (runs one pipeline at a time, 3-4 connections max)
   # No PgBouncer needed — Web UI uses its own pooled connection (Prisma built-in pool)
@@ -1934,8 +1934,8 @@ spec:
     driver: postgresql
     host: localhost
     port: 5432
-    database: aifishtank
-    user: aifishtank
+    database: aquarco
+    user: aquarco
     passwordFile: /home/agent/.postgres-password
     retentionDays: 30
 
@@ -1946,12 +1946,12 @@ spec:
     validateBeforeWrite: true
 
   blobStorage:
-    path: /var/lib/aifishtank/blobs
+    path: /var/lib/aquarco/blobs
     maxSizeMB: 50
 
   logging:
     level: info
-    file: /var/log/aifishtank/supervisor.log
+    file: /var/log/aquarco/supervisor.log
     maxSizeMB: 100
     maxFiles: 5
     format: json
@@ -1988,8 +1988,8 @@ spec:
 
   # Per-repo config auto-reload
   repoConfig:
-    autoReload: true           # Re-read .aifishtank.yaml after every git pull
-    configFile: .aifishtank.yaml   # Config file name in target repo root
+    autoReload: true           # Re-read .aquarco.yaml after every git pull
+    configFile: .aquarco.yaml   # Config file name in target repo root
 
   pollers:
     - name: github-tasks
@@ -2028,8 +2028,8 @@ spec:
       enabled: true
       intervalSeconds: 10
       config:
-        watchDir: /var/lib/aifishtank/triggers
-        processedDir: /var/lib/aifishtank/triggers/processed
+        watchDir: /var/lib/aquarco/triggers
+        processedDir: /var/lib/aquarco/triggers/processed
 
   pipelines:
     - name: feature-pipeline
@@ -2075,15 +2075,15 @@ spec:
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aifishtank.local/schemas/agent-definition-v1.json",
+  "$id": "https://aquarco.local/schemas/agent-definition-v1.json",
   "title": "Agent Definition",
-  "description": "Schema for AI Fishtank agent definition files",
+  "description": "Schema for Aquarco agent definition files",
   "type": "object",
   "required": ["apiVersion", "kind", "metadata", "spec"],
   "properties": {
     "apiVersion": {
       "type": "string",
-      "const": "aifishtank.agents/v1"
+      "const": "aquarco.agents/v1"
     },
     "kind": {
       "type": "string",
@@ -2236,7 +2236,7 @@ spec:
 ### Task Queue Schema (PostgreSQL)
 
 ```sql
--- PostgreSQL schema for AI Fishtank task queue and context storage
+-- PostgreSQL schema for Aquarco task queue and context storage
 
 -- Registered repositories (populated from supervisor.yaml on startup/reload)
 CREATE TABLE repositories (
@@ -2419,7 +2419,7 @@ $$ LANGUAGE plpgsql;
 1. Create definition file:
 ```yaml
 # agents/definitions/my-new-agent.yaml
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: my-new-agent
@@ -2453,7 +2453,7 @@ You MUST output a JSON block with your results:
 \`\`\`
 ```
 
-3. Agent is automatically discovered on next poll cycle (or manually trigger: `aifishtank-discover-agents`)
+3. Agent is automatically discovered on next poll cycle (or manually trigger: `aquarco-discover-agents`)
 
 ### Adding a New Task Category
 
@@ -2495,7 +2495,7 @@ pollers:
     enabled: true
     intervalSeconds: 120
     config:
-      script: /usr/local/lib/aifishtank/pollers/my-new-poller.sh
+      script: /usr/local/lib/aquarco/pollers/my-new-poller.sh
       # Custom config
 ```
 
@@ -2529,7 +2529,7 @@ Create a trigger file programmatically:
 
 ```bash
 # From any external system, create a YAML file:
-cat > /var/lib/aifishtank/triggers/slack-request-$(date +%s).yaml << 'EOF'
+cat > /var/lib/aquarco/triggers/slack-request-$(date +%s).yaml << 'EOF'
 category: implementation
 title: "Request from Slack: Add dark mode"
 priority: medium
@@ -2642,7 +2642,7 @@ Host browser (localhost:8080)
   - Last polled timestamp
   - Clone status (pending, cloning, ready, error)
   - Current branch and HEAD SHA
-- **Show per-repo config overrides** (from `.aifishtank.yaml`):
+- **Show per-repo config overrides** (from `.aquarco.yaml`):
   - Pipeline stage skips
   - Agent extra_context
   - Protected paths
@@ -2752,7 +2752,7 @@ export default function Dashboard() {
 /api/agents/[name]      GET, PATCH (enable/disable)
 
 /api/repos              GET (list registered repos), POST (add new repo)
-/api/repos/[name]       GET (repo details + .aifishtank.yaml), PATCH, DELETE
+/api/repos/[name]       GET (repo details + .aquarco.yaml), PATCH, DELETE
 /api/repos/[name]/pull  POST (force pull/re-clone)
 /api/repos/[name]/logs  GET (clone/pull logs)
 
@@ -2761,7 +2761,7 @@ export default function Dashboard() {
 
 /api/config             GET, PUT (supervisor.yaml)
 /api/config/reload      POST (trigger reload)
-/api/config/publish     POST (commit and push to ai-fishtank repo)
+/api/config/publish     POST (commit and push to aquarco repo)
 
 /api/logs               GET (with streaming support)
 /api/ws                 WebSocket endpoint
@@ -2824,11 +2824,11 @@ const task = await prisma.task.findUnique({
 
 ## 9. Repo Topology
 
-The AI Fishtank system distinguishes between two types of repositories with fundamentally different purposes.
+The Aquarco system distinguishes between two types of repositories with fundamentally different purposes.
 
 ### Two Types of Repos
 
-**AI Fishtank repo** (`ai-fishtank`) — the system itself:
+**Aquarco repo** (`aquarco`) — the system itself:
 - Supervisor code, pollers, pipeline executor
 - Agent definitions (YAML) and prompts (MD)
 - Web UI (Next.js monitoring dashboard)
@@ -2846,7 +2846,7 @@ The AI Fishtank system distinguishes between two types of repositories with fund
 
 ```
 /home/agent/
-├── ai-fishtank/                    <- AI Fishtank repo (the system)
+├── aquarco/                    <- Aquarco repo (the system)
 │   ├── supervisor/
 │   ├── agents/definitions/
 │   ├── agents/prompts/
@@ -2861,15 +2861,15 @@ The AI Fishtank system distinguishes between two types of repositories with fund
 
 ### Key Principles
 
-1. **GitHub Tasks Poller polls issues from TARGET repos, not from ai-fishtank** — The poller watches for issues tagged `agent-task` in the repos where actual work happens.
+1. **GitHub Tasks Poller polls issues from TARGET repos, not from aquarco** — The poller watches for issues tagged `agent-task` in the repos where actual work happens.
 
 2. **GitHub Source Poller watches PRs/commits on TARGET repos** — When a PR is opened on `my-saas-app`, the review pipeline runs against that repo.
 
 3. **The `repository` field in tasks table tracks which target repo a task belongs to** — Every task is associated with a specific target repo.
 
-4. **"Publish changes" sync pushes config back to ai-fishtank repo only** — When you edit `supervisor.yaml` or agent definitions via the Web UI, those changes are committed to the ai-fishtank repo, not to target repos.
+4. **"Publish changes" sync pushes config back to aquarco repo only** — When you edit `supervisor.yaml` or agent definitions via the Web UI, those changes are committed to the aquarco repo, not to target repos.
 
-5. **Agent definitions in ai-fishtank are UNIVERSAL** — The same `review-agent` reviews code across all target repos. Repo-specific customizations come from `.aifishtank.yaml` in each target repo.
+5. **Agent definitions in aquarco are UNIVERSAL** — The same `review-agent` reviews code across all target repos. Repo-specific customizations come from `.aquarco.yaml` in each target repo.
 
 6. **Workspace isolation** — Each target repo gets its own clone directory. Agents working on one repo cannot accidentally modify another.
 
@@ -2903,8 +2903,8 @@ repositories:
 
 # Per-repo config auto-reload
 repoConfig:
-  autoReload: true           # Re-read .aifishtank.yaml after every git pull
-  configFile: .aifishtank.yaml   # Config file name in target repo root
+  autoReload: true           # Re-read .aquarco.yaml after every git pull
+  configFile: .aquarco.yaml   # Config file name in target repo root
 ```
 
 Pollers reference registered repo names (or "all") instead of hardcoded "owner/repo" strings:
@@ -2916,13 +2916,13 @@ pollers:
       repositories: all  # or ["my-saas-app", "internal-api"]
 ```
 
-### Per-Repo Agent Overrides (.aifishtank.yaml)
+### Per-Repo Agent Overrides (.aquarco.yaml)
 
-Target repos can optionally include a `.aifishtank.yaml` file in their root to customize agent behavior for that repo:
+Target repos can optionally include a `.aquarco.yaml` file in their root to customize agent behavior for that repo:
 
 ```yaml
-# .aifishtank.yaml (in target repo root)
-apiVersion: aifishtank.repo/v1
+# .aquarco.yaml (in target repo root)
+apiVersion: aquarco.repo/v1
 kind: RepoConfig
 
 spec:
@@ -2963,9 +2963,9 @@ spec:
 ```
 
 **Merge Behavior:**
-- The supervisor loads `.aifishtank.yaml` from each target repo after cloning
+- The supervisor loads `.aquarco.yaml` from each target repo after cloning
 - Repo-level config merges with and overrides global config for that repo only
-- If no `.aifishtank.yaml` exists, global defaults apply
+- If no `.aquarco.yaml` exists, global defaults apply
 
 ### Agent Executor Updates for Multi-Repo
 
@@ -2973,10 +2973,10 @@ When the supervisor executes an agent for a task, it must:
 
 1. **Look up which repository the task belongs to** — Read `repository` field from task record
 2. **`cd` into that repo's clone directory** — Set working directory to `/home/agent/repos/<repo-name>/`
-3. **Load the repo's `.aifishtank.yaml` if present** — Parse and validate against schema
+3. **Load the repo's `.aquarco.yaml` if present** — Parse and validate against schema
 4. **Merge repo-specific `extra_context` into the agent's prompt** — Append repo-level context to agent system prompt
 5. **Apply repo-specific pipeline stage overrides** — Skip stages listed in `skip_stages`
-6. **Run the agent in the context of the target repo, NOT in ai-fishtank** — All file operations happen in the target repo
+6. **Run the agent in the context of the target repo, NOT in aquarco** — All file operations happen in the target repo
 
 ```bash
 execute_agent() {
@@ -2990,10 +2990,10 @@ execute_agent() {
     local workdir=$(echo "$repo_config" | jq -r '.cloneDir')
 
     # Load repo-specific overrides
-    local aifishtank_yaml="$workdir/.aifishtank.yaml"
+    local aquarco_yaml="$workdir/.aquarco.yaml"
     local extra_context=""
-    if [[ -f "$aifishtank_yaml" ]]; then
-        extra_context=$(yq eval ".spec.agents.$agent_name.extra_context // ''" "$aifishtank_yaml")
+    if [[ -f "$aquarco_yaml" ]]; then
+        extra_context=$(yq eval ".spec.agents.$agent_name.extra_context // ''" "$aquarco_yaml")
     fi
 
     # Load agent definition
@@ -3060,7 +3060,7 @@ EOF
 - [ ] Security review of agent capability system — assigned to: security
 - [ ] Document agent development guide — assigned to: docs
 - [ ] Implement repo registration and clone management — assigned to: scripting
-- [ ] Implement .aifishtank.yaml loader and merger — assigned to: scripting
+- [ ] Implement .aquarco.yaml loader and merger — assigned to: scripting
 - [ ] Add repository management page to Web UI — assigned to: frontend
 
 ## Acceptance Criteria
@@ -3102,7 +3102,7 @@ EOF
 14. **No auth for web UI** — Local dev machine only, accessible only via VirtualBox NAT from host. No internet exposure, no auth complexity.
 15. **Claude Code Max subscription, not API** — Token metrics are for observability only (understanding efficiency, comparing usage, spotting bloat), not billing.
 16. **GitHub PAT for all target repos** — Single PAT with `repo` scope accesses all repos the user has access to. Reuses the same token used for `gh` CLI. Clone via HTTPS with token: `https://<token>@github.com/owner/repo.git`. Simpler than managing per-repo deploy keys. Deploy keys available as optional override in `supervisor.yaml` for tighter scoping.
-17. **Auto-reload `.aifishtank.yaml` on pull** — Supervisor re-reads `.aifishtank.yaml` after every `git pull` during the poll cycle. If the file changed (compare hash/mtime), merge new config into running state. Part of the normal poll loop, no separate signal needed. If malformed, log warning and keep previous valid config.
+17. **Auto-reload `.aquarco.yaml` on pull** — Supervisor re-reads `.aquarco.yaml` after every `git pull` during the poll cycle. If the file changed (compare hash/mtime), merge new config into running state. Part of the normal poll loop, no separate signal needed. If malformed, log warning and keep previous valid config.
 
 ### Open Questions
 
@@ -3111,16 +3111,16 @@ EOF
 3. ~~Token budget strategy for accumulated context~~ — **RESOLVED**: Original issue ALWAYS full. Intermediate stages (0 to N-2): summaries only (structured output fields serve as implicit summaries). Previous stage (N-1): full output. Supervisor extracts summaries from structured fields — no separate Claude call.
 4. ~~WebSocket authentication for the web UI~~ — **RESOLVED**: No auth. Local dev machine only, accessible only via VirtualBox NAT from host. No auth complexity needed.
 5. ~~Blob garbage collection~~ — **RESOLVED**: Daily cron/background loop with retention rules as designed. Keep as-is.
-6. ~~How to sync VM state (config, agent definitions) with initial state so the VM can be destroyed and reprovisioned with latest configuration?~~ — **RESOLVED**: "Publish changes" button in web UI commits config changes back to the ai-fishtank repo. Flow:
+6. ~~How to sync VM state (config, agent definitions) with initial state so the VM can be destroyed and reprovisioned with latest configuration?~~ — **RESOLVED**: "Publish changes" button in web UI commits config changes back to the aquarco repo. Flow:
    1. User edits config via web UI
-   2. Changes are written to local files in `/home/agent/ai-fishtank/`
+   2. Changes are written to local files in `/home/agent/aquarco/`
    3. User clicks "Publish changes"
    4. Web UI shows diff of what changed
    5. User confirms
-   6. Web UI runs: `git add`, `git commit`, `git push` in the ai-fishtank repo
-   7. Next time VM is provisioned (`vagrant destroy` + `vagrant up`), it pulls latest ai-fishtank with those changes
+   6. Web UI runs: `git add`, `git commit`, `git push` in the aquarco repo
+   7. Next time VM is provisioned (`vagrant destroy` + `vagrant up`), it pulls latest aquarco with those changes
 7. ~~How to handle deploy keys for multiple target repos?~~ — **RESOLVED**: Use GitHub PAT (Personal Access Token) with `repo` scope. Single PAT accesses all repos the user has access to. Already in the design for `gh` CLI — reuse the same token for git operations. Clone via HTTPS with token: `https://<token>@github.com/owner/repo.git`. Simpler than managing per-repo deploy keys. This is a local dev VM, not production — PAT scope is acceptable. Deploy keys remain available as an optional override in `supervisor.yaml` for anyone who wants tighter scoping per repo.
-8. ~~Should `.aifishtank.yaml` changes in target repos trigger supervisor reload?~~ — **RESOLVED**: Auto-reload on pull. Supervisor re-reads `.aifishtank.yaml` after every `git pull` during the poll cycle. If the file changed (compare hash/mtime), merge new config into running state. No SIGHUP or signal mechanism needed — it's part of the normal poll loop. Nearly free: one file read + YAML parse per poll cycle per repo. If `.aifishtank.yaml` is invalid/malformed, log a warning and keep using the previous valid config.
+8. ~~Should `.aquarco.yaml` changes in target repos trigger supervisor reload?~~ — **RESOLVED**: Auto-reload on pull. Supervisor re-reads `.aquarco.yaml` after every `git pull` during the poll cycle. If the file changed (compare hash/mtime), merge new config into running state. No SIGHUP or signal mechanism needed — it's part of the normal poll loop. Nearly free: one file read + YAML parse per poll cycle per repo. If `.aquarco.yaml` is invalid/malformed, log a warning and keep using the previous valid config.
 
 ### Risks
 
@@ -3130,7 +3130,7 @@ EOF
 - **Polling latency** — 60-second intervals mean up to 60s delay for new tasks
 - **Agent prompt drift** — Prompts may become stale as codebase evolves
 - **Pipeline deadlocks** — Circular dependencies in triggers could cause infinite loops
-- ~~Config drift between web UI edits and git repo~~ — **Mitigated**: "Publish changes" button commits config back to ai-fishtank repo. Users must click to sync; unpublished changes will be lost on VM reprovision.
+- ~~Config drift between web UI edits and git repo~~ — **Mitigated**: "Publish changes" button commits config back to aquarco repo. Users must click to sync; unpublished changes will be lost on VM reprovision.
 
 ### Dependencies
 

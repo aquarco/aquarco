@@ -1,6 +1,6 @@
 [Unit]
-Description=AI Fishtank Agent Supervisor
-Documentation=https://github.com/owner/ai-fishtank
+Description=Aquarco Agent Supervisor
+Documentation=https://github.com/owner/aquarco
 After=postgresql.service docker.service network.target
 Wants=postgresql.service
 # Ensure the supervisor only starts after the database is accepting connections.
@@ -12,7 +12,7 @@ User=agent
 Group=agent
 
 # Main entry point.
-ExecStart=/home/agent/ai-fishtank/supervisor/scripts/supervisor.sh
+ExecStart=/home/agent/aquarco/supervisor/scripts/supervisor.sh
 
 # On SIGHUP the supervisor re-reads its config file without restarting.
 ExecReload=/bin/kill -HUP $MAINPID
@@ -26,14 +26,14 @@ TimeoutStopSec=30
 
 # Working directory; supervisor uses absolute paths internally but this
 # provides a sane default for relative operations.
-WorkingDirectory=/home/agent/ai-fishtank
+WorkingDirectory=/home/agent/aquarco
 
 # Standard PATH for finding gh, git, psql, yq, jq, claude, etc.
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:/home/agent/.local/bin
 
-# Optional: load secrets from /etc/aifishtank/secrets.env if it exists.
+# Optional: load secrets from /etc/aquarco/secrets.env if it exists.
 # The leading "-" means systemd will not fail if the file is absent.
-EnvironmentFile=-/etc/aifishtank/secrets.env
+EnvironmentFile=-/etc/aquarco/secrets.env
 
 # Resource constraints to prevent runaway processes.
 # Adjust based on available VM memory.
@@ -45,12 +45,12 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/home/agent /var/log/aifishtank /var/lib/aifishtank /var/run/aifishtank /tmp
+ReadWritePaths=/home/agent /var/log/aquarco /var/lib/aquarco /var/run/aquarco /tmp
 
-# Logging: send stdout/stderr to the journal; journalctl -u aifishtank-supervisor follows.
+# Logging: send stdout/stderr to the journal; journalctl -u aquarco-supervisor follows.
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=aifishtank-supervisor
+SyslogIdentifier=aquarco-supervisor
 
 [Install]
 WantedBy=multi-user.target

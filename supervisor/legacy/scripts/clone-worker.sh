@@ -148,7 +148,7 @@ clone_pending_repos() {
   if [[ ! -f "$ssh_repo_key" ]]; then
     log "info" "Generating deploy key for: $repo_name -> $ssh_key_dir"
     mkdir -p "$ssh_key_dir"
-    ssh-keygen -t ed25519 -f "$ssh_repo_key" -N '' -C "aifishtank-${ssh_key_name}" -q
+    ssh-keygen -t ed25519 -f "$ssh_repo_key" -N '' -C "aquarco-${ssh_key_name}" -q
   fi
 
   if [[ -f "${ssh_repo_key}.pub" ]]; then

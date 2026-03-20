@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from aifishtank_supervisor.database import Database
-from aifishtank_supervisor.exceptions import PipelineError, StageError
-from aifishtank_supervisor.pipeline.executor import (
+from aquarco_supervisor.database import Database
+from aquarco_supervisor.exceptions import PipelineError, StageError
+from aquarco_supervisor.pipeline.executor import (
     PipelineExecutor,
     _auto_commit,
     _compare_complexity,
@@ -18,10 +18,10 @@ from aifishtank_supervisor.pipeline.executor import (
     _resolve_field,
     check_conditions,
 )
-from aifishtank_supervisor.task_queue import TaskQueue
-from aifishtank_supervisor.utils import run_cmd as _run_cmd
-from aifishtank_supervisor.utils import run_git as _run_git
-from aifishtank_supervisor.utils import url_to_slug
+from aquarco_supervisor.task_queue import TaskQueue
+from aquarco_supervisor.utils import run_cmd as _run_cmd
+from aquarco_supervisor.utils import run_git as _run_git
+from aquarco_supervisor.utils import url_to_slug
 
 
 def test_https_url_to_slug() -> None:
@@ -243,7 +243,7 @@ async def test_setup_branch_uses_head_branch_if_provided(sample_pipelines: Any) 
     executor = PipelineExecutor(AsyncMock(), AsyncMock(), AsyncMock(), sample_pipelines)
 
     with patch(
-        "aifishtank_supervisor.pipeline.executor._git_checkout", new_callable=AsyncMock
+        "aquarco_supervisor.pipeline.executor._git_checkout", new_callable=AsyncMock
     ) as mock_checkout:
         branch = await executor._setup_branch(
             "task-001",
@@ -268,11 +268,11 @@ async def test_setup_branch_creates_branch_from_task_title(sample_pipelines: Any
     executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
 
     with patch(
-        "aifishtank_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
     ):
         branch = await executor._setup_branch("task-abc", {}, "/repos/myrepo")
 
-    assert branch.startswith("aifishtank/task-abc/")
+    assert branch.startswith("aquarco/task-abc/")
     assert "add-new-feature" in branch
 
 
@@ -336,24 +336,24 @@ async def test_execute_pipeline_no_pipeline_name_uses_task_pipeline(
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with patch(
-        "aifishtank_supervisor.pipeline.executor.execute_claude",
+        "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
         return_value={"result": "ok"},
-    ), patch("aifishtank_supervisor.pipeline.executor.Path"), patch(
-        "aifishtank_supervisor.pipeline.executor.load_overlay",
+    ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
+        "aquarco_supervisor.pipeline.executor.load_overlay",
         return_value=None,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._run_git",
+        "aquarco_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="0",
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._git_checkout",
+        "aquarco_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._auto_commit",
+        "aquarco_supervisor.pipeline.executor._auto_commit",
         new_callable=AsyncMock,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._get_ahead_count",
+        "aquarco_supervisor.pipeline.executor._get_ahead_count",
         new_callable=AsyncMock,
         return_value=0,
     ):
@@ -390,7 +390,7 @@ async def test_run_cmd_check_false_no_raise() -> None:
 async def test_run_git_delegates_to_run_cmd(tmp_path: Any) -> None:
     """_run_git produces correct git invocation (echo test)."""
     with patch(
-        "aifishtank_supervisor.utils.run_cmd", new_callable=AsyncMock
+        "aquarco_supervisor.utils.run_cmd", new_callable=AsyncMock
     ) as mock_run:
         mock_run.return_value = "abc123"
         result = await _run_git("/some/dir", "rev-parse", "HEAD")
@@ -403,7 +403,7 @@ async def test_run_git_delegates_to_run_cmd(tmp_path: Any) -> None:
 async def test_auto_commit_skips_when_clean() -> None:
     """_auto_commit does nothing when status output is empty."""
     with patch(
-        "aifishtank_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
     ) as mock_git:
         mock_git.return_value = ""  # clean tree
         await _auto_commit("/repo", "task-001", 0, "review")
@@ -421,7 +421,7 @@ async def test_auto_commit_commits_when_dirty() -> None:
     call_results = ["M  file.py", "", ""]  # status, add, commit
 
     with patch(
-        "aifishtank_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
     ) as mock_git:
         mock_git.side_effect = call_results
         await _auto_commit("/repo", "task-001", 2, "implementation")
@@ -436,11 +436,11 @@ async def test_auto_commit_commits_when_dirty() -> None:
 async def test_push_if_ahead_pushes_when_ahead() -> None:
     """_push_if_ahead calls git push when ahead count > 0."""
     with patch(
-        "aifishtank_supervisor.pipeline.executor._get_ahead_count",
+        "aquarco_supervisor.pipeline.executor._get_ahead_count",
         new_callable=AsyncMock,
         return_value=3,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
     ) as mock_git:
         await _push_if_ahead("/repo", "my-branch")
 
@@ -452,11 +452,11 @@ async def test_push_if_ahead_pushes_when_ahead() -> None:
 async def test_push_if_ahead_skips_when_not_ahead() -> None:
     """_push_if_ahead does not push when ahead count == 0."""
     with patch(
-        "aifishtank_supervisor.pipeline.executor._get_ahead_count",
+        "aquarco_supervisor.pipeline.executor._get_ahead_count",
         new_callable=AsyncMock,
         return_value=0,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
     ) as mock_git:
         await _push_if_ahead("/repo", "my-branch")
 
@@ -466,7 +466,7 @@ async def test_push_if_ahead_skips_when_not_ahead() -> None:
 @pytest.mark.asyncio
 async def test_get_ahead_count_returns_integer() -> None:
     with patch(
-        "aifishtank_supervisor.pipeline.executor._run_git",
+        "aquarco_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="5",
     ):
@@ -478,7 +478,7 @@ async def test_get_ahead_count_returns_integer() -> None:
 @pytest.mark.asyncio
 async def test_get_ahead_count_returns_zero_on_empty() -> None:
     with patch(
-        "aifishtank_supervisor.pipeline.executor._run_git",
+        "aquarco_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="",
     ):
@@ -490,7 +490,7 @@ async def test_get_ahead_count_returns_zero_on_empty() -> None:
 @pytest.mark.asyncio
 async def test_get_ahead_count_returns_zero_on_non_numeric() -> None:
     with patch(
-        "aifishtank_supervisor.pipeline.executor._run_git",
+        "aquarco_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="not-a-number",
     ):
@@ -518,11 +518,11 @@ async def test_execute_stage_success(sample_pipelines: Any) -> None:
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with patch(
-        "aifishtank_supervisor.pipeline.executor.execute_claude",
+        "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
         return_value={"result": "done"},
     ), patch(
-        "aifishtank_supervisor.pipeline.executor.Path",
+        "aquarco_supervisor.pipeline.executor.Path",
     ):
         output = await executor._execute_stage("implementation", "task-1", {}, {}, 0)
 
@@ -548,7 +548,7 @@ async def test_execute_stage_failure_records_and_raises(sample_pipelines: Any) -
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with patch(
-        "aifishtank_supervisor.pipeline.executor.execute_claude",
+        "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
         side_effect=RuntimeError("agent crashed"),
     ), pytest.raises(StageError, match="Stage 0.*failed"):
@@ -592,24 +592,24 @@ async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with patch(
-        "aifishtank_supervisor.pipeline.executor.execute_claude",
+        "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
         return_value={"result": "ok"},
-    ), patch("aifishtank_supervisor.pipeline.executor.Path"), patch(
-        "aifishtank_supervisor.pipeline.executor.load_overlay",
+    ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
+        "aquarco_supervisor.pipeline.executor.load_overlay",
         return_value=None,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._run_git",
+        "aquarco_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="0",
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._git_checkout",
+        "aquarco_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._auto_commit",
+        "aquarco_supervisor.pipeline.executor._auto_commit",
         new_callable=AsyncMock,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._get_ahead_count",
+        "aquarco_supervisor.pipeline.executor._get_ahead_count",
         new_callable=AsyncMock,
         return_value=0,
     ):
@@ -652,24 +652,24 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with patch(
-        "aifishtank_supervisor.pipeline.executor.execute_claude",
+        "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
         return_value={"result": "ok"},
-    ), patch("aifishtank_supervisor.pipeline.executor.Path"), patch(
-        "aifishtank_supervisor.pipeline.executor.load_overlay",
+    ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
+        "aquarco_supervisor.pipeline.executor.load_overlay",
         return_value=None,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._run_git",
+        "aquarco_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="0",
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._git_checkout",
+        "aquarco_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._auto_commit",
+        "aquarco_supervisor.pipeline.executor._auto_commit",
         new_callable=AsyncMock,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._get_ahead_count",
+        "aquarco_supervisor.pipeline.executor._get_ahead_count",
         new_callable=AsyncMock,
         return_value=0,
     ):
@@ -710,18 +710,18 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
     with patch(
-        "aifishtank_supervisor.pipeline.executor.execute_claude",
+        "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
         side_effect=RuntimeError("agent died"),
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._run_git",
+        "aquarco_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="",
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._git_checkout",
+        "aquarco_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,
-    ), patch("aifishtank_supervisor.pipeline.executor.Path"), patch(
-        "aifishtank_supervisor.pipeline.executor.load_overlay",
+    ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
+        "aquarco_supervisor.pipeline.executor.load_overlay",
         return_value=None,
     ):
         await executor.execute_pipeline("feature-pipeline", "task-1", {})
@@ -766,32 +766,32 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
     ]
 
     with patch(
-        "aifishtank_supervisor.pipeline.executor.get_pipeline_config",
+        "aquarco_supervisor.pipeline.executor.get_pipeline_config",
         return_value=optional_stages,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor.execute_claude",
+        "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
     ) as mock_claude, patch(
-        "aifishtank_supervisor.pipeline.executor.Path",
+        "aquarco_supervisor.pipeline.executor.Path",
     ), patch(
-        "aifishtank_supervisor.pipeline.executor.load_overlay",
+        "aquarco_supervisor.pipeline.executor.load_overlay",
         return_value=None,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._run_git",
+        "aquarco_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="",
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._git_checkout",
+        "aquarco_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._auto_commit",
+        "aquarco_supervisor.pipeline.executor._auto_commit",
         new_callable=AsyncMock,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._get_ahead_count",
+        "aquarco_supervisor.pipeline.executor._get_ahead_count",
         new_callable=AsyncMock,
         return_value=0,
     ), patch(
-        "aifishtank_supervisor.pipeline.executor._run_cmd",
+        "aquarco_supervisor.pipeline.executor._run_cmd",
         new_callable=AsyncMock,
     ):
         # First call (analyze) fails, second call (implementation) succeeds

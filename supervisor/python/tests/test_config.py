@@ -7,23 +7,23 @@ from pathlib import Path
 import pytest
 import yaml
 
-from aifishtank_supervisor.config import (
+from aquarco_supervisor.config import (
     get_pipeline_config,
     get_poller_config,
     load_config,
     load_pipelines,
     load_secrets,
 )
-from aifishtank_supervisor.exceptions import (
+from aquarco_supervisor.exceptions import (
     ConfigFileNotFoundError,
     ConfigValidationError,
 )
-from aifishtank_supervisor.models import PipelineConfig
+from aquarco_supervisor.models import PipelineConfig
 
 
 def test_load_valid_config(sample_config_path: Path) -> None:
     config = load_config(sample_config_path)
-    assert config.api_version == "aifishtank.supervisor/v1"
+    assert config.api_version == "aquarco.supervisor/v1"
     assert config.spec.database.url == "postgresql://test:test@localhost:5432/test"
     assert config.spec.database.max_connections == 2
     assert config.spec.global_limits.max_concurrent_agents == 2
@@ -43,7 +43,7 @@ def test_load_invalid_api_version(tmp_path: Path) -> None:
 
 def test_load_empty_database_url(tmp_path: Path) -> None:
     config = {
-        "apiVersion": "aifishtank.supervisor/v1",
+        "apiVersion": "aquarco.supervisor/v1",
         "spec": {
             "workdir": "/tmp",
             "agentsDir": "/tmp",
@@ -130,7 +130,7 @@ def test_load_non_mapping_yaml(tmp_path: Path) -> None:
 def test_load_config_pydantic_validation_error(tmp_path: Path) -> None:
     """Invalid spec structure should raise ConfigValidationError."""
     config = {
-        "apiVersion": "aifishtank.supervisor/v1",
+        "apiVersion": "aquarco.supervisor/v1",
         "spec": "not-a-dict",
     }
     config_file = tmp_path / "bad-spec.yaml"
@@ -172,7 +172,7 @@ def test_load_secrets_missing_files(sample_config_path: Path) -> None:
 def test_load_minimal_config(tmp_path: Path) -> None:
     """Config with no pollers should load without error."""
     config = {
-        "apiVersion": "aifishtank.supervisor/v1",
+        "apiVersion": "aquarco.supervisor/v1",
         "metadata": {"name": "test"},
         "spec": {
             "workdir": "/tmp",

@@ -124,7 +124,7 @@ write_valid_def() {
   local category="${2:-analyze}"
   write_prompt "$name"
   cat > "$FAKE_DEFS/${name}.yaml" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: $name
@@ -167,7 +167,7 @@ YAML
       ;;
     bad-category)
       cat > "$FAKE_DEFS/${name}.yaml" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: $name
@@ -183,7 +183,7 @@ YAML
       ;;
     missing-prompt)
       cat > "$FAKE_DEFS/${name}.yaml" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: $name
@@ -305,7 +305,7 @@ cat > "$FAKE_PROMPTS/low-pri.md" <<'MD'
 # low priority agent
 MD
 cat > "$FAKE_DEFS/high-pri-agent.yaml" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: high-pri-agent
@@ -320,7 +320,7 @@ spec:
     format: task-file
 YAML
 cat > "$FAKE_DEFS/low-pri-agent.yaml" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: low-pri-agent

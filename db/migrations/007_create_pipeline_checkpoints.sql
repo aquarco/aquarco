@@ -17,7 +17,7 @@
 
 -- up
 
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 
 CREATE TABLE IF NOT EXISTS pipeline_checkpoints (
     -- 1:1 with tasks; CASCADE ensures cleanup when a task is removed.
@@ -41,4 +41,4 @@ COMMENT ON COLUMN pipeline_checkpoints.checkpoint_data      IS 'Executor state n
 
 -- down
 
--- DROP TABLE IF EXISTS aifishtank.pipeline_checkpoints;
+-- DROP TABLE IF EXISTS aquarco.pipeline_checkpoints;

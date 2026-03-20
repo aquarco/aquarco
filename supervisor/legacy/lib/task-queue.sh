@@ -34,7 +34,7 @@ _tq_log() {
 _psql() {
   psql --no-psqlrc --tuples-only --no-align --quiet -F $'\x1f' \
     "${DATABASE_URL:?DATABASE_URL is not set}" \
-    -c "SET search_path TO aifishtank, public;" \
+    -c "SET search_path TO aquarco, public;" \
     "$@" | { grep -v '^SET$' || true; }
 }
 
@@ -43,7 +43,7 @@ _psql() {
 _psql_json() {
   psql --no-psqlrc --tuples-only --no-align --quiet -F $'\x1f' \
     "${DATABASE_URL:?DATABASE_URL is not set}" \
-    -c "SET search_path TO aifishtank, public;" \
+    -c "SET search_path TO aquarco, public;" \
     "$@" | { grep -v '^SET$' || true; }
 }
 

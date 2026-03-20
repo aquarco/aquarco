@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
-from aifishtank_supervisor.database import Database
-from aifishtank_supervisor.exceptions import AgentRegistryError, NoAvailableAgentError
-from aifishtank_supervisor.pipeline.agent_registry import AgentRegistry
+from aquarco_supervisor.database import Database
+from aquarco_supervisor.exceptions import AgentRegistryError, NoAvailableAgentError
+from aquarco_supervisor.pipeline.agent_registry import AgentRegistry
 
 
 @pytest.fixture

@@ -84,7 +84,7 @@ write_valid_definition() {
   local name="${2:-test-agent}"
   local prompt="${3:-$EXISTING_PROMPT}"
   cat > "$path" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: $name
@@ -135,7 +135,7 @@ assert_exit_code "wrong apiVersion exits 1" 1 "$actual_exit"
 # Test 3: wrong kind exits 1
 DEF="$TMPDIR_ROOT/bad-kind.yaml"
 cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: WrongKind
 metadata:
   name: test-agent
@@ -155,7 +155,7 @@ assert_exit_code "wrong kind exits 1" 1 "$actual_exit"
 # Test 4: missing metadata.name exits 1
 DEF="$TMPDIR_ROOT/missing-name.yaml"
 cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   version: "1.0.0"
@@ -174,7 +174,7 @@ assert_exit_code "missing metadata.name exits 1" 1 "$actual_exit"
 # Test 5: invalid name format (uppercase) exits 1
 DEF="$TMPDIR_ROOT/bad-name.yaml"
 cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: BadName_With_Underscores
@@ -194,7 +194,7 @@ assert_exit_code "invalid metadata.name (not kebab-case) exits 1" 1 "$actual_exi
 # Test 6: invalid semver exits 1
 DEF="$TMPDIR_ROOT/bad-version.yaml"
 cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: test-agent
@@ -214,7 +214,7 @@ assert_exit_code "invalid semver version exits 1" 1 "$actual_exit"
 # Test 7: description too short exits 1
 DEF="$TMPDIR_ROOT/short-desc.yaml"
 cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: test-agent
@@ -234,7 +234,7 @@ assert_exit_code "description < 10 chars exits 1" 1 "$actual_exit"
 # Test 8: empty categories exits 1
 DEF="$TMPDIR_ROOT/empty-categories.yaml"
 cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: test-agent
@@ -253,7 +253,7 @@ assert_exit_code "empty spec.categories exits 1" 1 "$actual_exit"
 # Test 9: invalid category value exits 1
 DEF="$TMPDIR_ROOT/bad-category.yaml"
 cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: test-agent
@@ -274,7 +274,7 @@ assert_exit_code "invalid category value exits 1" 1 "$actual_exit"
 for cat in review implementation test design docs analyze; do
   DEF="$TMPDIR_ROOT/cat-${cat}.yaml"
   cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: ${cat}-agent
@@ -295,7 +295,7 @@ done
 # Test 11: missing promptFile field exits 1
 DEF="$TMPDIR_ROOT/no-promptfile.yaml"
 cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: test-agent
@@ -314,7 +314,7 @@ assert_exit_code "missing spec.promptFile exits 1" 1 "$actual_exit"
 # Test 12: promptFile references nonexistent file exits 1
 DEF="$TMPDIR_ROOT/bad-promptfile.yaml"
 cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: test-agent
@@ -334,7 +334,7 @@ assert_exit_code "promptFile pointing to nonexistent file exits 1" 1 "$actual_ex
 # Test 13: invalid output format exits 1
 DEF="$TMPDIR_ROOT/bad-output.yaml"
 cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: test-agent
@@ -355,7 +355,7 @@ assert_exit_code "invalid spec.output.format exits 1" 1 "$actual_exit"
 for fmt in task-file github-pr-comment commit issue none; do
   DEF="$TMPDIR_ROOT/fmt-${fmt//\//-}.yaml"
   cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: test-agent
@@ -376,7 +376,7 @@ done
 # Test 15: priority out of range exits 1
 DEF="$TMPDIR_ROOT/bad-priority.yaml"
 cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: test-agent
@@ -397,7 +397,7 @@ assert_exit_code "priority > 100 exits 1" 1 "$actual_exit"
 # Test 16: priority = 0 exits 1
 DEF="$TMPDIR_ROOT/priority-zero.yaml"
 cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: test-agent
@@ -418,7 +418,7 @@ assert_exit_code "priority = 0 exits 1" 1 "$actual_exit"
 # Test 17: valid priority within range exits 0
 DEF="$TMPDIR_ROOT/good-priority.yaml"
 cat > "$DEF" <<YAML
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: test-agent

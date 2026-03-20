@@ -1,8 +1,8 @@
-name: aifishtank-monitoring
+name: aquarco-monitoring
 
 networks:
   default:
-    name: aifishtank-monitoring
+    name: aquarco-monitoring
 
 volumes:
   prometheus_data:
@@ -32,7 +32,7 @@ services:
       retries: 5
 
   # ── Grafana ───────────────────────────────────────────────────────────────────
-  # Runs on port 3000 — separate from the AI Fishtank web UI (port 8080).
+  # Runs on port 3000 — separate from the Aquarco web UI (port 8080).
   grafana:
     image: grafana/grafana:latest
     restart: unless-stopped

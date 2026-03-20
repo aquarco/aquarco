@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-from aifishtank_supervisor.database import Database
-from aifishtank_supervisor.models import SupervisorConfig
-from aifishtank_supervisor.pollers.github_tasks import GitHubTasksPoller
-from aifishtank_supervisor.task_queue import TaskQueue
+from aquarco_supervisor.database import Database
+from aquarco_supervisor.models import SupervisorConfig
+from aquarco_supervisor.pollers.github_tasks import GitHubTasksPoller
+from aquarco_supervisor.task_queue import TaskQueue
 
 
 def test_get_poller_config(sample_config: SupervisorConfig) -> None:

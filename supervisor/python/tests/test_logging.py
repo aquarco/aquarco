@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from aifishtank_supervisor.logging import get_logger, setup_logging
+from aquarco_supervisor.logging import get_logger, setup_logging
 
 
 def test_setup_logging_stderr() -> None:

@@ -12,7 +12,7 @@
 
 -- up
 
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 
 -- ---------------------------------------------------------------------------
 -- 1. Tasks table changes

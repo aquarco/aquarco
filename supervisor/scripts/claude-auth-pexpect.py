@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-IPC_DIR = sys.argv[1] if len(sys.argv) > 1 else "/var/lib/aifishtank/claude-ipc"
+IPC_DIR = sys.argv[1] if len(sys.argv) > 1 else "/var/lib/aquarco/claude-ipc"
 
 def log(msg):
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

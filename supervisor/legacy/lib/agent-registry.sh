@@ -32,7 +32,7 @@ _ar_log() {
 _ar_psql() {
   psql --no-psqlrc --tuples-only --no-align --quiet \
     "${DATABASE_URL:?DATABASE_URL is not set}" \
-    -c "SET search_path TO aifishtank, public;" \
+    -c "SET search_path TO aquarco, public;" \
     "$@" | { grep -v '^SET$' || true; }
 }
 
@@ -44,7 +44,7 @@ _ar_psql() {
 load_registry() {
   # Resolve registry file path.
   if [[ -z "$AGENT_REGISTRY_FILE" ]]; then
-    local agents_base="${CFG_AGENTS_DIR:-/home/agent/ai-fishtank/agents/definitions}"
+    local agents_base="${CFG_AGENTS_DIR:-/home/agent/aquarco/agents/definitions}"
     local parent_dir
     parent_dir="$(dirname "$agents_base")"
     AGENT_REGISTRY_FILE="${parent_dir}/schemas/agent-registry.json"
@@ -212,7 +212,7 @@ SQL
 # Usage: definition="$(get_agent_definition "analyze-agent")"
 get_agent_definition() {
   local agent_name="$1"
-  local agents_dir="${CFG_AGENTS_DIR:-/home/agent/ai-fishtank/agents/definitions}"
+  local agents_dir="${CFG_AGENTS_DIR:-/home/agent/aquarco/agents/definitions}"
   local def_file="${agents_dir}/${agent_name}.yaml"
 
   if [[ ! -f "$def_file" ]]; then
@@ -229,7 +229,7 @@ get_agent_definition() {
 # Usage: prompt_path="$(get_agent_prompt_file "analyze-agent")"
 get_agent_prompt_file() {
   local agent_name="$1"
-  local prompts_dir="${CFG_PROMPTS_DIR:-/home/agent/ai-fishtank/agents/prompts}"
+  local prompts_dir="${CFG_PROMPTS_DIR:-/home/agent/aquarco/agents/prompts}"
 
   # Look up promptFile from the registry.
   local prompt_file
@@ -288,7 +288,7 @@ SQL
 # Build the registry JSON inline from definition YAML files.
 # Used as a fallback when no registry file exists.
 _discover_agents_inline() {
-  local agents_dir="${CFG_AGENTS_DIR:-/home/agent/ai-fishtank/agents/definitions}"
+  local agents_dir="${CFG_AGENTS_DIR:-/home/agent/aquarco/agents/definitions}"
 
   if [[ ! -d "$agents_dir" ]]; then
     _ar_log "error" "Agents directory not found: $agents_dir"

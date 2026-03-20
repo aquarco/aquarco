@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 import yaml
 
-from aifishtank_supervisor.config_overlay import (
+from aquarco_supervisor.config_overlay import (
     ResolvedConfig,
     ScopedAgentView,
     load_overlay,
@@ -16,16 +16,16 @@ from aifishtank_supervisor.config_overlay import (
     merge_pipelines,
     resolve_config,
 )
-from aifishtank_supervisor.models import MergeStrategy
+from aquarco_supervisor.models import MergeStrategy
 
 
 # --- load_overlay ---
 
 
 def test_load_overlay_valid(tmp_path: Path) -> None:
-    """Parses a valid .aifishtank.yaml."""
+    """Parses a valid .aquarco.yaml."""
     overlay = {
-        "apiVersion": "aifishtank.config/v1",
+        "apiVersion": "aquarco.config/v1",
         "kind": "ConfigOverlay",
         "merge": {"agents": "extend", "pipelines": "replace"},
         "agents": [
@@ -36,11 +36,11 @@ def test_load_overlay_valid(tmp_path: Path) -> None:
         ],
         "promptsDir": "./my-prompts",
     }
-    (tmp_path / ".aifishtank.yaml").write_text(yaml.dump(overlay))
+    (tmp_path / ".aquarco.yaml").write_text(yaml.dump(overlay))
 
     result = load_overlay(tmp_path)
     assert result is not None
-    assert result.api_version == "aifishtank.config/v1"
+    assert result.api_version == "aquarco.config/v1"
     assert result.merge.agents == MergeStrategy.EXTEND
     assert result.merge.pipelines == MergeStrategy.REPLACE
     assert len(result.agents) == 1
@@ -50,28 +50,28 @@ def test_load_overlay_valid(tmp_path: Path) -> None:
 
 
 def test_load_overlay_missing_file(tmp_path: Path) -> None:
-    """Returns None when .aifishtank.yaml doesn't exist."""
+    """Returns None when .aquarco.yaml doesn't exist."""
     result = load_overlay(tmp_path)
     assert result is None
 
 
 def test_load_overlay_invalid_yaml(tmp_path: Path) -> None:
     """Returns None for invalid YAML."""
-    (tmp_path / ".aifishtank.yaml").write_text("{{bad yaml::")
+    (tmp_path / ".aquarco.yaml").write_text("{{bad yaml::")
     result = load_overlay(tmp_path)
     assert result is None
 
 
 def test_load_overlay_non_dict(tmp_path: Path) -> None:
     """Returns None when YAML is not a dict."""
-    (tmp_path / ".aifishtank.yaml").write_text("- just a list")
+    (tmp_path / ".aquarco.yaml").write_text("- just a list")
     result = load_overlay(tmp_path)
     assert result is None
 
 
 def test_load_overlay_defaults(tmp_path: Path) -> None:
     """Defaults are applied when minimal YAML is provided."""
-    (tmp_path / ".aifishtank.yaml").write_text(yaml.dump({}))
+    (tmp_path / ".aquarco.yaml").write_text(yaml.dump({}))
     result = load_overlay(tmp_path)
     assert result is not None
     assert result.merge.agents == MergeStrategy.EXTEND
@@ -169,7 +169,7 @@ def test_resolve_config_no_overlays(tmp_path: Path) -> None:
 
 def test_resolve_config_all_layers(tmp_path: Path) -> None:
     """Full 3-layer resolution."""
-    from aifishtank_supervisor.models import ConfigOverlay, MergeConfig
+    from aquarco_supervisor.models import ConfigOverlay, MergeConfig
 
     agents = {"a": {"name": "a", "categories": ["cat1"]}}
     pipelines = [{"name": "p1", "stages": []}]
@@ -318,7 +318,7 @@ def test_scoped_view_accessors_defaults(tmp_path: Path) -> None:
 
 def test_scoped_view_path_traversal(tmp_path: Path) -> None:
     """Path traversal in promptFile is rejected."""
-    from aifishtank_supervisor.exceptions import AgentRegistryError
+    from aquarco_supervisor.exceptions import AgentRegistryError
 
     resolved = ResolvedConfig(
         agents={"agent": {"name": "agent", "promptFile": "../../etc/passwd"}},

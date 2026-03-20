@@ -6,11 +6,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from aifishtank_supervisor.database import Database
-from aifishtank_supervisor.models import PipelineConfig, SupervisorConfig
-from aifishtank_supervisor.pollers.github_tasks import GitHubTasksPoller
-from aifishtank_supervisor.task_queue import TaskQueue
-from aifishtank_supervisor.utils import url_to_slug as _url_to_slug
+from aquarco_supervisor.database import Database
+from aquarco_supervisor.models import PipelineConfig, SupervisorConfig
+from aquarco_supervisor.pollers.github_tasks import GitHubTasksPoller
+from aquarco_supervisor.task_queue import TaskQueue
+from aquarco_supervisor.utils import url_to_slug as _url_to_slug
 
 SAMPLE_REPO = {
     "name": "test-repo",
@@ -109,7 +109,7 @@ async def test_poll_creates_tasks_from_issues(
     ]
 
     with patch(
-        "aifishtank_supervisor.pollers.github_tasks._gh_list_issues",
+        "aquarco_supervisor.pollers.github_tasks._gh_list_issues",
         AsyncMock(return_value=issues),
     ):
         count = await poller.poll()
@@ -134,7 +134,7 @@ async def test_poll_handles_gh_error(
     poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
 
     with patch(
-        "aifishtank_supervisor.pollers.github_tasks._gh_list_issues",
+        "aquarco_supervisor.pollers.github_tasks._gh_list_issues",
         AsyncMock(side_effect=RuntimeError("gh failed")),
     ):
         count = await poller.poll()
@@ -156,7 +156,7 @@ async def test_poll_no_repos_from_db(
     poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
 
     with patch(
-        "aifishtank_supervisor.pollers.github_tasks._gh_list_issues",
+        "aquarco_supervisor.pollers.github_tasks._gh_list_issues",
         AsyncMock(return_value=[]),
     ) as mock_gh:
         count = await poller.poll()
@@ -179,7 +179,7 @@ async def test_poll_skips_repo_with_invalid_url(
     poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
 
     with patch(
-        "aifishtank_supervisor.pollers.github_tasks._gh_list_issues",
+        "aquarco_supervisor.pollers.github_tasks._gh_list_issues",
         AsyncMock(return_value=[]),
     ) as mock_gh:
         count = await poller.poll()

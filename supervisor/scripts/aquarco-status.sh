@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# supervisor/scripts/aifishtank-status.sh
-# AI Fishtank status reporting utility.
+# supervisor/scripts/aquarco-status.sh
+# Aquarco status reporting utility.
 #
 # Displays supervisor status, agent registry summary, task queue statistics,
 # active agent instances, and recent tasks. Supports --json for machine-readable
 # output consumed by dashboards and health monitors.
 #
 # Usage:
-#   ./aifishtank-status.sh [options]
+#   ./aquarco-status.sh [options]
 #
 # Options:
 #   --json         Output as a JSON document instead of human-readable text
@@ -27,7 +27,7 @@ source "${SUPERVISOR_ROOT}/lib/config.sh"
 # ── Globals ───────────────────────────────────────────────────────────────────
 
 OUTPUT_JSON=false
-SUPERVISOR_PID_FILE="${SUPERVISOR_PID_FILE:-/var/run/aifishtank/supervisor.pid}"
+SUPERVISOR_PID_FILE="${SUPERVISOR_PID_FILE:-/var/run/aquarco/supervisor.pid}"
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 
@@ -117,7 +117,7 @@ _get_supervisor_status() {
 }
 
 _get_registry_summary() {
-  local agents_dir="${CFG_AGENTS_DIR:-/home/agent/ai-fishtank/agents/definitions}"
+  local agents_dir="${CFG_AGENTS_DIR:-/home/agent/aquarco/agents/definitions}"
   local registry_file="${SUPERVISOR_ROOT}/../agents/schemas/agent-registry.json"
 
   local agent_count=0
@@ -146,7 +146,7 @@ _get_registry_summary() {
 _get_task_queue_stats() {
   local sql
   sql="$(cat <<'SQL'
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 SELECT
   status,
   COUNT(*) AS cnt
@@ -188,7 +188,7 @@ SQL
 _get_active_instances() {
   local sql
   sql="$(cat <<'SQL'
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 SELECT
   agent_name,
   active_count,
@@ -244,7 +244,7 @@ SQL
 _get_recent_tasks() {
   local sql
   sql="$(cat <<'SQL'
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 SELECT
   id,
   title,
@@ -339,7 +339,7 @@ main() {
       }'
   else
     echo "=============================="
-    echo " AI Fishtank Supervisor Status"
+    echo " Aquarco Supervisor Status"
     printf " %s\n" "$ts"
     echo "=============================="
 

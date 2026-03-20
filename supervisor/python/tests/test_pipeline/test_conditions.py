@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aifishtank_supervisor.pipeline.executor import check_conditions
+from aquarco_supervisor.pipeline.executor import check_conditions
 
 
 def test_equality_condition() -> None:

@@ -37,7 +37,7 @@ app.command("status")(status)
 app.command("auth-watch")(auth_watch)
 log = get_logger("supervisor")
 
-DEFAULT_CONFIG = "/home/agent/ai-fishtank/supervisor/config/supervisor.yaml"
+DEFAULT_CONFIG = "/home/agent/aquarco/supervisor/config/supervisor.yaml"
 
 
 class Supervisor:
@@ -417,7 +417,7 @@ def _build_health_report(
 def run(
     config: str = typer.Option(DEFAULT_CONFIG, "--config", "-c", help="Config file path"),
 ) -> None:
-    """Start the AI Fishtank supervisor."""
+    """Start the Aquarco supervisor."""
     cfg = load_config(config)
     secrets = load_secrets(cfg)
 

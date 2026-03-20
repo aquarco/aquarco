@@ -1,4 +1,4 @@
-"""Status reporting CLI command for AI Fishtank supervisor."""
+"""Status reporting CLI command for Aquarco supervisor."""
 
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ from ..logging import get_logger, setup_logging
 
 log = get_logger("status")
 
-DEFAULT_CONFIG = "/home/agent/ai-fishtank/supervisor/config/supervisor.yaml"
-DEFAULT_PID_FILE = "/var/run/aifishtank/supervisor.pid"
+DEFAULT_CONFIG = "/home/agent/aquarco/supervisor/config/supervisor.yaml"
+DEFAULT_PID_FILE = "/var/run/aquarco/supervisor.pid"
 
 
 # ── Process status ────────────────────────────────────────────────────────────
@@ -189,7 +189,7 @@ def _render_human(
 ) -> None:
     """Print human-readable status to stdout."""
     print("==============================")
-    print(" AI Fishtank Supervisor Status")
+    print(" Aquarco Supervisor Status")
     print(f" {generated_at}")
     print("==============================")
 
@@ -278,7 +278,7 @@ async def _run_status(config_file: str, output_json: bool, pid_file: str) -> Non
 
     # Load config (best-effort — status must not hard-fail on bad config)
     db_url: str | None = None
-    agents_dir = "/home/agent/ai-fishtank/agents/definitions"
+    agents_dir = "/home/agent/aquarco/agents/definitions"
 
     try:
         cfg = load_config(config_file)

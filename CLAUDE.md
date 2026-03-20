@@ -45,7 +45,7 @@ Source code lives on the macOS host and is synced into the VirtualBox VM via a
 shared folder (`vboxsf`). The mount is configured in `vagrant/Vagrantfile`:
 
 ```
-config.vm.synced_folder "..", "/home/agent/ai-fishtank", type: "virtualbox"
+config.vm.synced_folder "..", "/home/agent/aquarco", type: "virtualbox"
 ```
 
 **Important:** `vboxsf` does **not** propagate filesystem events (inotify/fswatch)
@@ -66,11 +66,11 @@ changes.
   (default interval ~1-5 s) and auto-rebuild. No restart needed.
 - **Supervisor** — after editing `supervisor/python/src/`, restart manually:
   ```bash
-  vagrant ssh d2a20a4 -- -t "sudo systemctl restart aifishtank-supervisor-python"
+  vagrant ssh d2a20a4 -- -t "sudo systemctl restart aquarco-supervisor-python"
   ```
 - **Monitoring** — after config changes, restart the stack:
   ```bash
-  vagrant ssh d2a20a4 -- -t "cd /home/agent/ai-fishtank/docker && sudo docker compose -f compose.yml -f compose.monitoring.yml restart prometheus grafana loki"
+  vagrant ssh d2a20a4 -- -t "cd /home/agent/aquarco/docker && sudo docker compose -f compose.yml -f compose.monitoring.yml restart prometheus grafana loki"
   ```
 
 ## Configuration Layout
@@ -120,8 +120,8 @@ The supervisor system manages autonomous AI agent pipelines. It was rewritten fr
 ### Running
 ```bash
 cd supervisor/python && pip install -e ".[dev]"
-aifishtank-supervisor --config supervisor/config/supervisor.yaml
-# Or via systemd: aifishtank-supervisor-python.service
+aquarco-supervisor --config supervisor/config/supervisor.yaml
+# Or via systemd: aquarco-supervisor-python.service
 ```
 
 ### Testing

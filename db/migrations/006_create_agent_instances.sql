@@ -12,7 +12,7 @@
 
 -- up
 
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 
 CREATE TABLE IF NOT EXISTS agent_instances (
     -- Matches metadata.name in the agent definition YAML.
@@ -44,4 +44,4 @@ COMMENT ON COLUMN agent_instances.total_tokens_used IS 'Cumulative token usage f
 
 -- down
 
--- DROP TABLE IF EXISTS aifishtank.agent_instances;
+-- DROP TABLE IF EXISTS aquarco.agent_instances;

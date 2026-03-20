@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # supervisor/lib/config.sh
-# Configuration loading library for the AI Fishtank supervisor.
+# Configuration loading library for the Aquarco supervisor.
 #
 # Parses supervisor.yaml using yq and exports configuration values as
 # shell variables. Supports runtime reload via SIGHUP.
@@ -14,7 +14,7 @@ set -euo pipefail
 
 # ── Globals ──────────────────────────────────────────────────────────────────
 
-SUPERVISOR_CONFIG_FILE="${SUPERVISOR_CONFIG_FILE:-/home/agent/ai-fishtank/supervisor/config/supervisor.yaml}"
+SUPERVISOR_CONFIG_FILE="${SUPERVISOR_CONFIG_FILE:-/home/agent/aquarco/supervisor/config/supervisor.yaml}"
 SUPERVISOR_CONFIG_LOADED=false
 
 # ── Logging shim (safe to call before log lib is loaded) ─────────────────────
@@ -50,8 +50,8 @@ load_config() {
   # Validate the apiVersion field before proceeding.
   local api_version
   api_version="$(yq '.apiVersion' "$config_file" 2>/dev/null || true)"
-  if [[ "$api_version" != "aifishtank.supervisor/v1" ]]; then
-    _cfg_log "error" "Invalid apiVersion '$api_version'; expected aifishtank.supervisor/v1"
+  if [[ "$api_version" != "aquarco.supervisor/v1" ]]; then
+    _cfg_log "error" "Invalid apiVersion '$api_version'; expected aquarco.supervisor/v1"
     return 1
   fi
 
@@ -80,7 +80,7 @@ load_config() {
   CFG_LOG_LEVEL="$(yq '.spec.logging.level // "info"' "$config_file")"
 
   export CFG_LOG_FILE
-  CFG_LOG_FILE="$(yq '.spec.logging.file // "/var/log/aifishtank/supervisor.log"' "$config_file")"
+  CFG_LOG_FILE="$(yq '.spec.logging.file // "/var/log/aquarco/supervisor.log"' "$config_file")"
 
   export CFG_LOG_FORMAT
   CFG_LOG_FORMAT="$(yq '.spec.logging.format // "json"' "$config_file")"
@@ -262,7 +262,7 @@ _validate_config() {
   # Must have the correct apiVersion.
   local api_version
   api_version="$(yq '.apiVersion' "$config_file" 2>/dev/null || echo "")"
-  if [[ "$api_version" != "aifishtank.supervisor/v1" ]]; then
+  if [[ "$api_version" != "aquarco.supervisor/v1" ]]; then
     _cfg_log "error" "Config apiVersion '$api_version' is invalid"
     return 1
   fi

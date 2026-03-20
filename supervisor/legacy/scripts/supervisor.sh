@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # supervisor/scripts/supervisor.sh
-# AI Fishtank Agent Supervisor — main control loop.
+# Aquarco Agent Supervisor — main control loop.
 #
 # Responsibilities:
 #   - Load configuration and agent registry
@@ -17,7 +17,7 @@ set -euo pipefail
 
 # Feature flag: if SUPERVISOR_USE_PYTHON=1, delegate to the Python implementation.
 if [ "${SUPERVISOR_USE_PYTHON:-0}" = "1" ]; then
-    exec aifishtank-supervisor "$@"
+    exec aquarco-supervisor "$@"
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -221,7 +221,7 @@ dispatch_pending_tasks() {
 
   local current_active
   current_active="$(psql --no-psqlrc --tuples-only --no-align \
-    "${DATABASE_URL:?}" -c "SET search_path TO aifishtank, public;" \
+    "${DATABASE_URL:?}" -c "SET search_path TO aquarco, public;" \
     -c "$active_count_sql" 2>/dev/null | tail -1 | tr -d '[:space:]' || echo "0")"
   current_active="${current_active:-0}"
 
@@ -323,7 +323,7 @@ maybe_report_health() {
   # Gather stats.
   local stats_sql
   stats_sql="$(cat <<'SQL'
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 SELECT
   status,
   COUNT(*) AS cnt
@@ -384,7 +384,7 @@ main() {
   trap handle_sigterm SIGTERM
   trap handle_sigint  SIGINT
 
-  log "info" "AI Fishtank Supervisor starting (PID=$SUPERVISOR_PID)"
+  log "info" "Aquarco Supervisor starting (PID=$SUPERVISOR_PID)"
 
   # Load configuration.
   if ! load_config; then

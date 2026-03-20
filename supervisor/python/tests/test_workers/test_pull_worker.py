@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from aifishtank_supervisor.database import Database
-from aifishtank_supervisor.workers.pull_worker import PullWorker
+from aquarco_supervisor.database import Database
+from aquarco_supervisor.workers.pull_worker import PullWorker
 
 
 @pytest.mark.asyncio
@@ -70,7 +70,7 @@ async def test_pull_ready_repos_pulls_and_updates_db(tmp_path: Any) -> None:
     sha_sequence = ["oldsha123", "", "", "newsha456"]
 
     with patch(
-        "aifishtank_supervisor.workers.pull_worker._run_git",
+        "aquarco_supervisor.workers.pull_worker._run_git",
         new_callable=AsyncMock,
         side_effect=sha_sequence,
     ) as mock_git:
@@ -111,7 +111,7 @@ async def test_pull_ready_repos_no_db_update_on_same_sha(tmp_path: Any) -> None:
     sha_sequence = [same_sha, "", "", same_sha]
 
     with patch(
-        "aifishtank_supervisor.workers.pull_worker._run_git",
+        "aquarco_supervisor.workers.pull_worker._run_git",
         new_callable=AsyncMock,
         side_effect=sha_sequence,
     ):
@@ -154,7 +154,7 @@ async def test_pull_ready_repos_handles_git_error_gracefully(tmp_path: Any) -> N
         return "sha-healthy"
 
     with patch(
-        "aifishtank_supervisor.workers.pull_worker._run_git",
+        "aquarco_supervisor.workers.pull_worker._run_git",
         side_effect=mock_git,
     ):
         worker = PullWorker(db)
@@ -186,7 +186,7 @@ async def test_pull_ready_repos_multiple_repos(tmp_path: Any) -> None:
     git_responses = ["sha1", "", "", "sha1"] * 3
 
     with patch(
-        "aifishtank_supervisor.workers.pull_worker._run_git",
+        "aquarco_supervisor.workers.pull_worker._run_git",
         new_callable=AsyncMock,
         side_effect=git_responses,
     ):
@@ -219,7 +219,7 @@ async def test_pull_skipped_when_active_pipeline_uses_repo(tmp_path: Any) -> Non
     db.fetch_val = AsyncMock(return_value=1)
 
     with patch(
-        "aifishtank_supervisor.workers.pull_worker._run_git",
+        "aquarco_supervisor.workers.pull_worker._run_git",
         new_callable=AsyncMock,
     ) as mock_git:
         worker = PullWorker(db)
@@ -251,7 +251,7 @@ async def test_pull_active_pipeline_check_uses_correct_query(tmp_path: Any) -> N
     db.fetch_val = AsyncMock(return_value=0)
 
     with patch(
-        "aifishtank_supervisor.workers.pull_worker._run_git",
+        "aquarco_supervisor.workers.pull_worker._run_git",
         new_callable=AsyncMock,
         side_effect=["sha-old", "", "", "sha-new"],
     ):
@@ -290,7 +290,7 @@ async def test_pull_idle_repo_not_blocked_by_other_active_repo(tmp_path: Any) ->
     db.fetch_val = AsyncMock(side_effect=[2, 0])
 
     with patch(
-        "aifishtank_supervisor.workers.pull_worker._run_git",
+        "aquarco_supervisor.workers.pull_worker._run_git",
         new_callable=AsyncMock,
         side_effect=["sha-old", "", "", "sha-new"],
     ):

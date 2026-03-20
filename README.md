@@ -1,4 +1,4 @@
-# AI Fishtank
+# Aquarco
 
 Sandboxed VirtualBox VM for autonomous AI agents. Agents watch GitHub
 repositories for issues and PRs, run multi-stage pipelines (analyze, design,
@@ -28,9 +28,9 @@ Open http://localhost:8080, log in to GitHub and Claude, then add a repository.
 │  │  └───────────────────────────────────────────────────────┘  │  │
 │  │                                                             │  │
 │  │  ┌─ Systemd Services (agent:agent) ──────────────────────┐  │  │
-│  │  │  aifishtank-supervisor-python  ← Python supervisor    │  │  │
-│  │  │  aifishtank-claude-auth        ← Claude IPC helper    │  │  │
-│  │  │  aifishtank-stack              ← docker compose up/dn │  │  │
+│  │  │  aquarco-supervisor-python  ← Python supervisor    │  │  │
+│  │  │  aquarco-claude-auth        ← Claude IPC helper    │  │  │
+│  │  │  aquarco-stack              ← docker compose up/dn │  │  │
 │  │  └───────────────────────────────────────────────────────┘  │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 └───────────────────────────────────────────────────────────────────┘
@@ -52,12 +52,12 @@ Source code is bind-mounted for hot reload; `node_modules` use named volumes.
 
 | Service                      | User:Group  | Entry Point                                       |
 |------------------------------|-------------|---------------------------------------------------|
-| aifishtank-stack             | agent:agent | `docker compose up -d` (oneshot)                  |
-| aifishtank-supervisor-python | agent:agent | `/home/agent/.venv/bin/aifishtank-supervisor run` |
-| aifishtank-claude-auth       | agent:agent | `supervisor/scripts/claude-auth-helper.sh`        |
+| aquarco-stack             | agent:agent | `docker compose up -d` (oneshot)                  |
+| aquarco-supervisor-python | agent:agent | `/home/agent/.venv/bin/aquarco-supervisor run` |
+| aquarco-claude-auth       | agent:agent | `supervisor/scripts/claude-auth-helper.sh`        |
 
 All three are enabled on boot. The supervisor waits for the Docker stack
-(`After=aifishtank-stack.service`).
+(`After=aquarco-stack.service`).
 
 ### Python Supervisor (`supervisor/python/`)
 
@@ -93,14 +93,14 @@ Async Python process running the main loop every ~5 seconds:
   .claude/
     .credentials.json         ← Claude auth token (written by auth helper)
   .venv/                      ← Python virtualenv with supervisor CLI
-  ai-fishtank/                ← synced from host git repo (VirtualBox shared folder)
+  aquarco/                ← synced from host git repo (VirtualBox shared folder)
   repos/{repo-name}/          ← cloned target repositories
 
-/var/lib/aifishtank/
+/var/lib/aquarco/
   claude-ipc/                 ← file-based IPC between API container and auth helper
   triggers/                   ← external trigger drop directory
 
-/var/log/aifishtank/
+/var/log/aquarco/
   supervisor.log              ← JSON structured logs
   agents/*.log                ← per-agent execution logs
 ```
@@ -111,7 +111,7 @@ Async Python process running the main loop every ~5 seconds:
 |--------------------------------|----------------|-------------------------|
 | /home/agent/.ssh               | /agent-ssh     | GitHub token read/write |
 | /home/agent/repos              | /repos         | Cloned repos access     |
-| /var/lib/aifishtank/claude-ipc | /claude-ipc    | Claude auth IPC         |
+| /var/lib/aquarco/claude-ipc | /claude-ipc    | Claude auth IPC         |
 | api/src                        | /app/src       | Hot-reloaded source     |
 
 ## Authentication Flows
@@ -181,7 +181,7 @@ User          Web UI           API Container            IPC Files         Auth H
 
 **IPC mechanism**: The API container cannot run the `claude` CLI directly
 (it runs inside Docker). It writes request files to `/claude-ipc/` (mounted
-from `/var/lib/aifishtank/claude-ipc/`). The `claude-auth-helper.sh` systemd
+from `/var/lib/aquarco/claude-ipc/`). The `claude-auth-helper.sh` systemd
 service watches that directory and handles requests using Python PKCE OAuth.
 
 ### Repository Clone
@@ -224,7 +224,7 @@ the public key in the database for display in the UI.
 | GraphQL API       | node        | Docker          | /agent-ssh/github-token     | /agent-ssh/github-token        |
 |                   |             |                 | /claude-ipc/* responses     | /claude-ipc/* requests         |
 | Web UI            | node        | Docker          | —                           | —                              |
-| Python Supervisor | agent:agent | VM host systemd | ~/.ssh/github-token         | /var/log/aifishtank/           |
+| Python Supervisor | agent:agent | VM host systemd | ~/.ssh/github-token         | /var/log/aquarco/           |
 |                   |             |                 | ~/.anthropic-key            | ~/repos/                       |
 |                   |             |                 | supervisor.yaml             | /tmp/git-askpass-helper.sh     |
 | Claude Auth       | agent:agent | VM host systemd | /claude-ipc/* requests      | ~/.claude/.credentials.json    |
@@ -241,7 +241,7 @@ the public key in the database for display in the UI.
 ```yaml
 spec:
   database:
-    url: postgresql://aifishtank:aifishtank@localhost:5432/aifishtank
+    url: postgresql://aquarco:aquarco@localhost:5432/aquarco
   globalLimits:
     maxConcurrentAgents: 3
     maxTokensPerHour: 1000000
@@ -249,16 +249,16 @@ spec:
   secrets:
     githubTokenFile: /home/agent/.ssh/github-token
     anthropicKeyFile: /home/agent/.anthropic-key
-  pipelinesFile: /home/agent/ai-fishtank/config/pipelines.yaml
-  agentsDir: /home/agent/ai-fishtank/config/agents/definitions
-  promptsDir: /home/agent/ai-fishtank/config/agents/prompts
+  pipelinesFile: /home/agent/aquarco/config/pipelines.yaml
+  agentsDir: /home/agent/aquarco/config/agents/definitions
+  promptsDir: /home/agent/aquarco/config/agents/prompts
 ```
 
 Secrets are re-read from disk every loop iteration (~5s). When a token file
 appears after the user logs in via web UI, the supervisor detects it
 automatically and logs `github_token_detected`.
 
-SIGHUP triggers a full config reload: `systemctl reload aifishtank-supervisor-python`
+SIGHUP triggers a full config reload: `systemctl reload aquarco-supervisor-python`
 
 ### Agent Definitions (`config/agents/definitions/`)
 
@@ -328,13 +328,13 @@ Source changes on the host are immediately visible inside the VM.
 cd vagrant && vagrant ssh
 
 # Inside VM — supervisor
-sudo journalctl -u aifishtank-supervisor-python -f     # follow logs
-sudo systemctl restart aifishtank-supervisor-python     # restart
-sudo systemctl reload aifishtank-supervisor-python      # reload config (SIGHUP)
+sudo journalctl -u aquarco-supervisor-python -f     # follow logs
+sudo systemctl restart aquarco-supervisor-python     # restart
+sudo systemctl reload aquarco-supervisor-python      # reload config (SIGHUP)
 
 # Inside VM — Docker stack
-sudo docker compose -f /home/agent/ai-fishtank/docker/compose.yml logs -f api
+sudo docker compose -f /home/agent/aquarco/docker/compose.yml logs -f api
 
 # DB access from host
-psql postgresql://aifishtank:aifishtank@localhost:15432/aifishtank
+psql postgresql://aquarco:aquarco@localhost:15432/aquarco
 ```

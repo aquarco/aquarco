@@ -17,7 +17,7 @@
 
 -- up
 
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 
 CREATE TABLE IF NOT EXISTS context (
     id              BIGSERIAL       PRIMARY KEY,
@@ -73,4 +73,4 @@ CREATE INDEX IF NOT EXISTS idx_context_task_id
 
 -- down
 
--- DROP TABLE IF EXISTS aifishtank.context;
+-- DROP TABLE IF EXISTS aquarco.context;

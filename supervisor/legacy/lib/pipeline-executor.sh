@@ -21,7 +21,7 @@ source "${_PE_LIB_DIR}/utils.sh"
 
 # ── Globals ───────────────────────────────────────────────────────────────────
 
-PIPELINE_CONTEXT_DIR="${PIPELINE_CONTEXT_DIR:-/tmp/aifishtank/pipeline-context}"
+PIPELINE_CONTEXT_DIR="${PIPELINE_CONTEXT_DIR:-/tmp/aquarco/pipeline-context}"
 
 # ── Logging shim ──────────────────────────────────────────────────────────────
 
@@ -124,7 +124,7 @@ execute_pipeline() {
       e_tid="$(_tq_escape "$task_id")"
       e_cat="$(_tq_escape "$s_category")"
       local init_sql
-      init_sql="SET search_path TO aifishtank, public;"
+      init_sql="SET search_path TO aquarco, public;"
       init_sql+=" INSERT INTO stages (task_id, stage_number, category, status)"
       init_sql+=" VALUES (\$tq\$${e_tid}\$tq\$, ${s_num}, \$tq\$${e_cat}\$tq\$, 'pending')"
       init_sql+=" ON CONFLICT (task_id, stage_number) DO NOTHING;"
@@ -164,7 +164,7 @@ execute_pipeline() {
         local task_title_slug
         task_title_slug="$(_psql -c "SELECT title FROM tasks WHERE id = \$tq\$$(_tq_escape "$task_id")\$tq\$;" 2>/dev/null | tr -d '[:space:]' || echo "task")"
         task_title_slug="$(echo "$task_title_slug" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//' | head -c 40)"
-        pipeline_branch="aifishtank/${task_id}/${task_title_slug}"
+        pipeline_branch="aquarco/${task_id}/${task_title_slug}"
 
         git -C "$clone_dir" checkout "$default_branch" 2>/dev/null || true
         git -C "$clone_dir" reset --hard "origin/$default_branch" 2>/dev/null || true
@@ -457,7 +457,7 @@ execute_agent() {
   # Context is piped on stdin as the user prompt.
   # cd to the repo directory so the agent sees the actual codebase.
   # Debug/verbose output goes to a separate log file per invocation.
-  local debug_log="/var/log/aifishtank/claude-${task_id}-stage${stage_num}.log"
+  local debug_log="/var/log/aquarco/claude-${task_id}-stage${stage_num}.log"
   if ! raw_output="$(cd "${work_dir:-.}" && timeout "${timeout_seconds}" \
       claude "${claude_args[@]}" < "$context_file" 2>"$debug_log")"; then
     exit_code=$?
@@ -490,7 +490,7 @@ execute_agent() {
   fi
 
   # Save structured output for debugging store failures.
-  echo "$structured_output" > "/var/log/aifishtank/agent-output-${task_id}-stage${stage_num}.json" 2>/dev/null || true
+  echo "$structured_output" > "/var/log/aquarco/agent-output-${task_id}-stage${stage_num}.json" 2>/dev/null || true
 
   echo "$structured_output"
   return 0
@@ -667,7 +667,7 @@ checkpoint_pipeline() {
   local checkpoint_data
   checkpoint_data="$(jq -n \
     --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-    --arg workdir "${CFG_WORKDIR:-/home/agent/ai-fishtank}" \
+    --arg workdir "${CFG_WORKDIR:-/home/agent/aquarco}" \
     '{"checkpointed_at": $ts, "workdir": $workdir}')"
 
   local e_task_id e_checkpoint
@@ -676,7 +676,7 @@ checkpoint_pipeline() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 INSERT INTO pipeline_checkpoints (task_id, last_completed_stage, checkpoint_data, created_at)
 VALUES (
   \$tq\$${e_task_id}\$tq\$,
@@ -771,7 +771,7 @@ _get_checkpoint() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 SELECT row_to_json(pc)
 FROM (
   SELECT task_id, last_completed_stage, checkpoint_data, created_at
@@ -793,7 +793,7 @@ _delete_checkpoint() {
   e_task_id="$(_tq_escape "$task_id")"
 
   local sql
-  sql="SET search_path TO aifishtank, public; DELETE FROM pipeline_checkpoints WHERE task_id = \$tq\$${e_task_id}\$tq\$;"
+  sql="SET search_path TO aquarco, public; DELETE FROM pipeline_checkpoints WHERE task_id = \$tq\$${e_task_id}\$tq\$;"
   psql --no-psqlrc --tuples-only --no-align \
     "${DATABASE_URL:?}" -c "$sql" &>/dev/null || true
 }
@@ -809,7 +809,7 @@ _record_stage_executing() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 INSERT INTO stages (task_id, stage_number, category, agent, status, started_at)
 VALUES (\$tq\$${e_task_id}\$tq\$, ${stage_num}, \$tq\$${e_category}\$tq\$, \$tq\$${e_agent}\$tq\$, 'executing', NOW())
 ON CONFLICT (task_id, stage_number) DO UPDATE
@@ -832,7 +832,7 @@ _record_stage_failed() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 UPDATE stages
 SET    status        = 'failed',
        completed_at  = NOW(),
@@ -855,7 +855,7 @@ _record_stage_skipped() {
 
   local sql
   sql="$(cat <<SQL
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 INSERT INTO stages (task_id, stage_number, category, status, started_at, completed_at)
 VALUES (\$tq\$${e_task_id}\$tq\$, ${stage_num}, \$tq\$${e_category}\$tq\$, 'skipped', NOW(), NOW())
 ON CONFLICT (task_id, stage_number) DO UPDATE
@@ -915,7 +915,7 @@ _complexity_lt() {
 #
 # Arguments:
 #   $1  task_id         — task identifier
-#   $2  branch_name     — pipeline branch name (aifishtank/<task_id>/...)
+#   $2  branch_name     — pipeline branch name (aquarco/<task_id>/...)
 #   $3  clone_dir       — path to the repository clone
 #   $4  stage_summaries — collected markdown summaries from all stages
 _create_pipeline_pr() {
@@ -970,14 +970,14 @@ _create_pipeline_pr() {
       pr_number="$(_psql -c "SELECT initial_context::json->>'github_pr_number' FROM tasks WHERE id = \$tq\$$(_tq_escape "$task_id")\$tq\$;" 2>/dev/null | tr -d '[:space:]' || echo "")"
       if [[ -n "$pr_number" && "$pr_number" != "null" ]]; then
         local comment_body
-        comment_body="## AI Fishtank Review — Fixes Pushed
+        comment_body="## Aquarco Review — Fixes Pushed
 
 **Task**: ${task_id}
 **Commits pushed**: ${ahead}
 
 $(echo -e "$stage_summaries")
 ---
-*Automatically generated by AI Fishtank supervisor*"
+*Automatically generated by Aquarco supervisor*"
         gh issue comment "$pr_number" --repo "$repo_slug" --body "$comment_body" 2>/dev/null || \
           _pe_log "warn" "Failed to post review comment on PR #$pr_number"
       fi
@@ -989,13 +989,13 @@ $(echo -e "$stage_summaries")
       pr_number="$(_psql -c "SELECT initial_context::json->>'github_pr_number' FROM tasks WHERE id = \$tq\$$(_tq_escape "$task_id")\$tq\$;" 2>/dev/null | tr -d '[:space:]' || echo "")"
       if [[ -n "$pr_number" && "$pr_number" != "null" ]]; then
         local comment_body
-        comment_body="## AI Fishtank Review
+        comment_body="## Aquarco Review
 
 **Task**: ${task_id}
 
 $(echo -e "$stage_summaries")
 ---
-*Automatically generated by AI Fishtank supervisor*"
+*Automatically generated by Aquarco supervisor*"
         gh issue comment "$pr_number" --repo "$repo_slug" --body "$comment_body" 2>/dev/null || \
           _pe_log "warn" "Failed to post review comment on PR #$pr_number"
       fi
@@ -1023,7 +1023,7 @@ $(echo -e "$stage_summaries")
     task_title="$(_psql -c "SELECT title FROM tasks WHERE id = \$tq\$$(_tq_escape "$task_id")\$tq\$;" 2>/dev/null | tr -d '[:space:]' || echo "$task_id")"
 
     local pr_body
-    pr_body="## AI Fishtank Pipeline
+    pr_body="## Aquarco Pipeline
 
 **Task**: ${task_id}
 **Commits**: ${ahead}
@@ -1031,7 +1031,7 @@ $(echo -e "$stage_summaries")
 ## Agent Summaries
 $(echo -e "$stage_summaries")
 ---
-*Automatically generated by AI Fishtank supervisor*"
+*Automatically generated by Aquarco supervisor*"
 
     local pr_url
     if pr_url="$(gh pr create \
@@ -1092,7 +1092,7 @@ _maybe_create_pr() {
   # Look for an agent-created branch matching this task ID.
   local branch_name=""
   local agent_branch
-  agent_branch="$(git branch --list "aifishtank/${task_id}*" 2>/dev/null | head -1 | sed 's/^[* ]*//' || echo "")"
+  agent_branch="$(git branch --list "aquarco/${task_id}*" 2>/dev/null | head -1 | sed 's/^[* ]*//' || echo "")"
 
   if [[ -n "$agent_branch" ]]; then
     branch_name="$agent_branch"
@@ -1105,7 +1105,7 @@ _maybe_create_pr() {
 
   if [[ -n "$has_changes" && -z "$branch_name" ]]; then
     # Uncommitted changes but no agent branch — create one.
-    branch_name="aifishtank/${task_id}"
+    branch_name="aquarco/${task_id}"
     _pe_log "info" "Agent produced uncommitted changes; creating branch for task=$task_id"
     git checkout -b "$branch_name" 2>/dev/null || git checkout "$branch_name" 2>/dev/null || true
     git add -A 2>/dev/null
@@ -1139,7 +1139,7 @@ _maybe_create_pr() {
     summary="$(echo "$stage_output" | jq -r '.summary // ._raw_output // "Agent completed task."' 2>/dev/null || echo "Agent completed task.")"
 
     local pr_body
-    pr_body="## AI Fishtank Agent Output
+    pr_body="## Aquarco Agent Output
 
 **Task**: ${task_id}
 **Category**: ${category}
@@ -1149,7 +1149,7 @@ _maybe_create_pr() {
 ${summary}
 
 ---
-*Automatically generated by AI Fishtank supervisor*"
+*Automatically generated by Aquarco supervisor*"
 
     # Create PR.
     local pr_url
@@ -1200,7 +1200,7 @@ ${summary}
 ${findings}
 
 ---
-*Review by AI Fishtank review-agent (task: ${task_id})*"
+*Review by Aquarco review-agent (task: ${task_id})*"
 
     # Post as issue comment (issue #1 or source_ref).
     local source_ref

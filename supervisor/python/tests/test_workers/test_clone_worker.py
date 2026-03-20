@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from aifishtank_supervisor.database import Database
-from aifishtank_supervisor.exceptions import CloneError
-from aifishtank_supervisor.workers.clone_worker import (
+from aquarco_supervisor.database import Database
+from aquarco_supervisor.exceptions import CloneError
+from aquarco_supervisor.workers.clone_worker import (
     CloneWorker,
     _url_to_key_name,
     _url_to_ssh,
@@ -130,7 +130,7 @@ async def test_clone_pending_repos_already_cloned(tmp_path: Any) -> None:
     worker = CloneWorker(db, github_token=None)
 
     with patch(
-        "aifishtank_supervisor.workers.clone_worker._run_git",
+        "aquarco_supervisor.workers.clone_worker._run_git",
         new_callable=AsyncMock,
         return_value="abc123",
     ):
@@ -160,7 +160,7 @@ async def test_clone_pending_repos_clones_successfully(tmp_path: Any) -> None:
 
     with patch.object(worker, "_do_clone", new_callable=AsyncMock) as mock_clone, \
          patch(
-             "aifishtank_supervisor.workers.clone_worker._run_git",
+             "aquarco_supervisor.workers.clone_worker._run_git",
              new_callable=AsyncMock,
              return_value="deadbeef",
          ):

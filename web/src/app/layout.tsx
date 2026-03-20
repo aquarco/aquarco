@@ -50,7 +50,7 @@ function AppShell({ children }: RootLayoutProps) {
       >
         <Toolbar>
           <Typography variant="h6" noWrap component="div" fontWeight={700}>
-            AI Fishtank
+            Aquarco
           </Typography>
         </Toolbar>
       </AppBar>

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # manage-ports.sh — VirtualBox NAT port forwarding management
 #
-# Adds, removes, and lists NAT port forwarding rules on the AI Fishtank VM.
+# Adds, removes, and lists NAT port forwarding rules on the Aquarco VM.
 # Works with both powered-off VMs (modifyvm) and running VMs (controlvm).
 #
 # Usage:
@@ -16,10 +16,10 @@
 #   help
 #
 # Examples:
-#   manage-ports.sh add aifishtank webui 8080 8080
-#   manage-ports.sh setup-repo aifishtank my-saas-app 3001 4001 5433
-#   manage-ports.sh teardown-repo aifishtank my-saas-app
-#   manage-ports.sh list aifishtank
+#   manage-ports.sh add aquarco webui 8080 8080
+#   manage-ports.sh setup-repo aquarco my-saas-app 3001 4001 5433
+#   manage-ports.sh teardown-repo aquarco my-saas-app
+#   manage-ports.sh list aquarco
 
 set -euo pipefail
 

@@ -3,8 +3,8 @@
 Provides two sub-commands that replace the shell scripts
 discover-agents.sh and validate-agent.sh:
 
-  aifishtank-supervisor agents discover  [--output PATH] [--verbose] [--json]
-  aifishtank-supervisor agents validate  DEFINITION_FILE  [--prompts-dir DIR] [--json]
+  aquarco-supervisor agents discover  [--output PATH] [--verbose] [--json]
+  aquarco-supervisor agents validate  DEFINITION_FILE  [--prompts-dir DIR] [--json]
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ app = typer.Typer(help="Agent discovery and validation commands.")
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-REQUIRED_API_VERSION = "aifishtank.agents/v1"
+REQUIRED_API_VERSION = "aquarco.agents/v1"
 REQUIRED_KIND = "AgentDefinition"
 VALID_CATEGORIES = {"review", "implementation", "test", "design", "docs", "analyze"}
 VALID_OUTPUT_FORMATS = {"task-file", "github-pr-comment", "commit", "issue", "none"}
@@ -36,13 +36,13 @@ KEBAB_CASE_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)")
 
 # Resolved at import time so commands work regardless of cwd.
-_PACKAGE_DIR = Path(__file__).resolve().parent.parent          # .../aifishtank_supervisor
+_PACKAGE_DIR = Path(__file__).resolve().parent.parent          # .../aquarco_supervisor
 _REPO_ROOT   = _PACKAGE_DIR.parents[3]                        # project root (4 levels up)
-# <repo>/supervisor/python/src/aifishtank_supervisor  → parents[0]=src, [1]=python, [2]=supervisor, [3]=repo-root
+# <repo>/supervisor/python/src/aquarco_supervisor  → parents[0]=src, [1]=python, [2]=supervisor, [3]=repo-root
 
 _DEFAULT_DEFINITIONS_DIR = _REPO_ROOT / "agents" / "definitions"
 _DEFAULT_PROMPTS_DIR     = _REPO_ROOT / "agents" / "prompts"
-_DEFAULT_REGISTRY_OUTPUT = Path("/var/lib/aifishtank/agent-registry.json")
+_DEFAULT_REGISTRY_OUTPUT = Path("/var/lib/aquarco/agent-registry.json")
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +254,7 @@ def discover(
     Exit code 1 means one or more validation errors were found; registry is NOT written.
     """
     if not as_json:
-        typer.echo("[INFO]  AI Fishtank agent discovery starting")
+        typer.echo("[INFO]  Aquarco agent discovery starting")
         typer.echo(f"[INFO]  Definitions directory : {definitions_dir}")
         typer.echo(f"[INFO]  Prompts directory     : {prompts_dir}")
         typer.echo(f"[INFO]  Output path           : {output}")

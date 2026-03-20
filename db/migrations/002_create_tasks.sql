@@ -9,7 +9,7 @@
 
 -- up
 
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 
 CREATE TABLE IF NOT EXISTS tasks (
     -- Stable external identifier; typically a UUID or a composite key
@@ -113,4 +113,4 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status_priority
 
 -- down
 
--- DROP TABLE IF EXISTS aifishtank.tasks;
+-- DROP TABLE IF EXISTS aquarco.tasks;

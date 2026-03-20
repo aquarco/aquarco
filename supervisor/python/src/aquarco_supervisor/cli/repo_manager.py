@@ -52,7 +52,7 @@ _API_PORT_BASE = 4000
 _POSTGRES_PORT_BASE = 5432
 
 _DEFAULT_REPOS_ROOT = "/home/agent/repos"
-_DEFAULT_CONFIG = "/home/agent/ai-fishtank/supervisor/config/supervisor.yaml"
+_DEFAULT_CONFIG = "/home/agent/aquarco/supervisor/config/supervisor.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -135,12 +135,12 @@ def _require_compose_files(clone_dir: Path, repo_name: str) -> tuple[Path, Path]
     if not cf.exists():
         _die(
             f"docker-compose.yml not found in {clone_dir} — "
-            "run 'aifishtank-supervisor repo setup' first"
+            "run 'aquarco-supervisor repo setup' first"
         )
     if not ef.exists():
         _die(
             f".env not found in {clone_dir} — "
-            "run 'aifishtank-supervisor repo setup' first"
+            "run 'aquarco-supervisor repo setup' first"
         )
     return cf, ef
 
@@ -273,7 +273,7 @@ def cmd_setup(
         tmpl_dir = Path(templates_dir)
     else:
         # Default: relative to this file → supervisor/templates
-        # parents[0]=cli/ [1]=aifishtank_supervisor/ [2]=src/ [3]=python/ [4]=supervisor/
+        # parents[0]=cli/ [1]=aquarco_supervisor/ [2]=src/ [3]=python/ [4]=supervisor/
         tmpl_dir = Path(__file__).parents[4] / "templates"
 
     compose_tmpl = tmpl_dir / "docker-compose.repo.yml.tmpl"

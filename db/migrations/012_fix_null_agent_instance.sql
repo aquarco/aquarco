@@ -5,7 +5,7 @@
 
 -- up
 
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 
 DELETE FROM agent_instances WHERE agent_name = 'null';
 

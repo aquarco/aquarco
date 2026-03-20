@@ -7,7 +7,7 @@
 
 ## Context
 
-AI Fishtank is a sandboxed VirtualBox VM where multiple specialized AI agent groups operate with no restrictions internally. The sole external interface is a GitHub repository — this is the security boundary. The project has a multi-agent system with 13 agents that need to run autonomously inside the VM.
+Aquarco is a sandboxed VirtualBox VM where multiple specialized AI agent groups operate with no restrictions internally. The sole external interface is a GitHub repository — this is the security boundary. The project has a multi-agent system with 13 agents that need to run autonomously inside the VM.
 
 The VM must host:
 - Docker Compose stacks (one per target repo, dev-style with source mounts and hot reload)
@@ -69,13 +69,13 @@ Port forwarding enables access to repo UIs from the host browser:
 
 ```bash
 # Web UI dashboard (TASK-002)
-VBoxManage modifyvm "aifishtank" --natpf1 "webui,tcp,,8080,,8080"
+VBoxManage modifyvm "aquarco" --natpf1 "webui,tcp,,8080,,8080"
 
 # Per-repo ports (added dynamically by supervisor when repos are registered)
-VBoxManage modifyvm "aifishtank" --natpf1 "repo1-fe,tcp,,3001,,3001"
-VBoxManage modifyvm "aifishtank" --natpf1 "repo1-api,tcp,,4001,,4001"
-VBoxManage modifyvm "aifishtank" --natpf1 "repo2-fe,tcp,,3002,,3002"
-VBoxManage modifyvm "aifishtank" --natpf1 "repo2-api,tcp,,4002,,4002"
+VBoxManage modifyvm "aquarco" --natpf1 "repo1-fe,tcp,,3001,,3001"
+VBoxManage modifyvm "aquarco" --natpf1 "repo1-api,tcp,,4001,,4001"
+VBoxManage modifyvm "aquarco" --natpf1 "repo2-fe,tcp,,3002,,3002"
+VBoxManage modifyvm "aquarco" --natpf1 "repo2-api,tcp,,4002,,4002"
 # ... dynamic, added by supervisor when repos are registered
 ```
 
@@ -101,13 +101,13 @@ VBoxManage modifyvm "aifishtank" --natpf1 "repo2-api,tcp,,4002,,4002"
 │  │  │  dnsmasq (local resolver + DNS logger)       │   │   │
 │  │  │  ┌─────────────────────────────────────┐     │   │   │
 │  │  │  │  Logs all DNS queries               │     │   │   │
-│  │  │  │  → /var/log/aifishtank/dns-queries.log  │     │   │   │
+│  │  │  │  → /var/log/aquarco/dns-queries.log  │     │   │   │
 │  │  │  └─────────────────────────────────────┘     │   │   │
 │  │  └─────────────────────────────────────────────┘   │   │
 │  │                                                     │   │
 │  │  ┌─────────────────────────────────────────────┐   │   │
 │  │  │  conntrack (connection logger)               │   │   │
-│  │  │  → /var/log/aifishtank/connections.log           │   │   │
+│  │  │  → /var/log/aquarco/connections.log           │   │   │
 │  │  └─────────────────────────────────────────────┘   │   │
 │  │                                                     │   │
 │  │  Full outbound internet access (no restrictions)    │   │
@@ -156,7 +156,7 @@ iptables -A OUTPUT -m state --state NEW -j LOG --log-prefix "OUTBOUND: " --log-l
 
 ### Tracking Output
 
-**Real-time log**: `/var/log/aifishtank/network-access.log`
+**Real-time log**: `/var/log/aquarco/network-access.log`
 
 ```
 # Example network-access.log format
@@ -391,10 +391,10 @@ The supervisor automatically:
 │                    SHARED RESOURCES                         │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │  - Git working directory: /home/agent/repos/          │  │
-│  │  - Task files: /home/agent/ai-fishtank/tasks/             │  │
-│  │  - PRD: /home/agent/ai-fishtank/prd.json                  │  │
+│  │  - Task files: /home/agent/aquarco/tasks/             │  │
+│  │  - PRD: /home/agent/aquarco/prd.json                  │  │
 │  │  - Supervisor config: /home/agent/config/supervisor.yaml│  │
-│  │  - Logs: /var/log/aifishtank/agents/                      │  │
+│  │  - Logs: /var/log/aquarco/agents/                      │  │
 │  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -402,17 +402,17 @@ The supervisor automatically:
 ### Agent Supervisor Service
 
 ```ini
-# /etc/systemd/system/aifishtank-supervisor.service
+# /etc/systemd/system/aquarco-supervisor.service
 [Unit]
-Description=AI Fishtank Agent Supervisor
+Description=Aquarco Agent Supervisor
 After=network.target docker.service
 
 [Service]
 Type=simple
 User=agent
 Group=agent
-WorkingDirectory=/home/agent/ai-fishtank
-ExecStart=/usr/local/bin/aifishtank-supervisor
+WorkingDirectory=/home/agent/aquarco
+ExecStart=/usr/local/bin/aquarco-supervisor
 Restart=always
 RestartSec=10
 Environment=GITHUB_TOKEN_FILE=/home/agent/.github-token
@@ -478,8 +478,8 @@ LOOP forever:
 ```bash
 # /home/agent/.gitconfig
 [user]
-    name = AI Fishtank Agents
-    email = ai-fishtank@example.com
+    name = Aquarco Agents
+    email = aquarco@example.com
 
 [core]
     sshCommand = ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new
@@ -542,10 +542,10 @@ Vagrant (VM orchestration)
 # Vagrantfile
 Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/noble64"
-  config.vm.hostname = "aifishtank"
+  config.vm.hostname = "aquarco"
 
   config.vm.provider "virtualbox" do |vb|
-    vb.name = "ai-fishtank"
+    vb.name = "aquarco"
     vb.memory = 12288
     vb.cpus = 6
     vb.customize ["modifyvm", :id, "--nested-hw-virt", "on"]
@@ -596,14 +596,14 @@ write_files:
     content: |
       # Log all DNS queries for network tracking
       log-queries
-      log-facility=/var/log/aifishtank/dns-queries.log
+      log-facility=/var/log/aquarco/dns-queries.log
 
 runcmd:
   - systemctl enable docker
   - systemctl start docker
   - systemctl enable dnsmasq
   - systemctl start dnsmasq
-  - mkdir -p /var/log/aifishtank
+  - mkdir -p /var/log/aquarco
 ```
 
 ### Ansible Playbook Structure
@@ -640,7 +640,7 @@ command -v VBoxManage >/dev/null || { echo "Install VirtualBox first"; exit 1; }
 # Generate SSH keypair for deploy key
 if [[ ! -f keys/deploy_key ]]; then
     mkdir -p keys
-    ssh-keygen -t ed25519 -f keys/deploy_key -N "" -C "ai-fishtank-deploy"
+    ssh-keygen -t ed25519 -f keys/deploy_key -N "" -C "aquarco-deploy"
     echo "Add this deploy key to GitHub:"
     cat keys/deploy_key.pub
 fi
@@ -724,7 +724,7 @@ Since the VM has no inbound ports (except forwarded ones), observability from ho
 
 ```ruby
 # Vagrantfile addition
-config.vm.synced_folder "./logs", "/var/log/aifishtank-export",
+config.vm.synced_folder "./logs", "/var/log/aquarco-export",
   type: "virtualbox",
   mount_options: ["dmode=755", "fmode=644"]
 ```
@@ -733,7 +733,7 @@ Cron job inside VM:
 
 ```bash
 # /etc/cron.d/export-logs
-*/5 * * * * root rsync -a /var/log/aifishtank/ /var/log/aifishtank-export/
+*/5 * * * * root rsync -a /var/log/aquarco/ /var/log/aquarco-export/
 ```
 
 ### GitHub-Based Status Reporting
@@ -793,17 +793,17 @@ Alert triggered in VM
 
 ```bash
 # Create snapshot
-VBoxManage snapshot "ai-fishtank" take "daily-$(date +%Y%m%d)" \
+VBoxManage snapshot "aquarco" take "daily-$(date +%Y%m%d)" \
     --description "Automated daily snapshot"
 
 # List snapshots
-VBoxManage snapshot "ai-fishtank" list
+VBoxManage snapshot "aquarco" list
 
 # Restore snapshot
-VBoxManage snapshot "ai-fishtank" restore "snapshot-name"
+VBoxManage snapshot "aquarco" restore "snapshot-name"
 
 # Delete old snapshots (keep last 7)
-VBoxManage snapshot "ai-fishtank" delete "old-snapshot-name"
+VBoxManage snapshot "aquarco" delete "old-snapshot-name"
 ```
 
 ### Host-Side Backup Script
@@ -813,7 +813,7 @@ VBoxManage snapshot "ai-fishtank" delete "old-snapshot-name"
 # scripts/backup.sh — Run on host
 
 SNAPSHOT_NAME="daily-$(date +%Y%m%d-%H%M%S)"
-VM_NAME="ai-fishtank"
+VM_NAME="aquarco"
 
 # Pause VM for consistent snapshot
 VBoxManage controlvm "$VM_NAME" savestate
@@ -841,7 +841,7 @@ VBoxManage snapshot "$VM_NAME" list --machinereadable | \
 | PostgreSQL (per-repo) | Docker volumes | pg_dump to Git repo |
 | Container images | Docker cache | Pulled from registries (pre-provisioned) |
 | Secrets | /home/agent/.* | Manual backup / Vault |
-| Logs | /var/log/aifishtank | Export to shared folder |
+| Logs | /var/log/aquarco | Export to shared folder |
 
 ### PostgreSQL Backup (Docker Compose)
 
@@ -849,7 +849,7 @@ VBoxManage snapshot "$VM_NAME" list --machinereadable | \
 #!/bin/bash
 # Runs inside VM, commits backup to Git
 
-BACKUP_DIR="/home/agent/ai-fishtank/backups/postgres"
+BACKUP_DIR="/home/agent/aquarco/backups/postgres"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 REPO_NAME="$1"  # e.g., "my-saas-app"
 
@@ -863,7 +863,7 @@ docker compose -f /home/agent/repos/$REPO_NAME/docker-compose.yaml \
 ls -t "$BACKUP_DIR/$REPO_NAME-"*.sql.gz | tail -n +6 | xargs rm -f
 
 # Commit and push
-cd /home/agent/ai-fishtank
+cd /home/agent/aquarco
 git add backups/
 git commit -m "chore: automated postgres backup $REPO_NAME $TIMESTAMP"
 git push origin main

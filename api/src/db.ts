@@ -18,8 +18,8 @@ pool.on('error', (err) => {
 })
 
 pool.on('connect', (client) => {
-  // Set the search_path for every new connection so aifishtank schema is default
-  client.query("SET search_path TO aifishtank, public").catch((err: Error) => {
+  // Set the search_path for every new connection so aquarco schema is default
+  client.query("SET search_path TO aquarco, public").catch((err: Error) => {
     console.error('Failed to set search_path on new connection:', err.message)
   })
 })
@@ -31,7 +31,7 @@ export async function query<R extends QueryResultRow = QueryResultRow>(
   const client = await pool.connect()
   try {
     // Ensure search_path is set for this query
-    await client.query('SET search_path TO aifishtank, public')
+    await client.query('SET search_path TO aquarco, public')
     return await client.query<R>(sql, params)
   } finally {
     client.release()

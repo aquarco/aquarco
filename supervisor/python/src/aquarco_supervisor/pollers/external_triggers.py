@@ -30,7 +30,7 @@ class ExternalTriggersPoller(BasePoller):
     ) -> None:
         super().__init__(config, task_queue, db)
         poller_cfg = self._get_poller_config()
-        self._watch_dir = Path(poller_cfg.get("watchDir", "/var/lib/aifishtank/triggers"))
+        self._watch_dir = Path(poller_cfg.get("watchDir", "/var/lib/aquarco/triggers"))
         self._processed_dir = Path(
             poller_cfg.get("processedDir", str(self._watch_dir / "processed"))
         )

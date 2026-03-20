@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-IPC_DIR="/var/lib/aifishtank/claude-ipc"
+IPC_DIR="/var/lib/aquarco/claude-ipc"
 POLL_INTERVAL=2
 
 log() {

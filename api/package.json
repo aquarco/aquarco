@@ -1,7 +1,7 @@
 {
-  "name": "ai-fishtank-api",
+  "name": "aquarco-api",
   "version": "1.0.0",
-  "description": "GraphQL API for the AI Fishtank agent system",
+  "description": "GraphQL API for the Aquarco agent system",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

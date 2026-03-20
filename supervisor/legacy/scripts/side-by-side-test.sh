@@ -8,16 +8,16 @@
 #   SUPERVISOR_USE_PYTHON=1 ./supervisor/scripts/side-by-side-test.sh
 #
 # Prerequisites:
-#   - PostgreSQL running with aifishtank schema
+#   - PostgreSQL running with aquarco schema
 #   - Python package installed (pip install -e supervisor/python)
 #   - gh and claude CLI available
 set -euo pipefail
 
-DB_URL="${DATABASE_URL:-postgresql://aifishtank:aifishtank@localhost:5432/aifishtank}"
+DB_URL="${DATABASE_URL:-postgresql://aquarco:aquarco@localhost:5432/aquarco}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SUPERVISOR_DIR="$(dirname "$SCRIPT_DIR")"
-TRIGGERS_DIR="/tmp/aifishtank-sbs-triggers"
-RESULTS_DIR="/tmp/aifishtank-sbs-results"
+TRIGGERS_DIR="/tmp/aquarco-sbs-triggers"
+RESULTS_DIR="/tmp/aquarco-sbs-results"
 NUM_TASKS="${NUM_TASKS:-5}"
 TIMEOUT="${TIMEOUT:-120}"
 
@@ -54,7 +54,7 @@ log "Created $NUM_TASKS trigger files in $TRIGGERS_DIR"
 # --- Snapshot pre-state ---
 
 psql "$DB_URL" -t -A -c "
-  SELECT COUNT(*) FROM aifishtank.tasks
+  SELECT COUNT(*) FROM aquarco.tasks
 " > "$RESULTS_DIR/task_count_before.txt" 2>/dev/null || echo "0" > "$RESULTS_DIR/task_count_before.txt"
 
 # --- Run Python poller ---
@@ -64,10 +64,10 @@ python3 -c "
 import asyncio
 import sys
 sys.path.insert(0, '$SUPERVISOR_DIR/python/src')
-from aifishtank_supervisor.config import load_config
-from aifishtank_supervisor.database import Database
-from aifishtank_supervisor.task_queue import TaskQueue
-from aifishtank_supervisor.pollers.external_triggers import ExternalTriggersPoller
+from aquarco_supervisor.config import load_config
+from aquarco_supervisor.database import Database
+from aquarco_supervisor.task_queue import TaskQueue
+from aquarco_supervisor.pollers.external_triggers import ExternalTriggersPoller
 
 async def main():
     config = load_config('$SUPERVISOR_DIR/config/supervisor.yaml')
@@ -91,7 +91,7 @@ asyncio.run(main())
 
 psql "$DB_URL" -t -A -c "
   SELECT id, title, category, status, pipeline, repository
-  FROM aifishtank.tasks
+  FROM aquarco.tasks
   WHERE id LIKE 'external-%'
   ORDER BY id
 " > "$RESULTS_DIR/tasks_after.txt" 2>/dev/null || true

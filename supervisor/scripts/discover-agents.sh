@@ -5,7 +5,7 @@
 #   ./discover-agents.sh [--output PATH] [--verbose]
 #
 # Options:
-#   --output PATH    Write registry JSON to PATH (default: /var/lib/aifishtank/agent-registry.json)
+#   --output PATH    Write registry JSON to PATH (default: /var/lib/aquarco/agent-registry.json)
 #   --verbose        Print per-agent validation details
 #
 # Exit codes:
@@ -23,7 +23,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 DEFINITIONS_DIR="$PROJECT_ROOT/agents/definitions"
 PROMPTS_DIR="$PROJECT_ROOT/agents/prompts"
-DEFAULT_OUTPUT="/var/lib/aifishtank/agent-registry.json"
+DEFAULT_OUTPUT="/var/lib/aquarco/agent-registry.json"
 
 OUTPUT_PATH="$DEFAULT_OUTPUT"
 VERBOSE=false
@@ -170,8 +170,8 @@ validate_definition() {
   # ---- apiVersion ----
   local api_version
   api_version="$(yq '.apiVersion' "$file" 2>/dev/null || true)"
-  if [[ "$api_version" != "aifishtank.agents/v1" ]]; then
-    log_error "$basename: apiVersion must be 'aifishtank.agents/v1' (got: '$api_version')"
+  if [[ "$api_version" != "aquarco.agents/v1" ]]; then
+    log_error "$basename: apiVersion must be 'aquarco.agents/v1' (got: '$api_version')"
     (( file_errors++ )) || true
   fi
 
@@ -337,7 +337,7 @@ validate_definition() {
 # Main
 # ---------------------------------------------------------------------------
 main() {
-  log_info "AI Fishtank agent discovery starting"
+  log_info "Aquarco agent discovery starting"
   log_info "Definitions directory : $DEFINITIONS_DIR"
   log_info "Prompts directory     : $PROMPTS_DIR"
   log_info "Output path           : $OUTPUT_PATH"

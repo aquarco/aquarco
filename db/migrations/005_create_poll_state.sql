@@ -11,7 +11,7 @@
 
 -- up
 
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 
 CREATE TABLE IF NOT EXISTS poll_state (
     -- Unique name of the poller; matches the name used in repositories.pollers[].
@@ -40,4 +40,4 @@ COMMENT ON COLUMN poll_state.state_data         IS 'Arbitrary poller state: rate
 
 -- down
 
--- DROP TABLE IF EXISTS aifishtank.poll_state;
+-- DROP TABLE IF EXISTS aquarco.poll_state;

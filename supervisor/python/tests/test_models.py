@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aifishtank_supervisor.models import (
+from aquarco_supervisor.models import (
     Complexity,
     Task,
     TaskStatus,

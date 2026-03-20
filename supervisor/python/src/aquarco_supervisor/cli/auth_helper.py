@@ -14,7 +14,7 @@ from ..logging import get_logger, setup_logging
 
 log = get_logger("auth-helper")
 
-DEFAULT_IPC_DIR = "/var/lib/aifishtank/claude-ipc"
+DEFAULT_IPC_DIR = "/var/lib/aquarco/claude-ipc"
 DEFAULT_POLL_INTERVAL = 2
 CLAUDE_AUTH_STATUS_TIMEOUT = 5  # seconds
 CLAUDE_LOGOUT_TIMEOUT = 10  # seconds
@@ -88,7 +88,7 @@ async def _handle_login(ipc_dir: Path, oauth_script: Path | None) -> None:
     if oauth_script is None:
         candidates = [
             Path(__file__).parent.parent.parent.parent / "scripts" / "claude-auth-oauth.py",
-            Path("/home/agent/ai-fishtank/supervisor/scripts/claude-auth-oauth.py"),
+            Path("/home/agent/aquarco/supervisor/scripts/claude-auth-oauth.py"),
         ]
         oauth_script = next((p for p in candidates if p.exists()), None)
 
@@ -98,7 +98,7 @@ async def _handle_login(ipc_dir: Path, oauth_script: Path | None) -> None:
         # running arbitrary files on disk.
         _TRUSTED_SCRIPT_ROOTS = [
             Path(__file__).parent.parent.parent.parent / "scripts",
-            Path("/home/agent/ai-fishtank/supervisor/scripts"),
+            Path("/home/agent/aquarco/supervisor/scripts"),
         ]
         resolved = oauth_script.resolve()
         if not any(

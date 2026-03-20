@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aifishtank_supervisor.pipeline.context import build_accumulated_context
+from aquarco_supervisor.pipeline.context import build_accumulated_context
 
 
 def test_recent_stages_full_output() -> None:

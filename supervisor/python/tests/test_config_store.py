@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, call
 import pytest
 import yaml
 
-from aifishtank_supervisor.config_store import (
+from aquarco_supervisor.config_store import (
     export_agent_definitions_to_files,
     export_pipeline_definitions_to_file,
     load_agent_definitions_from_files,
@@ -24,7 +24,7 @@ from aifishtank_supervisor.config_store import (
     validate_agent_definition,
     validate_pipeline_definition,
 )
-from aifishtank_supervisor.database import Database
+from aquarco_supervisor.database import Database
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -45,7 +45,7 @@ def _make_agent_doc(
     categories: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
-        "apiVersion": "aifishtank.agents/v1",
+        "apiVersion": "aquarco.agents/v1",
         "kind": "AgentDefinition",
         "metadata": {
             "name": name,
@@ -73,7 +73,7 @@ def _make_pipeline_doc(
             },
         ]
     return {
-        "apiVersion": "aifishtank.agents/v1",
+        "apiVersion": "aquarco.agents/v1",
         "kind": "PipelineDefinition",
         "pipelines": pipelines,
     }
@@ -150,7 +150,7 @@ class TestValidatePipelineDefinition:
         validate_pipeline_definition(doc, _pipeline_schema())
 
     def test_missing_pipelines(self) -> None:
-        doc = {"apiVersion": "aifishtank.agents/v1", "kind": "PipelineDefinition"}
+        doc = {"apiVersion": "aquarco.agents/v1", "kind": "PipelineDefinition"}
         with pytest.raises(Exception):
             validate_pipeline_definition(doc, _pipeline_schema())
 
@@ -297,7 +297,7 @@ class TestLoadPipelineDefinitionsFromFile:
         assert result == []
 
     def test_schema_invalid(self, pipelines_file: Path) -> None:
-        doc = {"apiVersion": "aifishtank.agents/v1", "kind": "PipelineDefinition", "pipelines": []}
+        doc = {"apiVersion": "aquarco.agents/v1", "kind": "PipelineDefinition", "pipelines": []}
         pipelines_file.write_text(yaml.dump(doc))
 
         result = load_pipeline_definitions_from_file(pipelines_file, schema=_pipeline_schema())
@@ -564,7 +564,7 @@ class TestReadAgentDefinitionsFromDb:
         docs = await read_agent_definitions_from_db(mock_db)
         assert len(docs) == 1
         doc = docs[0]
-        assert doc["apiVersion"] == "aifishtank.agents/v1"
+        assert doc["apiVersion"] == "aquarco.agents/v1"
         assert doc["kind"] == "AgentDefinition"
         assert doc["metadata"]["name"] == "my-agent"
         assert doc["metadata"]["version"] == "2.0.0"
@@ -722,7 +722,7 @@ class TestExportAgentDefinitionsToFiles:
         assert out_file.exists()
 
         loaded = yaml.safe_load(out_file.read_text())
-        assert loaded["apiVersion"] == "aifishtank.agents/v1"
+        assert loaded["apiVersion"] == "aquarco.agents/v1"
         assert loaded["kind"] == "AgentDefinition"
         assert loaded["metadata"]["name"] == "alpha-agent"
         assert loaded["metadata"]["version"] == "1.0.0"
@@ -805,7 +805,7 @@ class TestExportPipelineDefinitionsToFile:
         assert pipelines_file.exists()
 
         loaded = yaml.safe_load(pipelines_file.read_text())
-        assert loaded["apiVersion"] == "aifishtank.agents/v1"
+        assert loaded["apiVersion"] == "aquarco.agents/v1"
         assert loaded["kind"] == "PipelineDefinition"
         assert len(loaded["pipelines"]) == 1
         assert loaded["pipelines"][0]["name"] == "test-pipeline"

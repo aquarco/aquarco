@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, patch
 import psycopg
 import pytest
 
-from aifishtank_supervisor.database import Database, SEARCH_PATH
-from aifishtank_supervisor.exceptions import ConnectionPoolError, QueryError
+from aquarco_supervisor.database import Database, SEARCH_PATH
+from aquarco_supervisor.exceptions import ConnectionPoolError, QueryError
 
 
 @pytest.mark.asyncio
@@ -45,7 +45,7 @@ async def test_connect_passes_configure_callback_to_pool() -> None:
         return mock_pool
 
     with patch(
-        "aifishtank_supervisor.database.AsyncConnectionPool", side_effect=_capture_pool
+        "aquarco_supervisor.database.AsyncConnectionPool", side_effect=_capture_pool
     ):
         await db.connect()
 

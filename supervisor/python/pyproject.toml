@@ -3,10 +3,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "aifishtank-supervisor"
+name = "aquarco-supervisor"
 version = "1.0.0"
 requires-python = ">=3.10"
-description = "AI Fishtank supervisor - manages autonomous AI agent pipelines"
+description = "Aquarco supervisor - manages autonomous AI agent pipelines"
 dependencies = [
     "psycopg[binary]>=3.1",
     "psycopg-pool>=3.1",
@@ -27,10 +27,10 @@ dev = [
 ]
 
 [project.scripts]
-aifishtank-supervisor = "aifishtank_supervisor.main:app"
+aquarco-supervisor = "aquarco_supervisor.main:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/aifishtank_supervisor"]
+packages = ["src/aquarco_supervisor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

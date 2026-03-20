@@ -1,4 +1,4 @@
-apiVersion: aifishtank.agents/v1
+apiVersion: aquarco.agents/v1
 kind: AgentDefinition
 metadata:
   name: analyze-agent

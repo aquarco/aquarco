@@ -9,7 +9,7 @@
 
 -- up
 
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 
 -- Drop the valid_category CHECK constraint from tasks
 ALTER TABLE tasks DROP CONSTRAINT IF EXISTS valid_category;

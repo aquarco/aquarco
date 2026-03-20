@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from aifishtank_supervisor.database import Database
-from aifishtank_supervisor.pollers.github_source import (
+from aquarco_supervisor.database import Database
+from aquarco_supervisor.pollers.github_source import (
     GitHubSourcePoller,
 )
-from aifishtank_supervisor.task_queue import TaskQueue
-from aifishtank_supervisor.utils import url_to_slug as _url_to_slug
+from aquarco_supervisor.task_queue import TaskQueue
+from aquarco_supervisor.utils import url_to_slug as _url_to_slug
 
 SAMPLE_REPO = {
     "name": "test-repo",
@@ -39,8 +39,8 @@ def test_url_to_slug_invalid() -> None:
 # --- GitHubSourcePoller._process_pr ---
 
 @pytest.mark.asyncio
-async def test_process_pr_skips_aifishtank_branches(sample_config: Any) -> None:
-    """PRs from aifishtank/ branches are not processed."""
+async def test_process_pr_skips_aquarco_branches(sample_config: Any) -> None:
+    """PRs from aquarco/ branches are not processed."""
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_db = AsyncMock(spec=Database)
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
@@ -48,7 +48,7 @@ async def test_process_pr_skips_aifishtank_branches(sample_config: Any) -> None:
     pr = {
         "number": 42,
         "title": "Automated PR",
-        "headRefName": "aifishtank/task-001/my-feature",
+        "headRefName": "aquarco/task-001/my-feature",
         "baseRefName": "main",
         "url": "https://github.com/owner/repo/pull/42",
         "updatedAt": "2024-01-01T00:00:00Z",
@@ -210,7 +210,7 @@ async def test_poll_prs_filters_old_prs(sample_config: Any) -> None:
     ]
 
     with patch(
-        "aifishtank_supervisor.pollers.github_source._gh_list_prs",
+        "aquarco_supervisor.pollers.github_source._gh_list_prs",
         new_callable=AsyncMock,
         return_value=old_prs,
     ):
@@ -248,7 +248,7 @@ async def test_poll_prs_processes_new_prs(sample_config: Any) -> None:
     ]
 
     with patch(
-        "aifishtank_supervisor.pollers.github_source._gh_list_prs",
+        "aquarco_supervisor.pollers.github_source._gh_list_prs",
         new_callable=AsyncMock,
         return_value=new_prs,
     ):
@@ -293,7 +293,7 @@ async def test_poll_commits_creates_task_for_new_commit(
     commit_line = "abc123def456\tAdd new feature\tJohn Doe\t2024-06-01T00:00:00+00:00"
 
     with patch(
-        "aifishtank_supervisor.pollers.github_source._run_git",
+        "aquarco_supervisor.pollers.github_source._run_git",
         new_callable=AsyncMock,
         side_effect=["", "origin/main", commit_line],
     ):
@@ -328,7 +328,7 @@ async def test_poll_commits_skips_existing_commit(
     commit_line = "abc123def456\tOld commit\tJane Doe\t2024-06-01T00:00:00+00:00"
 
     with patch(
-        "aifishtank_supervisor.pollers.github_source._run_git",
+        "aquarco_supervisor.pollers.github_source._run_git",
         new_callable=AsyncMock,
         side_effect=["", "origin/main", commit_line],
     ):
@@ -450,7 +450,7 @@ async def test_poll_commits_falls_back_to_main(
         return ""
 
     with patch(
-        "aifishtank_supervisor.pollers.github_source._run_git",
+        "aquarco_supervisor.pollers.github_source._run_git",
         side_effect=mock_run_git,
     ):
         result = await poller._poll_commits(
@@ -475,7 +475,7 @@ async def test_poll_commits_empty_output(
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     with patch(
-        "aifishtank_supervisor.pollers.github_source._run_git",
+        "aquarco_supervisor.pollers.github_source._run_git",
         new_callable=AsyncMock,
         side_effect=["", "origin/main", ""],
     ):
@@ -499,7 +499,7 @@ async def test_poll_commits_malformed_line_skipped(
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     with patch(
-        "aifishtank_supervisor.pollers.github_source._run_git",
+        "aquarco_supervisor.pollers.github_source._run_git",
         new_callable=AsyncMock,
         side_effect=["", "origin/main", "short\tline"],
     ):

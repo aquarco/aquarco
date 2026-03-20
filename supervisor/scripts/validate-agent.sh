@@ -97,10 +97,10 @@ echo "---"
 
 # 1. apiVersion
 API_VERSION="$(yq '.apiVersion' "$FILE" 2>/dev/null || true)"
-if [[ "$API_VERSION" == "aifishtank.agents/v1" ]]; then
+if [[ "$API_VERSION" == "aquarco.agents/v1" ]]; then
   pass "apiVersion = $API_VERSION"
 else
-  fail "apiVersion must be 'aifishtank.agents/v1' (got: '$API_VERSION')"
+  fail "apiVersion must be 'aquarco.agents/v1' (got: '$API_VERSION')"
 fi
 
 # 2. kind

@@ -3,7 +3,7 @@
 
 -- up
 
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 
 ALTER TABLE repositories
   ADD COLUMN IF NOT EXISTS deploy_public_key TEXT;

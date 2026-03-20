@@ -1,8 +1,8 @@
 [Unit]
-Description=AI Fishtank Agent Supervisor (Python)
-Documentation=https://github.com/owner/ai-fishtank
-After=aifishtank-stack.service docker.service network.target
-Wants=aifishtank-stack.service
+Description=Aquarco Agent Supervisor (Python)
+Documentation=https://github.com/owner/aquarco
+After=aquarco-stack.service docker.service network.target
+Wants=aquarco-stack.service
 
 [Service]
 Type=simple
@@ -10,7 +10,7 @@ User=agent
 Group=agent
 
 # Python entry point. Uses the installed package CLI.
-ExecStart=/home/agent/.venv/bin/aifishtank-supervisor run --config /home/agent/ai-fishtank/supervisor/config/supervisor.yaml
+ExecStart=/home/agent/.venv/bin/aquarco-supervisor run --config /home/agent/aquarco/supervisor/config/supervisor.yaml
 
 # On SIGHUP the supervisor re-reads its config file without restarting.
 ExecReload=/bin/kill -HUP $MAINPID
@@ -22,14 +22,14 @@ RestartSec=10
 # Give the process up to 60 seconds to drain in-flight tasks on SIGTERM.
 TimeoutStopSec=60
 
-WorkingDirectory=/home/agent/ai-fishtank
+WorkingDirectory=/home/agent/aquarco
 
 # Standard PATH for finding gh, git, psql, claude, python, etc.
 Environment=PATH=/home/agent/.venv/bin:/usr/local/bin:/usr/bin:/bin:/home/agent/.npm-global/bin
 Environment=PYTHONUNBUFFERED=1
 
-# Optional: load secrets from /etc/aifishtank/secrets.env if it exists.
-EnvironmentFile=-/etc/aifishtank/secrets.env
+# Optional: load secrets from /etc/aquarco/secrets.env if it exists.
+EnvironmentFile=-/etc/aquarco/secrets.env
 
 # Resource constraints. Python uses slightly less memory than shell+subprocesses.
 MemoryMax=1G
@@ -40,12 +40,12 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/home/agent /var/log/aifishtank /var/lib/aifishtank /var/run/aifishtank /tmp
+ReadWritePaths=/home/agent /var/log/aquarco /var/lib/aquarco /var/run/aquarco /tmp
 
-# Logging: structlog writes JSON to stderr; journalctl -u aifishtank-supervisor-python follows.
+# Logging: structlog writes JSON to stderr; journalctl -u aquarco-supervisor-python follows.
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=aifishtank-supervisor-python
+SyslogIdentifier=aquarco-supervisor-python
 
 [Install]
 WantedBy=multi-user.target

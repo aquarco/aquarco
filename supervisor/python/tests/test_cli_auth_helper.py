@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 
-from aifishtank_supervisor.cli.auth_helper import (
+from aquarco_supervisor.cli.auth_helper import (
     _extract_logged_in,
     _handle_logout,
     _handle_status,
@@ -57,7 +57,7 @@ class TestExtractLoggedIn:
 class TestReadCredentialsFile:
     def test_returns_logged_in_false_when_no_credentials_file(self, tmp_path: Path) -> None:
         # Patch Path.home() to point to a directory without a .claude folder
-        with patch("aifishtank_supervisor.cli.auth_helper.Path") as mock_path_cls:
+        with patch("aquarco_supervisor.cli.auth_helper.Path") as mock_path_cls:
             # Build a fake path that doesn't exist
             fake_cred = tmp_path / ".claude" / ".credentials.json"
             mock_path_cls.home.return_value = tmp_path
@@ -76,7 +76,7 @@ class TestReadCredentialsFile:
         (claude_dir / ".credentials.json").write_text(json.dumps(creds))
 
         with patch(
-            "aifishtank_supervisor.cli.auth_helper.Path.home",
+            "aquarco_supervisor.cli.auth_helper.Path.home",
             return_value=tmp_path,
         ):
             result = _read_credentials_file()
@@ -92,7 +92,7 @@ class TestReadCredentialsFile:
         (claude_dir / ".credentials.json").write_text(json.dumps(creds))
 
         with patch(
-            "aifishtank_supervisor.cli.auth_helper.Path.home",
+            "aquarco_supervisor.cli.auth_helper.Path.home",
             return_value=tmp_path,
         ):
             result = _read_credentials_file()
@@ -106,7 +106,7 @@ class TestReadCredentialsFile:
         (claude_dir / ".credentials.json").write_text(json.dumps(creds))
 
         with patch(
-            "aifishtank_supervisor.cli.auth_helper.Path.home",
+            "aquarco_supervisor.cli.auth_helper.Path.home",
             return_value=tmp_path,
         ):
             result = _read_credentials_file()
@@ -119,7 +119,7 @@ class TestReadCredentialsFile:
         (claude_dir / ".credentials.json").write_text("{broken json")
 
         with patch(
-            "aifishtank_supervisor.cli.auth_helper.Path.home",
+            "aquarco_supervisor.cli.auth_helper.Path.home",
             return_value=tmp_path,
         ):
             result = _read_credentials_file()
@@ -128,7 +128,7 @@ class TestReadCredentialsFile:
 
     def test_result_is_valid_json_string(self, tmp_path: Path) -> None:
         with patch(
-            "aifishtank_supervisor.cli.auth_helper.Path.home",
+            "aquarco_supervisor.cli.auth_helper.Path.home",
             return_value=tmp_path,
         ):
             result = _read_credentials_file()
@@ -166,7 +166,7 @@ class TestHandleStatus:
         mock_output = json.dumps({"loggedIn": True, "authMethod": "oauth"})
 
         with patch(
-            "aifishtank_supervisor.cli.auth_helper._run_command",
+            "aquarco_supervisor.cli.auth_helper._run_command",
             new=AsyncMock(return_value=(0, mock_output, "")),
         ):
             await _handle_status(ipc_dir)
@@ -182,7 +182,7 @@ class TestHandleStatus:
         (ipc_dir / "status-request").write_text("")
 
         with patch(
-            "aifishtank_supervisor.cli.auth_helper._run_command",
+            "aquarco_supervisor.cli.auth_helper._run_command",
             new=AsyncMock(return_value=(0, json.dumps({"loggedIn": True}), "")),
         ):
             await _handle_status(ipc_dir)
@@ -197,10 +197,10 @@ class TestHandleStatus:
 
         # CLI returns non-zero exit code
         with patch(
-            "aifishtank_supervisor.cli.auth_helper._run_command",
+            "aquarco_supervisor.cli.auth_helper._run_command",
             new=AsyncMock(return_value=(1, "", "error")),
         ), patch(
-            "aifishtank_supervisor.cli.auth_helper._read_credentials_file",
+            "aquarco_supervisor.cli.auth_helper._read_credentials_file",
             return_value=json.dumps({"loggedIn": False}),
         ) as mock_cred:
             await _handle_status(ipc_dir)
@@ -216,10 +216,10 @@ class TestHandleStatus:
         (ipc_dir / "status-request").write_text("")
 
         with patch(
-            "aifishtank_supervisor.cli.auth_helper._run_command",
+            "aquarco_supervisor.cli.auth_helper._run_command",
             new=AsyncMock(return_value=(0, "not json output", "")),
         ), patch(
-            "aifishtank_supervisor.cli.auth_helper._read_credentials_file",
+            "aquarco_supervisor.cli.auth_helper._read_credentials_file",
             return_value=json.dumps({"loggedIn": False}),
         ) as mock_cred:
             await _handle_status(ipc_dir)
@@ -237,7 +237,7 @@ class TestHandleStatus:
         mock_output = json.dumps({"loggedIn": False})
 
         with patch(
-            "aifishtank_supervisor.cli.auth_helper._run_command",
+            "aquarco_supervisor.cli.auth_helper._run_command",
             new=AsyncMock(return_value=(0, mock_output, "")),
         ):
             await _handle_status(ipc_dir)
@@ -268,7 +268,7 @@ class TestHandleLogout:
         (ipc_dir / "logout-request").write_text("")
 
         with patch(
-            "aifishtank_supervisor.cli.auth_helper._run_command",
+            "aquarco_supervisor.cli.auth_helper._run_command",
             new=AsyncMock(return_value=(0, "", "")),
         ):
             await _handle_logout(ipc_dir)
@@ -284,7 +284,7 @@ class TestHandleLogout:
         (ipc_dir / "logout-request").write_text("")
 
         with patch(
-            "aifishtank_supervisor.cli.auth_helper._run_command",
+            "aquarco_supervisor.cli.auth_helper._run_command",
             new=AsyncMock(return_value=(1, "", "some error message")),
         ):
             await _handle_logout(ipc_dir)
@@ -303,7 +303,7 @@ class TestHandleLogout:
         (ipc_dir / "logout-request").write_text("")
 
         with patch(
-            "aifishtank_supervisor.cli.auth_helper._run_command",
+            "aquarco_supervisor.cli.auth_helper._run_command",
             new=AsyncMock(return_value=(0, "", "")),
         ):
             await _handle_logout(ipc_dir)
@@ -318,7 +318,7 @@ class TestHandleLogout:
         (ipc_dir / "logout-response").write_text(json.dumps({"success": True, "stale": True}))
 
         with patch(
-            "aifishtank_supervisor.cli.auth_helper._run_command",
+            "aquarco_supervisor.cli.auth_helper._run_command",
             new=AsyncMock(return_value=(0, "", "")),
         ):
             await _handle_logout(ipc_dir)
@@ -333,7 +333,7 @@ class TestHandleLogout:
         (ipc_dir / "logout-request").write_text("")
 
         with patch(
-            "aifishtank_supervisor.cli.auth_helper._run_command",
+            "aquarco_supervisor.cli.auth_helper._run_command",
             new=AsyncMock(return_value=(0, "", "")),
         ):
             await _handle_logout(ipc_dir)

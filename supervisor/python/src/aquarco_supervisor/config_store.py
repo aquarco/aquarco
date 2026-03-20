@@ -21,11 +21,11 @@ import jsonschema
 import structlog
 import yaml
 
-from aifishtank_supervisor.database import Database
+from aquarco_supervisor.database import Database
 
 log = structlog.get_logger()
 
-AGENT_API_VERSION = "aifishtank.agents/v1"
+AGENT_API_VERSION = "aquarco.agents/v1"
 AGENT_KIND = "AgentDefinition"
 PIPELINE_KIND = "PipelineDefinition"
 

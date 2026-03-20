@@ -1,5 +1,5 @@
 #cloud-config
-# AI Fishtank VM — Cloud-Init base configuration
+# Aquarco VM — Cloud-Init base configuration
 # Used by Vagrant (ubuntu/noble64 box) for initial OS setup.
 # This runs before provision.sh and handles the lowest-level bootstrapping.
 # See tasks/TASK-001-virtualbox-sandbox-architecture.md for architecture context.
@@ -29,7 +29,7 @@ packages:
 
 users:
   - name: agent
-    gecos: "AI Fishtank Agent"
+    gecos: "Aquarco Agent"
     groups:
       - docker
       - sudo
@@ -41,32 +41,32 @@ users:
 
 write_files:
   # dnsmasq DNS query logging config (provision.sh will overwrite with the full version)
-  - path: /etc/dnsmasq.d/aifishtank-tracking.conf
+  - path: /etc/dnsmasq.d/aquarco-tracking.conf
     owner: root:root
     permissions: "0644"
     content: |
-      # AI Fishtank DNS tracking — initial cloud-init placeholder
+      # Aquarco DNS tracking — initial cloud-init placeholder
       # Replaced by vagrant/scripts/setup-network-tracking.sh during provision
       log-queries=extra
-      log-facility=/var/log/aifishtank/dns-queries.log
+      log-facility=/var/log/aquarco/dns-queries.log
       server=8.8.8.8
       server=1.1.1.1
       cache-size=1000
 
-  # aifishtank directory structure marker
-  - path: /var/lib/aifishtank/.initialized
+  # aquarco directory structure marker
+  - path: /var/lib/aquarco/.initialized
     owner: root:root
     permissions: "0644"
     content: |
-      AI Fishtank data directory — created by cloud-init
+      Aquarco data directory — created by cloud-init
 
   # Placeholder secrets env (filled by setup-secrets.sh)
-  - path: /etc/aifishtank/secrets.env
+  - path: /etc/aquarco/secrets.env
     owner: root:root
     permissions: "0600"
     content: |
-      # AI Fishtank secrets — managed by vagrant/scripts/setup-secrets.sh
-      # Run: sudo /home/agent/ai-fishtank/vagrant/scripts/setup-secrets.sh
+      # Aquarco secrets — managed by vagrant/scripts/setup-secrets.sh
+      # Run: sudo /home/agent/aquarco/vagrant/scripts/setup-secrets.sh
       GITHUB_TOKEN=PLACEHOLDER
       ANTHROPIC_API_KEY=PLACEHOLDER
 
@@ -76,11 +76,11 @@ runcmd:
   - systemctl start docker
 
   # Create log and data directories
-  - mkdir -p /var/log/aifishtank /var/log/aifishtank/agents /var/log/aifishtank-export
-  - mkdir -p /var/lib/aifishtank/triggers /var/lib/aifishtank/triggers/processed /var/lib/aifishtank/blobs
-  - mkdir -p /etc/aifishtank
-  - chown -R agent:agent /var/log/aifishtank
-  - chmod 700 /etc/aifishtank
+  - mkdir -p /var/log/aquarco /var/log/aquarco/agents /var/log/aquarco-export
+  - mkdir -p /var/lib/aquarco/triggers /var/lib/aquarco/triggers/processed /var/lib/aquarco/blobs
+  - mkdir -p /etc/aquarco
+  - chown -R agent:agent /var/log/aquarco
+  - chmod 700 /etc/aquarco
 
   # Enable dnsmasq (provision.sh configures it fully)
   - systemctl enable dnsmasq

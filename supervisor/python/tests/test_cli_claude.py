@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 
-from aifishtank_supervisor.cli.claude import _extract_json, _parse_output, execute_claude
-from aifishtank_supervisor.exceptions import AgentExecutionError, AgentTimeoutError
+from aquarco_supervisor.cli.claude import _extract_json, _parse_output, execute_claude
+from aquarco_supervisor.exceptions import AgentExecutionError, AgentTimeoutError
 
 # --- _extract_json ---
 
@@ -308,7 +308,7 @@ async def test_execute_claude_uses_system_prompt_file(tmp_path: Any) -> None:
 
 def test_format_schema_prompt_contains_schema() -> None:
     """_format_schema_prompt produces markdown with the JSON schema."""
-    from aifishtank_supervisor.cli.claude import _format_schema_prompt
+    from aquarco_supervisor.cli.claude import _format_schema_prompt
 
     schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
     result = _format_schema_prompt(schema)

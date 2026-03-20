@@ -148,7 +148,7 @@ class MergeConfig(BaseModel):
 
 
 class ConfigOverlay(BaseModel):
-    api_version: str = Field(default="aifishtank.config/v1", alias="apiVersion")
+    api_version: str = Field(default="aquarco.config/v1", alias="apiVersion")
     kind: str = "ConfigOverlay"
     merge: MergeConfig = Field(default_factory=MergeConfig)
     agents: list[dict[str, Any]] = Field(default_factory=list)
@@ -211,7 +211,7 @@ class DatabaseConfig(BaseModel):
 
 class LoggingConfig(BaseModel):
     level: str = "info"
-    file: str = "/var/log/aifishtank/supervisor.log"
+    file: str = "/var/log/aquarco/supervisor.log"
     max_size_mb: int = Field(default=100, alias="maxSizeMB")
     max_files: int = Field(default=5, alias="maxFiles")
     format: str = "json"

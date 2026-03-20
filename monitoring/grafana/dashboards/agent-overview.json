@@ -10,7 +10,7 @@
   "annotations": {
     "list": []
   },
-  "description": "AI Fishtank agent system overview — task throughput, status breakdown, active agents, and token usage.",
+  "description": "Aquarco agent system overview — task throughput, status breakdown, active agents, and token usage.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -48,7 +48,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "aifishtank_active_agents_total",
+          "expr": "aquarco_active_agents_total",
           "legendFormat": "Active agents",
           "refId": "A"
         }
@@ -82,7 +82,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "rate(aifishtank_tasks_completed_total[5m]) * 60",
+          "expr": "rate(aquarco_tasks_completed_total[5m]) * 60",
           "legendFormat": "Completions/min",
           "refId": "A"
         }
@@ -118,7 +118,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "increase(aifishtank_tokens_used_total[1h])",
+          "expr": "increase(aquarco_tokens_used_total[1h])",
           "legendFormat": "{{ agent }}",
           "refId": "A"
         }
@@ -154,7 +154,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "increase(aifishtank_tasks_failed_total[1h])",
+          "expr": "increase(aquarco_tasks_failed_total[1h])",
           "legendFormat": "Failed",
           "refId": "A"
         }
@@ -188,19 +188,19 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "rate(aifishtank_tasks_completed_total[5m])",
+          "expr": "rate(aquarco_tasks_completed_total[5m])",
           "legendFormat": "completed",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "rate(aifishtank_tasks_failed_total[5m])",
+          "expr": "rate(aquarco_tasks_failed_total[5m])",
           "legendFormat": "failed",
           "refId": "B"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "aifishtank_tasks_pending_total",
+          "expr": "aquarco_tasks_pending_total",
           "legendFormat": "pending",
           "refId": "C"
         }
@@ -230,7 +230,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "rate(aifishtank_tokens_used_total[5m])",
+          "expr": "rate(aquarco_tokens_used_total[5m])",
           "legendFormat": "{{ agent }}",
           "refId": "A"
         }
@@ -239,7 +239,7 @@
   ],
   "refresh": "30s",
   "schemaVersion": 38,
-  "tags": ["aifishtank", "agents"],
+  "tags": ["aquarco", "agents"],
   "templating": {
     "list": [
       {
@@ -258,7 +258,7 @@
   "time": { "from": "now-3h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "AI Fishtank — Agent Overview",
-  "uid": "aifishtank-agent-overview",
+  "title": "Aquarco — Agent Overview",
+  "uid": "aquarco-agent-overview",
   "version": 1
 }

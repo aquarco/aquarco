@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aifishtank_supervisor.cli.claude import _extract_json, _parse_output
+from aquarco_supervisor.cli.claude import _extract_json, _parse_output
 
 
 def test_extract_json_code_block() -> None:

@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 import yaml
 
-from aifishtank_supervisor.cli.agents import (
+from aquarco_supervisor.cli.agents import (
     KEBAB_CASE_RE,
     REQUIRED_API_VERSION,
     REQUIRED_KIND,

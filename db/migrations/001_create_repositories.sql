@@ -7,11 +7,11 @@
 
 -- up
 
-SET search_path TO aifishtank, public;
+SET search_path TO aquarco, public;
 
 CREATE TABLE IF NOT EXISTS repositories (
     -- Human-readable short name, used as FK target from tasks.
-    -- Example: 'ai-fishtank', 'my-app'
+    -- Example: 'aquarco', 'my-app'
     name          TEXT        PRIMARY KEY,
 
     -- Full clone URL (SSH or HTTPS).
@@ -52,4 +52,4 @@ COMMENT ON COLUMN repositories.head_sha         IS 'Full SHA of HEAD after the m
 
 -- down
 
--- DROP TABLE IF EXISTS aifishtank.repositories;
+-- DROP TABLE IF EXISTS aquarco.repositories;

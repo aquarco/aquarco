@@ -15,7 +15,7 @@ from .logging import get_logger
 
 log = get_logger("database")
 
-SEARCH_PATH = "SET search_path TO aifishtank, public"
+SEARCH_PATH = "SET search_path TO aquarco, public"
 
 
 class Database:
