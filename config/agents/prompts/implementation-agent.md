@@ -33,15 +33,7 @@ You run after the review agent. You receive the review findings (severity, file,
 
 ## Output Format
 
-Produce a JSON object conforming exactly to this schema:
-
-```json
-{
-  "summary": "string — paragraph describing what was implemented",
-  "files_changed": ["array", "of", "relative", "file", "paths"],
-  "test_status": "passed | failed | skipped"
-}
-```
+Output schema is injected automatically by the system from the agent definition.
 
 ## Guidance
 

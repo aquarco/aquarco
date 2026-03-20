@@ -141,6 +141,7 @@ export type Mutation = {
   removeRepository: RepositoryPayload;
   retryClone: RepositoryPayload;
   retryTask: TaskPayload;
+  setConfigRepo: RepositoryPayload;
   unblockTask: TaskPayload;
   updateTaskStatus: TaskPayload;
 };
@@ -181,6 +182,12 @@ export type MutationRetryTaskArgs = {
 };
 
 
+export type MutationSetConfigRepoArgs = {
+  isConfigRepo: Scalars['Boolean']['input'];
+  name: Scalars['String']['input'];
+};
+
+
 export type MutationUnblockTaskArgs = {
   id: Scalars['ID']['input'];
   resolution: Scalars['String']['input'];
@@ -214,12 +221,19 @@ export type Query = {
   claudeAuthStatus: ClaudeAuthStatus;
   dashboardStats: DashboardStats;
   githubAuthStatus: GithubAuthStatus;
+  githubBranches: Array<Scalars['String']['output']>;
   githubRepositories: Array<GithubRepo>;
   pipelineStatus?: Maybe<PipelineStatus>;
   repositories: Array<Repository>;
   repository?: Maybe<Repository>;
   task?: Maybe<Task>;
   tasks: TaskConnection;
+};
+
+
+export type QueryGithubBranchesArgs = {
+  owner: Scalars['String']['input'];
+  repo: Scalars['String']['input'];
 };
 
 
@@ -248,6 +262,7 @@ export type QueryTasksArgs = {
 export type RegisterRepositoryInput = {
   branch?: InputMaybe<Scalars['String']['input']>;
   cloneDir?: InputMaybe<Scalars['String']['input']>;
+  isConfigRepo?: InputMaybe<Scalars['Boolean']['input']>;
   name: Scalars['String']['input'];
   pollers?: InputMaybe<Array<Scalars['String']['input']>>;
   url: Scalars['String']['input'];
@@ -255,12 +270,13 @@ export type RegisterRepositoryInput = {
 
 export type Repository = {
   __typename?: 'Repository';
-  branch: Scalars['String']['output'];
+  branch?: Maybe<Scalars['String']['output']>;
   cloneDir: Scalars['String']['output'];
   cloneStatus: CloneStatus;
   deployPublicKey?: Maybe<Scalars['String']['output']>;
   errorMessage?: Maybe<Scalars['String']['output']>;
   headSha?: Maybe<Scalars['String']['output']>;
+  isConfigRepo: Scalars['Boolean']['output'];
   lastClonedAt?: Maybe<Scalars['DateTime']['output']>;
   lastPulledAt?: Maybe<Scalars['DateTime']['output']>;
   name: Scalars['String']['output'];
@@ -626,6 +642,7 @@ export type MutationResolvers<ContextType = Context, ParentType extends Resolver
   removeRepository?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationRemoveRepositoryArgs, 'name'>>;
   retryClone?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationRetryCloneArgs, 'name'>>;
   retryTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationRetryTaskArgs, 'id'>>;
+  setConfigRepo?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationSetConfigRepoArgs, 'isConfigRepo' | 'name'>>;
   unblockTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationUnblockTaskArgs, 'id' | 'resolution'>>;
   updateTaskStatus?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationUpdateTaskStatusArgs, 'id' | 'status'>>;
 }>;
@@ -651,6 +668,7 @@ export type QueryResolvers<ContextType = Context, ParentType extends ResolversPa
   claudeAuthStatus?: Resolver<ResolversTypes['ClaudeAuthStatus'], ParentType, ContextType>;
   dashboardStats?: Resolver<ResolversTypes['DashboardStats'], ParentType, ContextType>;
   githubAuthStatus?: Resolver<ResolversTypes['GithubAuthStatus'], ParentType, ContextType>;
+  githubBranches?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType, RequireFields<QueryGithubBranchesArgs, 'owner' | 'repo'>>;
   githubRepositories?: Resolver<Array<ResolversTypes['GithubRepo']>, ParentType, ContextType>;
   pipelineStatus?: Resolver<Maybe<ResolversTypes['PipelineStatus']>, ParentType, ContextType, RequireFields<QueryPipelineStatusArgs, 'taskId'>>;
   repositories?: Resolver<Array<ResolversTypes['Repository']>, ParentType, ContextType>;
@@ -660,12 +678,13 @@ export type QueryResolvers<ContextType = Context, ParentType extends ResolversPa
 }>;
 
 export type RepositoryResolvers<ContextType = Context, ParentType extends ResolversParentTypes['Repository'] = ResolversParentTypes['Repository']> = ResolversObject<{
-  branch?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  branch?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   cloneDir?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   cloneStatus?: Resolver<ResolversTypes['CloneStatus'], ParentType, ContextType>;
   deployPublicKey?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   errorMessage?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   headSha?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  isConfigRepo?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   lastClonedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   lastPulledAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   name?: Resolver<ResolversTypes['String'], ParentType, ContextType>;

@@ -16,6 +16,20 @@ from ..logging import get_logger
 log = get_logger("claude-cli")
 
 
+def _format_schema_prompt(schema: dict[str, Any]) -> str:
+    """Format an outputSchema dict as a human-readable prompt section."""
+    lines = [
+        "## Output Format",
+        "",
+        "You MUST respond with a JSON object conforming to this schema:",
+        "",
+        "```json",
+        json.dumps(schema, indent=2),
+        "```",
+    ]
+    return "\n".join(lines)
+
+
 async def execute_claude(
     prompt_file: Path,
     context: dict[str, Any],
@@ -26,6 +40,7 @@ async def execute_claude(
     task_id: str = "",
     stage_num: int = 0,
     extra_env: dict[str, str] | None = None,
+    output_schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Invoke the Claude CLI and return structured output.
 
@@ -56,6 +71,9 @@ async def execute_claude(
             args.extend(["--allowedTools", ",".join(allowed_tools)])
         if denied_tools:
             args.extend(["--disallowedTools", ",".join(denied_tools)])
+        if output_schema:
+            args.extend(["--append-system-prompt", _format_schema_prompt(output_schema)])
+            args.extend(["--json-schema", json.dumps(output_schema)])
 
         safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)
         debug_log = Path(f"/var/log/aifishtank/claude-{safe_id}-stage{stage_num}.log")

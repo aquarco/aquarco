@@ -12,6 +12,12 @@ from typing import Any
 
 from ..cli.claude import execute_claude
 from ..config import get_pipeline_config
+from ..config_overlay import (
+    ResolvedConfig,
+    ScopedAgentView,
+    load_overlay,
+    resolve_config,
+)
 from ..database import Database
 from ..exceptions import NoAvailableAgentError, PipelineError, StageError
 from ..logging import get_logger
@@ -47,6 +53,64 @@ class PipelineExecutor:
         self._tq = task_queue
         self._registry = registry
         self._pipelines = pipelines
+
+    # -----------------------------------------------------------------------
+    # Config overlay resolution
+    # -----------------------------------------------------------------------
+
+    async def _resolve_layered_config(self, task_id: str) -> ScopedAgentView | None:
+        """Resolve 3-layer config: default -> global config repo -> per-repo.
+
+        Returns a ScopedAgentView if any overlay exists, None otherwise.
+        """
+        # Layer 1: defaults from registry
+        default_agents = self._registry.get_default_agents()
+        default_pipelines = [
+            {"name": p.name, "version": p.version, "trigger": p.trigger.model_dump(), "stages": [s.model_dump() for s in p.stages]}
+            for p in self._pipelines
+        ]
+        default_prompts_dir = self._registry.get_default_prompts_dir()
+
+        # Layer 2: global config repo (is_config_repo=true, clone_status='ready')
+        global_overlay = None
+        global_overlay_base = None
+        try:
+            config_repo = await self._db.fetch_one(
+                """
+                SELECT clone_dir FROM repositories
+                WHERE is_config_repo = TRUE AND clone_status = 'ready'
+                LIMIT 1
+                """,
+            )
+            if config_repo:
+                config_dir = Path(config_repo["clone_dir"])
+                global_overlay = load_overlay(config_dir)
+                if global_overlay:
+                    global_overlay_base = config_dir
+        except Exception:
+            log.warning("global_config_repo_lookup_failed", task_id=task_id)
+
+        # Layer 3: per-repo overlay from task's repo
+        repo_overlay = None
+        repo_overlay_base = None
+        try:
+            clone_dir = await self._resolve_clone_dir(task_id)
+            repo_dir = Path(clone_dir)
+            repo_overlay = load_overlay(repo_dir)
+            if repo_overlay:
+                repo_overlay_base = repo_dir
+        except PipelineError:
+            pass
+
+        if not global_overlay and not repo_overlay:
+            return None
+
+        resolved = resolve_config(
+            default_agents, default_pipelines, default_prompts_dir,
+            global_overlay, global_overlay_base,
+            repo_overlay, repo_overlay_base,
+        )
+        return ScopedAgentView(resolved)
 
     # -----------------------------------------------------------------------
     # Main entry point
@@ -110,15 +174,23 @@ class PipelineExecutor:
                 )
             planned_stages = task.planned_stages
 
+        # --- Resolve layered config ---
+        scoped_view = await self._resolve_layered_config(task_id)
+
         # --- Phase 3: Running with iteration loops ---
         await self._tq.update_task_phase(task_id, TaskPhase.RUNNING)
         clone_dir = await self._resolve_clone_dir(task_id)
         branch_name = await self._setup_branch(task_id, context, clone_dir)
 
-        failed = await self._execute_running_phase(
-            task_id, planned_stages, stages, context, clone_dir, branch_name,
-            start_stage=start_stage,
-        )
+        try:
+            failed = await self._execute_running_phase(
+                task_id, planned_stages, stages, context, clone_dir, branch_name,
+                start_stage=start_stage,
+                scoped_view=scoped_view,
+            )
+        finally:
+            if scoped_view:
+                scoped_view.cleanup()
 
         if failed:
             return
@@ -229,6 +301,7 @@ class PipelineExecutor:
         branch_name: str,
         *,
         start_stage: int = 0,
+        scoped_view: ScopedAgentView | None = None,
     ) -> bool:
         """Execute planned stages with validation-driven iteration loops.
 
@@ -269,6 +342,7 @@ class PipelineExecutor:
                     stage_output = await self._execute_parallel_agents(
                         task_id, stage_num, category, agents,
                         context, previous_output, clone_dir, branch_name,
+                        scoped_view=scoped_view,
                     )
                 else:
                     # Sequential execution (single or multiple agents)
@@ -281,6 +355,7 @@ class PipelineExecutor:
                         out = await self._execute_planned_stage(
                             task_id, stage_num, category, agent_name,
                             accumulated, previous_output, iteration=1,
+                            scoped_view=scoped_view,
                         )
                         stage_output.update(out)
 
@@ -327,6 +402,7 @@ class PipelineExecutor:
                             accumulated, previous_output,
                             iteration=current_iteration,
                             validation_items_in=vi_in,
+                            scoped_view=scoped_view,
                         )
                         stage_output.update(out)
                         await self._process_validation_items(task_id, sk, out)
@@ -368,6 +444,7 @@ class PipelineExecutor:
         *,
         iteration: int = 1,
         validation_items_in: list[dict[str, Any]] | None = None,
+        scoped_view: ScopedAgentView | None = None,
     ) -> dict[str, Any]:
         """Execute a single planned stage with a specific agent."""
         stage_key = f"{stage_num}:{category}:{agent_name}"
@@ -382,6 +459,7 @@ class PipelineExecutor:
         try:
             output = await self._execute_agent(
                 agent_name, task_id, context, previous_output, stage_num,
+                scoped_view=scoped_view,
             )
             await self._tq.store_stage_output(
                 task_id, stage_num, category, agent_name, output,
@@ -415,6 +493,8 @@ class PipelineExecutor:
         previous_output: dict[str, Any],
         clone_dir: str,
         branch_name: str,
+        *,
+        scoped_view: ScopedAgentView | None = None,
     ) -> dict[str, Any]:
         """Run multiple agents in parallel using git worktrees."""
         log.info(
@@ -450,6 +530,7 @@ class PipelineExecutor:
                 return await self._execute_planned_stage(
                     task_id, stage_num, category, agent_name,
                     accumulated, previous_output, iteration=1,
+                    scoped_view=scoped_view,
                 )
 
             results = await asyncio.gather(
@@ -610,10 +691,13 @@ class PipelineExecutor:
         stage_num: int,
         *,
         work_dir: str | None = None,
+        scoped_view: ScopedAgentView | None = None,
     ) -> dict[str, Any]:
         """Invoke the Claude CLI for an agent."""
-        prompt_file = self._registry.get_agent_prompt_file(agent_name)
-        timeout_minutes = self._registry.get_agent_timeout(agent_name)
+        # Use scoped_view for config lookups when available, fall back to registry
+        cfg = scoped_view or self._registry
+        prompt_file = cfg.get_agent_prompt_file(agent_name)
+        timeout_minutes = cfg.get_agent_timeout(agent_name)
         clone_dir = work_dir or await self._resolve_clone_dir(task_id)
 
         agent_context = {
@@ -629,11 +713,12 @@ class PipelineExecutor:
             context=agent_context,
             work_dir=clone_dir,
             timeout_seconds=timeout_minutes * 60,
-            allowed_tools=self._registry.get_allowed_tools(agent_name),
-            denied_tools=self._registry.get_denied_tools(agent_name),
+            allowed_tools=cfg.get_allowed_tools(agent_name),
+            denied_tools=cfg.get_denied_tools(agent_name),
             task_id=task_id,
             stage_num=stage_num,
-            extra_env=self._registry.get_agent_environment(agent_name),
+            extra_env=cfg.get_agent_environment(agent_name),
+            output_schema=cfg.get_agent_output_schema(agent_name),
         )
 
         output["_agent_name"] = agent_name
@@ -691,7 +776,12 @@ class PipelineExecutor:
         # Use the repo's configured default branch
         base_branch = await self._get_repo_branch(task_id)
         await _run_git(clone_dir, "fetch", "origin")
-        await _run_git(clone_dir, "checkout", "-b", branch_name, f"origin/{base_branch}")
+        try:
+            await _run_git(clone_dir, "checkout", "-b", branch_name, f"origin/{base_branch}")
+        except RuntimeError:
+            # Branch already exists from a previous (failed/timed-out) attempt — reuse it
+            await _run_git(clone_dir, "checkout", branch_name)
+            await _run_git(clone_dir, "reset", "--hard", f"origin/{base_branch}")
         return branch_name
 
     async def _get_repo_branch(self, task_id: str) -> str:
@@ -704,7 +794,7 @@ class PipelineExecutor:
             """,
             {"id": task_id},
         )
-        return row["branch"] if row else "main"
+        return (row["branch"] if row and row["branch"] else None) or "main"
 
     async def _create_pipeline_pr(
         self,

@@ -24,24 +24,7 @@ You run second in feature and bugfix pipelines, after `analysis-complete` has be
 
 ## Output Format
 
-Produce a JSON object conforming exactly to this schema:
-
-```json
-{
-  "design_summary": "string — paragraph summarizing the approach",
-  "components_affected": ["array", "of", "component", "names"],
-  "implementation_steps": [
-    {
-      "step": 1,
-      "description": "string",
-      "files": ["list", "of", "file", "paths"]
-    }
-  ],
-  "acceptance_criteria": ["criterion one", "criterion two"],
-  "api_changes": {},
-  "database_migrations": ["optional", "migration", "file", "names"]
-}
-```
+Output schema is injected automatically by the system from the agent definition.
 
 ## Guidance
 

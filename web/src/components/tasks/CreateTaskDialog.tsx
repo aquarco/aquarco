@@ -34,7 +34,7 @@ interface CreateTaskFormState {
   repository: string
   pipeline: string
   priority: number
-  initialContext: string
+  description: string
 }
 
 const EMPTY_FORM: CreateTaskFormState = {
@@ -42,7 +42,7 @@ const EMPTY_FORM: CreateTaskFormState = {
   repository: '',
   pipeline: 'feature-pipeline',
   priority: 5,
-  initialContext: '',
+  description: '',
 }
 
 interface CreateTaskDialogProps {
@@ -60,7 +60,6 @@ export function CreateTaskDialog({
 }: CreateTaskDialogProps) {
   const [form, setForm] = useState<CreateTaskFormState>(EMPTY_FORM)
   const [formError, setFormError] = useState<string | null>(null)
-  const [jsonError, setJsonError] = useState<string | null>(null)
 
   const [createTask, { loading }] = useMutation(CREATE_TASK, {
     onCompleted: (result) => {
@@ -80,27 +79,10 @@ export function CreateTaskDialog({
   const handleClose = useCallback(() => {
     setForm(EMPTY_FORM)
     setFormError(null)
-    setJsonError(null)
     onClose()
   }, [onClose])
 
-  const validateJson = (value: string): boolean => {
-    if (!value.trim()) {
-      setJsonError(null)
-      return true
-    }
-    try {
-      JSON.parse(value)
-      setJsonError(null)
-      return true
-    } catch {
-      setJsonError('Invalid JSON format')
-      return false
-    }
-  }
-
   const handleSubmit = () => {
-    // Validate required fields
     if (!form.title.trim()) {
       setFormError('Title is required.')
       return
@@ -110,23 +92,11 @@ export function CreateTaskDialog({
       return
     }
 
-    // Validate JSON if provided
-    if (!validateJson(form.initialContext)) {
-      return
-    }
-
     setFormError(null)
 
-    // Parse initial context if provided
-    let initialContext = undefined
-    if (form.initialContext.trim()) {
-      try {
-        initialContext = JSON.parse(form.initialContext)
-      } catch {
-        setFormError('Invalid JSON in initial context.')
-        return
-      }
-    }
+    const initialContext = form.description.trim()
+      ? { description: form.description.trim() }
+      : undefined
 
     createTask({
       variables: {
@@ -229,27 +199,16 @@ export function CreateTaskDialog({
           </Box>
 
           <TextField
-            label="Initial Context (optional)"
+            label="Description"
             multiline
-            minRows={4}
+            minRows={3}
             maxRows={10}
             fullWidth
-            value={form.initialContext}
-            onChange={(e) => {
-              setForm((f) => ({ ...f, initialContext: e.target.value }))
-              if (e.target.value.trim()) {
-                validateJson(e.target.value)
-              } else {
-                setJsonError(null)
-              }
-            }}
-            placeholder='{"key": "value"}'
-            error={!!jsonError}
-            helperText={jsonError || 'JSON object with additional context for the agent'}
-            InputProps={{
-              sx: { fontFamily: 'monospace', fontSize: '0.875rem' },
-            }}
-            data-testid="task-form-initial-context"
+            value={form.description}
+            onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+            placeholder="Describe what the agent should do..."
+            helperText="Provide enough detail for the agent to understand the task"
+            data-testid="task-form-description"
           />
         </Stack>
       </DialogContent>
@@ -260,7 +219,7 @@ export function CreateTaskDialog({
         <Button
           variant="contained"
           onClick={handleSubmit}
-          disabled={loading || !!jsonError}
+          disabled={loading}
           data-testid="task-form-submit"
         >
           {loading ? 'Creating...' : 'Create Task'}

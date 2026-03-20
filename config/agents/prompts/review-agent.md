@@ -27,29 +27,7 @@ You operate as a standalone agent that can be triggered directly on any PR, or a
 
 ## Output Format
 
-Produce a JSON object conforming exactly to this schema:
-
-```json
-{
-  "summary": "string — one to three sentence overview of the review",
-  "findings": [
-    {
-      "file": "relative/path/to/file.ts",
-      "line": 42,
-      "severity": "info | warning | error | critical",
-      "message": "Actionable description of the finding"
-    }
-  ],
-  "recommendation": "approve | request_changes | comment",
-  "severity": "clean | minor_issues | major_issues | blocking"
-}
-```
-
-Severity mapping:
-- `clean` — no findings or only `info` findings
-- `minor_issues` — only `warning` findings
-- `major_issues` — one or more `error` findings
-- `blocking` — one or more `critical` findings
+Output schema is injected automatically by the system from the agent definition.
 
 ## Guidance
 

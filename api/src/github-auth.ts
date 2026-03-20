@@ -214,6 +214,29 @@ export async function listUserRepos(): Promise<
   return repos
 }
 
+export async function listRepoBranches(owner: string, repo: string): Promise<string[]> {
+  const fs = await import('node:fs/promises')
+
+  let token: string | null = null
+  try {
+    token = (await fs.readFile(TOKEN_FILE, 'utf-8')).trim() || null
+  } catch {
+    // no token — try unauthenticated (works for public repos)
+  }
+
+  const headers: Record<string, string> = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const res = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?per_page=100`,
+    { headers }
+  )
+  if (!res.ok) return []
+
+  const data = (await res.json()) as Array<{ name: string }>
+  return data.map((b) => b.name)
+}
+
 export async function getAuthStatus(): Promise<{
   authenticated: boolean
   username: string | null

@@ -328,6 +328,7 @@ async def test_execute_pipeline_no_pipeline_name_uses_task_pipeline(
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
     mock_registry.get_agent_environment = MagicMock(return_value={})
+    mock_registry.get_agent_output_schema = MagicMock(return_value=None)
     # Sync methods
     mock_registry.should_skip_planning = MagicMock(return_value=True)
     mock_registry.get_agents_for_category = MagicMock(return_value=["review-agent"])
@@ -339,6 +340,9 @@ async def test_execute_pipeline_no_pipeline_name_uses_task_pipeline(
         new_callable=AsyncMock,
         return_value={"result": "ok"},
     ), patch("aifishtank_supervisor.pipeline.executor.Path"), patch(
+        "aifishtank_supervisor.pipeline.executor.load_overlay",
+        return_value=None,
+    ), patch(
         "aifishtank_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="0",
@@ -580,6 +584,7 @@ async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
     mock_registry.get_agent_environment = MagicMock(return_value={})
+    mock_registry.get_agent_output_schema = MagicMock(return_value=None)
     # Sync methods must use MagicMock, not AsyncMock
     mock_registry.should_skip_planning = MagicMock(return_value=True)
     mock_registry.get_agents_for_category = MagicMock(return_value=["impl-agent"])
@@ -591,6 +596,9 @@ async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
         new_callable=AsyncMock,
         return_value={"result": "ok"},
     ), patch("aifishtank_supervisor.pipeline.executor.Path"), patch(
+        "aifishtank_supervisor.pipeline.executor.load_overlay",
+        return_value=None,
+    ), patch(
         "aifishtank_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="0",
@@ -639,6 +647,7 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
     mock_registry.get_agent_environment = MagicMock(return_value={})
+    mock_registry.get_agent_output_schema = MagicMock(return_value=None)
 
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
@@ -647,6 +656,9 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
         new_callable=AsyncMock,
         return_value={"result": "ok"},
     ), patch("aifishtank_supervisor.pipeline.executor.Path"), patch(
+        "aifishtank_supervisor.pipeline.executor.load_overlay",
+        return_value=None,
+    ), patch(
         "aifishtank_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="0",
@@ -690,6 +702,7 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
     mock_registry.get_agent_environment = MagicMock(return_value={})
+    mock_registry.get_agent_output_schema = MagicMock(return_value=None)
     # Sync methods
     mock_registry.should_skip_planning = MagicMock(return_value=True)
     mock_registry.get_agents_for_category = MagicMock(return_value=["agent"])
@@ -707,7 +720,10 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
     ), patch(
         "aifishtank_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,
-    ), patch("aifishtank_supervisor.pipeline.executor.Path"):
+    ), patch("aifishtank_supervisor.pipeline.executor.Path"), patch(
+        "aifishtank_supervisor.pipeline.executor.load_overlay",
+        return_value=None,
+    ):
         await executor.execute_pipeline("feature-pipeline", "task-1", {})
 
     mock_tq.fail_task.assert_awaited_once()
@@ -736,6 +752,7 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
     mock_registry.get_agent_environment = MagicMock(return_value={})
+    mock_registry.get_agent_output_schema = MagicMock(return_value=None)
     # Sync methods
     mock_registry.should_skip_planning = MagicMock(return_value=True)
     mock_registry.get_agents_for_category = MagicMock(return_value=["agent"])
@@ -756,6 +773,9 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
         new_callable=AsyncMock,
     ) as mock_claude, patch(
         "aifishtank_supervisor.pipeline.executor.Path",
+    ), patch(
+        "aifishtank_supervisor.pipeline.executor.load_overlay",
+        return_value=None,
     ), patch(
         "aifishtank_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,

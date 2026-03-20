@@ -33,12 +33,19 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
 import VpnKeyIcon from '@mui/icons-material/VpnKey'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import ClearIcon from '@mui/icons-material/Clear'
+import InputAdornment from '@mui/material/InputAdornment'
 import Tooltip from '@mui/material/Tooltip'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import LogoutIcon from '@mui/icons-material/Logout'
 import Autocomplete from '@mui/material/Autocomplete'
 import LockIcon from '@mui/icons-material/Lock'
-import { GET_REPOSITORIES, REGISTER_REPOSITORY, REMOVE_REPOSITORY, RETRY_CLONE, GITHUB_AUTH_STATUS, GITHUB_LOGIN_START, GITHUB_LOGIN_POLL, GITHUB_LOGOUT, GITHUB_REPOSITORIES } from '@/lib/graphql/queries'
+import Switch from '@mui/material/Switch'
+import FormControlLabel from '@mui/material/FormControlLabel'
+import FormGroup from '@mui/material/FormGroup'
+import Checkbox from '@mui/material/Checkbox'
+import SettingsIcon from '@mui/icons-material/Settings'
+import { GET_REPOSITORIES, REGISTER_REPOSITORY, REMOVE_REPOSITORY, RETRY_CLONE, SET_CONFIG_REPO, GITHUB_AUTH_STATUS, GITHUB_LOGIN_START, GITHUB_LOGIN_POLL, GITHUB_LOGOUT, GITHUB_REPOSITORIES } from '@/lib/graphql/queries'
 import { formatDate } from '@/lib/format'
 
 interface Repository {
@@ -46,6 +53,7 @@ interface Repository {
   url: string
   branch: string
   cloneDir: string
+  isConfigRepo: boolean
   cloneStatus: string
   lastPulledAt: string | null
   errorMessage: string | null
@@ -71,14 +79,21 @@ interface GithubRepo {
   description: string | null
 }
 
+const AVAILABLE_POLLERS = [
+  { value: 'github-tasks', label: 'Issues' },
+  { value: 'github-source', label: 'PRs and commits' },
+] as const
+const DEFAULT_POLLERS = ['github-tasks', 'github-source']
+
 interface AddRepoFormState {
   name: string
   url: string
-  branch: string
-  cloneDir: string
+  defaultBranch: string | null
+  pollers: string[]
+  isConfigRepo: boolean
 }
 
-const EMPTY_FORM: AddRepoFormState = { name: '', url: '', branch: 'main', cloneDir: '' }
+const EMPTY_FORM: AddRepoFormState = { name: '', url: '', defaultBranch: null, pollers: [...DEFAULT_POLLERS], isConfigRepo: false }
 
 export default function ReposPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -213,6 +228,10 @@ export default function ReposPage() {
     onCompleted: () => refetch(),
   })
 
+  const [setConfigRepo] = useMutation(SET_CONFIG_REPO, {
+    onCompleted: () => refetch(),
+  })
+
   function handleSubmit() {
     if (!form.name.trim() || !form.url.trim()) {
       setFormError('Name and URL are required.')
@@ -223,8 +242,9 @@ export default function ReposPage() {
         input: {
           name: form.name.trim(),
           url: form.url.trim(),
-          branch: form.branch.trim() || 'main',
-          cloneDir: form.cloneDir.trim() || undefined,
+          branch: form.defaultBranch || undefined,
+          pollers: form.pollers,
+          isConfigRepo: form.isConfigRepo,
         },
       },
     })
@@ -290,6 +310,7 @@ export default function ReposPage() {
               <TableCell>URL</TableCell>
               <TableCell>Branch</TableCell>
               <TableCell>Clone Status</TableCell>
+              <TableCell>Config</TableCell>
               <TableCell>Last Pulled</TableCell>
               <TableCell align="right">Tasks</TableCell>
               <TableCell />
@@ -299,7 +320,7 @@ export default function ReposPage() {
             {loading
               ? [...Array(4)].map((_, i) => (
                   <TableRow key={i}>
-                    {[...Array(6)].map((_, j) => (
+                    {[...Array(7)].map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton variant="text" />
                       </TableCell>
@@ -350,6 +371,19 @@ export default function ReposPage() {
                             size="small"
                           />
                         </TableCell>
+                        <TableCell sx={{ py: 0 }}>
+                          <Tooltip title={repo.isConfigRepo ? 'Global config repo' : 'Mark as config repo'}>
+                            <Switch
+                              size="small"
+                              checked={repo.isConfigRepo}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => {
+                                setConfigRepo({ variables: { name: repo.name, isConfigRepo: e.target.checked } })
+                              }}
+                              data-testid={`toggle-config-repo-${repo.name}`}
+                            />
+                          </Tooltip>
+                        </TableCell>
                         <TableCell>{formatDate(repo.lastPulledAt)}</TableCell>
                         <TableCell align="right">{repo.taskCount ?? 0}</TableCell>
                         <TableCell align="right" sx={{ py: 0 }}>
@@ -370,7 +404,7 @@ export default function ReposPage() {
                       </TableRow>
                       {isError && (
                         <TableRow>
-                          <TableCell colSpan={7} sx={{ py: 0, borderBottom: isExpanded ? undefined : 'none' }}>
+                          <TableCell colSpan={8} sx={{ py: 0, borderBottom: isExpanded ? undefined : 'none' }}>
                             <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                               <Alert
                                 severity="error"
@@ -496,14 +530,16 @@ export default function ReposPage() {
                   </li>
                 )}
                 onChange={(_e, value) => {
-                  if (value && typeof value !== 'string') {
+                  if (!value) {
+                    setForm((f) => ({ ...f, name: '', url: '', defaultBranch: null }))
+                  } else if (typeof value !== 'string') {
                     const repoName = value.nameWithOwner.split('/').pop() ?? value.nameWithOwner
-                    setForm({
+                    setForm((f) => ({
+                      ...f,
                       name: repoName,
                       url: value.url,
-                      branch: value.defaultBranch,
-                      cloneDir: '',
-                    })
+                      defaultBranch: value.defaultBranch,
+                    }))
                   }
                 }}
                 onInputChange={(_e, value, reason) => {
@@ -541,21 +577,56 @@ export default function ReposPage() {
               onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
               placeholder="https://github.com/org/repo.git"
               data-testid="repo-form-url"
+              slotProps={{
+                input: {
+                  endAdornment: form.url ? (
+                    <InputAdornment position="end">
+                      <IconButton
+                        size="small"
+                        onClick={() => setForm((f) => ({ ...f, url: '' }))}
+                        edge="end"
+                      >
+                        <ClearIcon fontSize="small" />
+                      </IconButton>
+                    </InputAdornment>
+                  ) : undefined,
+                },
+              }}
             />
-            <TextField
-              label="Branch"
-              fullWidth
-              value={form.branch}
-              onChange={(e) => setForm((f) => ({ ...f, branch: e.target.value }))}
-              data-testid="repo-form-branch"
-            />
-            <TextField
-              label="Clone Directory"
-              fullWidth
-              value={form.cloneDir}
-              onChange={(e) => setForm((f) => ({ ...f, cloneDir: e.target.value }))}
-              placeholder="/repos/my-project (optional)"
-              data-testid="repo-form-clone-dir"
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Pollers</Typography>
+              <FormGroup row>
+                {AVAILABLE_POLLERS.map(({ value, label }) => (
+                  <FormControlLabel
+                    key={value}
+                    control={
+                      <Checkbox
+                        checked={form.pollers.includes(value)}
+                        onChange={(e) => {
+                          setForm((f) => ({
+                            ...f,
+                            pollers: e.target.checked
+                              ? [...f.pollers, value]
+                              : f.pollers.filter((p) => p !== value),
+                          }))
+                        }}
+                        data-testid={`repo-form-poller-${value}`}
+                      />
+                    }
+                    label={label}
+                  />
+                ))}
+              </FormGroup>
+            </Box>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={form.isConfigRepo}
+                  onChange={(e) => setForm((f) => ({ ...f, isConfigRepo: e.target.checked }))}
+                  data-testid="repo-form-is-config-repo"
+                />
+              }
+              label="Use as global config repository"
             />
           </Stack>
         </DialogContent>

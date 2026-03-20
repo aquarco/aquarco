@@ -306,6 +306,87 @@ async def test_execute_claude_uses_system_prompt_file(tmp_path: Any) -> None:
     assert "--system-prompt" not in args_str.replace("--system-prompt-file", "")
 
 
+def test_format_schema_prompt_contains_schema() -> None:
+    """_format_schema_prompt produces markdown with the JSON schema."""
+    from aifishtank_supervisor.cli.claude import _format_schema_prompt
+
+    schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
+    result = _format_schema_prompt(schema)
+    assert "## Output Format" in result
+    assert "```json" in result
+    assert '"summary"' in result
+    assert "You MUST respond with a JSON object" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_claude_passes_output_schema_flags(tmp_path: Any) -> None:
+    """output_schema adds --append-system-prompt and --json-schema flags."""
+    prompt_file = tmp_path / "system.md"
+    prompt_file.write_text("You are a test agent.")
+
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.communicate = AsyncMock(return_value=(b'{"result": "ok"}', b""))
+
+    captured_args: list = []
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        captured_args.extend(args)
+        return mock_proc
+
+    schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
+
+    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
+         patch("pathlib.Path.mkdir"), \
+         patch("builtins.open", mock_open()):
+        await execute_claude(
+            prompt_file=prompt_file,
+            context={},
+            work_dir=str(tmp_path),
+            task_id="t1",
+            stage_num=0,
+            output_schema=schema,
+        )
+
+    args_str = " ".join(str(a) for a in captured_args)
+    assert "--append-system-prompt" in args_str
+    assert "--json-schema" in args_str
+    assert '"summary"' in args_str
+
+
+@pytest.mark.asyncio
+async def test_execute_claude_no_schema_flags_when_none(tmp_path: Any) -> None:
+    """When output_schema is None, no schema flags are added."""
+    prompt_file = tmp_path / "system.md"
+    prompt_file.write_text("You are a test agent.")
+
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.communicate = AsyncMock(return_value=(b'{"result": "ok"}', b""))
+
+    captured_args: list = []
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        captured_args.extend(args)
+        return mock_proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
+         patch("pathlib.Path.mkdir"), \
+         patch("builtins.open", mock_open()):
+        await execute_claude(
+            prompt_file=prompt_file,
+            context={},
+            work_dir=str(tmp_path),
+            task_id="t1",
+            stage_num=0,
+            output_schema=None,
+        )
+
+    args_str = " ".join(str(a) for a in captured_args)
+    assert "--append-system-prompt" not in args_str
+    assert "--json-schema" not in args_str
+
+
 @pytest.mark.asyncio
 async def test_execute_claude_cleans_up_context_file(tmp_path: Any) -> None:
     """Temporary context file is deleted even when an exception occurs."""

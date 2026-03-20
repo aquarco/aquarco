@@ -305,3 +305,36 @@ async def test_load_default_path_no_file(
     reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
     await reg.load()  # No argument — uses default path
     assert reg._agents == {}
+
+
+def test_get_agent_output_schema_returns_schema(tmp_path: Path) -> None:
+    """Returns the outputSchema dict when present."""
+    mock_db = AsyncMock(spec=Database)
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
+    reg._agents = {"agent1": {"outputSchema": schema}}
+    assert reg.get_agent_output_schema("agent1") == schema
+
+
+def test_get_agent_output_schema_returns_none_when_missing(tmp_path: Path) -> None:
+    """Returns None when no outputSchema is defined."""
+    mock_db = AsyncMock(spec=Database)
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {"agent1": {}}
+    assert reg.get_agent_output_schema("agent1") is None
+
+
+def test_get_agent_output_schema_returns_none_for_unknown(tmp_path: Path) -> None:
+    """Returns None for an agent not in the registry."""
+    mock_db = AsyncMock(spec=Database)
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {}
+    assert reg.get_agent_output_schema("nonexistent") is None
+
+
+def test_get_agent_output_schema_returns_none_for_empty_schema(tmp_path: Path) -> None:
+    """Returns None when outputSchema is an empty dict."""
+    mock_db = AsyncMock(spec=Database)
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {"agent1": {"outputSchema": {}}}
+    assert reg.get_agent_output_schema("agent1") is None

@@ -21,12 +21,27 @@ import urllib.error
 
 IPC_DIR = sys.argv[1] if len(sys.argv) > 1 else "/var/lib/aifishtank/claude-ipc"
 
-# Claude CLI OAuth constants (from CLI source v2.1.76)
+# Claude CLI OAuth constants
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 AUTHORIZE_URL = "https://claude.ai/oauth/authorize"
 TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 REDIRECT_URI = "https://platform.claude.com/oauth/code/callback"
 SCOPES = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
+
+
+def get_cli_version():
+    """Get installed Claude CLI version for User-Agent, fall back to default."""
+    try:
+        import subprocess
+        out = subprocess.check_output(["claude", "--version"], text=True, timeout=5).strip()
+        # Output: "2.1.80 (Claude Code)" → extract version number
+        ver = out.split()[0] if out else "2.1.80"
+        return ver
+    except Exception:
+        return "2.1.80"
+
+
+CLI_VERSION = get_cli_version()
 
 # Credential storage
 CLAUDE_DIR = os.path.expanduser("~/.claude")
@@ -76,7 +91,7 @@ def build_authorize_url(code_challenge, state):
 
 
 def exchange_token(auth_code, code_verifier, state):
-    """Exchange authorization code for tokens."""
+    """Exchange authorization code for tokens (with retry on 429)."""
     body = {
         "grant_type": "authorization_code",
         "code": auth_code,
@@ -91,27 +106,41 @@ def exchange_token(auth_code, code_verifier, state):
         f"verifier_len={len(code_verifier)}")
     payload = json.dumps(body).encode("utf-8")
 
-    req = urllib.request.Request(
-        TOKEN_URL,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": "claude-code/2.1.76",
-            "Accept": "application/json",
-        },
-        method="POST",
-    )
+    max_retries = 5
+    last_error = None
 
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        log(f"Token exchange failed: HTTP {e.code} — {body[:300]}")
-        raise
-    except Exception as e:
-        log(f"Token exchange error: {e}")
-        raise
+    for attempt in range(max_retries):
+        req = urllib.request.Request(
+            TOKEN_URL,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": f"claude-code/{CLI_VERSION}",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            resp_body = e.read().decode("utf-8", errors="replace")
+            last_error = e
+            if e.code == 429:
+                retry_after = e.headers.get("Retry-After")
+                delay = int(retry_after) if retry_after and retry_after.isdigit() else (3 * (2 ** attempt))
+                log(f"Token exchange rate-limited (429), retry {attempt + 1}/{max_retries} in {delay}s")
+                time.sleep(delay)
+                continue
+            log(f"Token exchange failed: HTTP {e.code} — {resp_body[:300]}")
+            raise
+        except Exception as e:
+            log(f"Token exchange error: {e}")
+            raise
+
+    log(f"Token exchange failed after {max_retries} retries")
+    raise last_error
 
 
 def save_credentials(token_response):

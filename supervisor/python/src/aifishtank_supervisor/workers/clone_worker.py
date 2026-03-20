@@ -60,6 +60,15 @@ class CloneWorker:
             await self._do_clone(clone_url, branch, clone_dir, ssh_command, env_extras)
 
             head_sha = await _run_git(clone_dir, "rev-parse", "HEAD")
+            # Detect actual default branch and update DB if it was unset
+            if not branch:
+                actual_branch = await _run_git(
+                    clone_dir, "rev-parse", "--abbrev-ref", "HEAD"
+                )
+                await self._db.execute(
+                    "UPDATE repositories SET branch = %(branch)s WHERE name = %(name)s",
+                    {"name": name, "branch": actual_branch},
+                )
             await self._mark_ready(name, head_sha)
             log.info("clone_success", name=name, sha=head_sha)
 
@@ -122,7 +131,10 @@ class CloneWorker:
         if ssh_command:
             env_args["GIT_SSH_COMMAND"] = ssh_command
 
-        cmd = ["git", "clone", "--branch", branch, "--single-branch", "--", url, clone_dir]
+        cmd = ["git", "clone"]
+        if branch:
+            cmd += ["--branch", branch, "--single-branch"]
+        cmd += ["--", url, clone_dir]
 
         env = {**os.environ, **env_args} if env_args else None
         proc = await asyncio.create_subprocess_exec(

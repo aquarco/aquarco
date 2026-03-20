@@ -27,14 +27,7 @@ You run after `implementation-complete` has been emitted. You consume the implem
 
 ## Output Format
 
-Produce a JSON object conforming exactly to this schema:
-
-```json
-{
-  "files_updated": ["array", "of", "documentation", "file", "paths"],
-  "summary": "string — description of what documentation was changed and why"
-}
-```
+Output schema is injected automatically by the system from the agent definition.
 
 ## Guidance
 

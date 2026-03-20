@@ -179,6 +179,12 @@ class AgentRegistry:
         tools: list[str] = tools_section.get("denied", [])
         return tools
 
+    def get_agent_output_schema(self, agent_name: str) -> dict[str, Any] | None:
+        """Get the outputSchema for an agent, if defined."""
+        spec = self._agents.get(agent_name, {})
+        schema: dict[str, Any] | None = spec.get("outputSchema")
+        return schema if schema else None
+
     def get_agent_environment(self, agent_name: str) -> dict[str, str]:
         """Get environment variables for an agent."""
         spec = self._agents.get(agent_name, {})
@@ -239,6 +245,14 @@ class AgentRegistry:
             }
             for name, spec in self._agents.items()
         ]
+
+    def get_default_agents(self) -> dict[str, dict[str, Any]]:
+        """Return a copy of all loaded agent definitions."""
+        return dict(self._agents)
+
+    def get_default_prompts_dir(self) -> Path:
+        """Return the default prompts directory path."""
+        return self._prompts_dir
 
     def should_skip_planning(self, categories: list[str]) -> bool:
         """Return True if every category has exactly one registered agent.

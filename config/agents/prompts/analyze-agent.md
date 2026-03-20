@@ -28,20 +28,7 @@ You run first in every pipeline. Downstream agents (design, implementation, test
 
 ## Output Format
 
-Produce a JSON object conforming exactly to this schema:
-
-```json
-{
-  "issue_summary": "string — one-paragraph description of what is needed",
-  "affected_components": ["array", "of", "component", "names"],
-  "recommended_pipeline": "feature-pipeline | bugfix-pipeline | docs-pipeline | hotfix-pipeline",
-  "estimated_complexity": "low | medium | high",
-  "files_to_modify": ["optional", "list", "of", "predicted", "file", "paths"],
-  "risks": ["optional", "list", "of", "identified", "risks"]
-}
-```
-
-Write this JSON as the final output of your task file. Do not include anything outside the JSON block in the structured output section.
+Output schema is injected automatically by the system from the agent definition.
 
 ## Guidance
 

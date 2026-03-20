@@ -46,27 +46,7 @@ For each category, define validation criteria that downstream stages (like revie
 
 ## Output Format
 
-Return a JSON object with this structure:
-
-```json
-{
-  "planned_stages": [
-    {
-      "category": "analyze",
-      "agents": ["analyze-agent"],
-      "parallel": false,
-      "validation": ["Verify all affected components are identified"]
-    },
-    {
-      "category": "implementation",
-      "agents": ["frontend-agent", "backend-agent"],
-      "parallel": true,
-      "validation": ["Code compiles without errors", "No regressions in existing tests"]
-    }
-  ],
-  "reasoning": "Selected frontend-agent and backend-agent for parallel implementation because the change affects both React components in src/web/ and GraphQL resolvers in src/api/. These can proceed independently since they communicate through a well-defined GraphQL schema."
-}
-```
+Output schema is injected automatically by the system from the agent definition.
 
 ## Rules
 

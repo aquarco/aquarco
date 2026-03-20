@@ -149,6 +149,11 @@ export const Query = {
     return listUserRepos()
   },
 
+  async githubBranches(_: unknown, args: { owner: string; repo: string }) {
+    const { listRepoBranches } = await import('../github-auth.js')
+    return listRepoBranches(args.owner, args.repo)
+  },
+
   async claudeAuthStatus() {
     const { getClaudeAuthStatus } = await import('../claude-auth.js')
     return getClaudeAuthStatus()
@@ -211,6 +216,7 @@ export function mapRepository(row: Record<string, unknown>) {
     branch: row.branch,
     cloneDir: row.clone_dir,
     pollers: row.pollers ?? [],
+    isConfigRepo: row.is_config_repo ?? false,
     lastClonedAt: row.last_cloned_at ?? null,
     lastPulledAt: row.last_pulled_at ?? null,
     cloneStatus: (row.clone_status as string).toUpperCase(),

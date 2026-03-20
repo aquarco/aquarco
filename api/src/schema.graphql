@@ -19,6 +19,7 @@ type Query {
   # GitHub auth
   githubAuthStatus: GithubAuthStatus!
   githubRepositories: [GithubRepo!]!
+  githubBranches(owner: String!, repo: String!): [String!]!
 
   # Claude auth
   claudeAuthStatus: ClaudeAuthStatus!
@@ -51,6 +52,7 @@ type Mutation {
 
   # Repository actions
   retryClone(name: String!): RepositoryPayload!
+  setConfigRepo(name: String!, isConfigRepo: Boolean!): RepositoryPayload!
 
   # Intervention
   unblockTask(id: ID!, resolution: String!): TaskPayload!
@@ -106,9 +108,10 @@ type Stage {
 type Repository {
   name: String!
   url: String!
-  branch: String!
+  branch: String
   cloneDir: String!
   pollers: [String!]!
+  isConfigRepo: Boolean!
   lastClonedAt: DateTime
   lastPulledAt: DateTime
   cloneStatus: CloneStatus!
@@ -210,6 +213,7 @@ input RegisterRepositoryInput {
   branch: String
   cloneDir: String
   pollers: [String!]
+  isConfigRepo: Boolean
 }
 
 # --- Enums ---

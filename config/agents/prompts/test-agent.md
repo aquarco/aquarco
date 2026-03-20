@@ -28,17 +28,7 @@ You run fourth in feature and bugfix pipelines, after `implementation-complete` 
 
 ## Output Format
 
-Produce a JSON object conforming exactly to this schema:
-
-```json
-{
-  "tests_added": 0,
-  "tests_passed": 0,
-  "tests_failed": 0,
-  "coverage_percent": 0.0,
-  "test_files": ["array", "of", "test", "file", "paths"]
-}
-```
+Output schema is injected automatically by the system from the agent definition.
 
 ## Guidance
 
