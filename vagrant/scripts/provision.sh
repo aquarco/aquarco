@@ -136,7 +136,7 @@ if ! id "${AGENT_USER}" &>/dev/null; then
   log "Creating agent user..."
   useradd -m -s /bin/bash -G docker,vboxsf "${AGENT_USER}"
   # Restrict passwordless sudo to specific commands needed by the supervisor
-  echo "${AGENT_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart aquarco-supervisor, /usr/bin/systemctl status aquarco-supervisor, /usr/bin/docker, /usr/bin/docker-compose" > "/etc/sudoers.d/${AGENT_USER}"
+  echo "${AGENT_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart aquarco-supervisor-python, /usr/bin/systemctl status aquarco-supervisor-python, /usr/bin/docker, /usr/bin/docker-compose" > "/etc/sudoers.d/${AGENT_USER}"
   chmod 440 "/etc/sudoers.d/${AGENT_USER}"
 else
   log "User '${AGENT_USER}' already exists"
