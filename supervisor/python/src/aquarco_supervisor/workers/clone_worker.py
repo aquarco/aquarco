@@ -95,11 +95,20 @@ class CloneWorker:
     def _get_auth_env(self, url: str) -> dict[str, str]:
         """Get extra environment variables for git authentication.
 
-        GitHub token auth is configured process-wide via GIT_ASKPASS and
-        GITHUB_TOKEN env vars set in main.py. This method returns an empty
-        dict for HTTPS URLs since the process env already handles auth.
+        For HTTPS URLs with a token, returns git config env vars that inject
+        a Bearer Authorization header, plus GIT_ASKPASS and GIT_TERMINAL_PROMPT
+        to suppress interactive prompts.
+        SSH URLs use deploy-key auth via GIT_SSH_COMMAND and return an empty dict.
         """
-        return {}
+        if not self._github_token or url.startswith("git@"):
+            return {}
+        return {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.extraheader",
+            "GIT_CONFIG_VALUE_0": f"Authorization: Bearer {self._github_token}",
+            "GIT_ASKPASS": "/bin/echo",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
 
     def _get_ssh_command(self, url: str) -> str | None:
         """Get SSH command with deploy key if available."""
@@ -189,6 +198,18 @@ class CloneWorker:
             """,
             {"name": name, "sha": head_sha},
         )
+
+
+def _url_to_ssh(url: str) -> str:
+    """Convert an HTTPS GitHub URL to SSH format; pass through SSH URLs unchanged."""
+    if url.startswith("git@"):
+        return url
+    # https://github.com/owner/repo[.git] → git@github.com:owner/repo[.git]
+    match = re.match(r"https?://([^/]+)/(.+)", url)
+    if match:
+        host, path = match.group(1), match.group(2)
+        return f"git@{host}:{path}"
+    return url
 
 
 def _url_to_key_name(url: str) -> str:

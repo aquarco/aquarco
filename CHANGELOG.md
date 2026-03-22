@@ -1,5 +1,34 @@
 # Changelog
 
+## [2026-03-20] — Rebrand: ai-fishtank → aquarco
+
+### Breaking Changes
+
+> **Upgrade path required for existing deployments.** Apply `018_rename_schema.sql`
+> before restarting any service — the application now issues `SET search_path TO aquarco`
+> and will fail immediately if the database schema is still named `aifishtank`.
+
+- **PostgreSQL schema renamed** from `aifishtank` to `aquarco`. Run migration
+  `db/migrations/018_rename_schema.sql` on every deployed database before upgrading.
+  Fresh installs are unaffected (the migration is a no-op when `aifishtank` does not exist).
+- **Python package renamed** from `aifishtank_supervisor` to `aquarco_supervisor`.
+  Re-install the package: `pip install -e supervisor/python/` (or `pip install -e ".[dev]"`).
+- **CLI binary renamed** from `aifishtank-supervisor` to `aquarco-supervisor`.
+  Update any scripts, cron jobs, or process supervisors that invoke the old binary.
+- **systemd service units renamed** — the Python supervisor service is now
+  `aquarco-supervisor-python`. Update `systemctl` calls and any monitoring checks.
+- **Config `apiVersion` changed** — all agent definition YAML files must use the
+  new `apiVersion` value. The supervisor will fast-fail on stale configs at startup.
+
+### Changed (non-breaking)
+
+- All 140 source files updated: directory names, import paths, log prefixes,
+  environment variable prefixes, Docker image tags, and inline comments.
+- Sudoers entry in `provision.sh` corrected to reference `aquarco-supervisor-python`
+  (the actual systemd service name), restoring passwordless restart capability for
+  the agent user.
+- Branch prefixes in test assertions updated to match executor implementation.
+
 ## [2026-03-06] — E2E agent for mission-critical flows
 
 ### Added

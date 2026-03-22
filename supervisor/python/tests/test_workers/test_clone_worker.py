@@ -27,6 +27,12 @@ def test_url_to_ssh_already_ssh() -> None:
     assert _url_to_ssh(url) == url
 
 
+def test_url_to_ssh_non_matching_returns_unchanged() -> None:
+    """URLs that don't match https?:// or git@ are returned unchanged."""
+    url = "ssh://git@github.com/owner/repo.git"
+    assert _url_to_ssh(url) == url
+
+
 def test_url_to_key_name() -> None:
     assert _url_to_key_name("git@github.com:owner/repo.git") == "github.com-owner-repo"
     assert _url_to_key_name("https://github.com/owner/repo.git") == "github.com-owner-repo"
@@ -293,6 +299,46 @@ async def test_mark_ready_updates_db() -> None:
 
 
 # --- _ensure_deploy_key ---
+
+
+@pytest.mark.asyncio
+async def test_clone_pending_repos_no_branch_detects_default(tmp_path: Any) -> None:
+    """When branch is None/empty, detects actual default branch and updates DB."""
+    db = AsyncMock(spec=Database)
+    clone_dir = str(tmp_path / "unset-branch-repo")
+    db.fetch_one = AsyncMock(
+        return_value={
+            "name": "unset-branch-repo",
+            "url": "https://github.com/org/repo.git",
+            "branch": None,
+            "clone_dir": clone_dir,
+        }
+    )
+    db.execute = AsyncMock()
+
+    worker = CloneWorker(db, github_token="ghp_token")
+
+    run_git_responses = iter(["deadbeef", "main"])
+
+    async def fake_run_git(*args: Any, **kwargs: Any) -> str:
+        return next(run_git_responses)
+
+    with patch.object(worker, "_do_clone", new_callable=AsyncMock), \
+         patch(
+             "aquarco_supervisor.workers.clone_worker._run_git",
+             side_effect=fake_run_git,
+         ):
+        await worker.clone_pending_repos()
+
+    assert db.execute.await_count == 2
+    # First call: branch update
+    first_call_sql = db.execute.await_args_list[0].args[0]
+    first_call_params = db.execute.await_args_list[0].args[1]
+    assert "SET branch" in first_call_sql
+    assert first_call_params["branch"] == "main"
+    # Second call: mark ready
+    second_call_sql = db.execute.await_args_list[1].args[0]
+    assert "clone_status = 'ready'" in second_call_sql
 
 
 @pytest.mark.asyncio
