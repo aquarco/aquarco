@@ -260,6 +260,115 @@ async def test_poll_prs_processes_new_prs(sample_config: Any) -> None:
 # --- GitHubSourcePoller._poll_commits ---
 
 @pytest.mark.asyncio
+async def test_poll_commits_skips_pipeline_branch_subjects(
+    sample_config: Any, tmp_path: Any
+) -> None:
+    """Commits with 'aquarco/' in the subject are skipped to prevent task loops."""
+    git_dir = tmp_path / "repo" / ".git"
+    git_dir.mkdir(parents=True)
+
+    mock_tq = AsyncMock(spec=TaskQueue)
+    mock_tq.task_exists = AsyncMock(return_value=False)
+    mock_tq.create_task = AsyncMock(return_value=True)
+    mock_db = AsyncMock(spec=Database)
+
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
+
+    # Two commits: one normal, one with aquarco/ in the subject (pipeline merge)
+    commit_lines = (
+        "aaa111222333\tAdd feature\tDev\t2024-06-01T00:00:00+00:00\n"
+        "bbb444555666\tMerge pull request #8 from borissuska/aquarco/github-commit-aquarco-bc1db35/review\tDev\t2024-06-01T00:00:00+00:00"
+    )
+
+    with patch(
+        "aquarco_supervisor.pollers.github_source._run_git",
+        new_callable=AsyncMock,
+        side_effect=["", "origin/main", commit_lines],
+    ):
+        result = await poller._poll_commits(
+            "test-repo",
+            str(tmp_path / "repo"),
+            "2024-01-01T00:00:00Z",
+        )
+
+    # Only the first commit should be processed
+    assert result == 1
+    call_kwargs = mock_tq.create_task.await_args.kwargs
+    assert call_kwargs["task_id"] == "github-commit-test-repo-aaa111222333"
+
+
+@pytest.mark.asyncio
+async def test_poll_commits_skips_all_aquarco_subjects(
+    sample_config: Any, tmp_path: Any
+) -> None:
+    """When all commits have aquarco/ in subject, none are processed."""
+    git_dir = tmp_path / "repo" / ".git"
+    git_dir.mkdir(parents=True)
+
+    mock_tq = AsyncMock(spec=TaskQueue)
+    mock_tq.task_exists = AsyncMock(return_value=False)
+    mock_db = AsyncMock(spec=Database)
+
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
+
+    commit_line = "ccc777888999\taquarco/github-commit-repo-abc/review\tBot\t2024-06-01T00:00:00+00:00"
+
+    with patch(
+        "aquarco_supervisor.pollers.github_source._run_git",
+        new_callable=AsyncMock,
+        side_effect=["", "origin/main", commit_line],
+    ):
+        result = await poller._poll_commits(
+            "test-repo",
+            str(tmp_path / "repo"),
+            "2024-01-01T00:00:00Z",
+        )
+
+    assert result == 0
+    mock_tq.create_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_poll_commits_uses_no_merges_flag(
+    sample_config: Any, tmp_path: Any
+) -> None:
+    """git log is called with --no-merges to exclude merge commits."""
+    git_dir = tmp_path / "repo" / ".git"
+    git_dir.mkdir(parents=True)
+
+    mock_tq = AsyncMock(spec=TaskQueue)
+    mock_db = AsyncMock(spec=Database)
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
+
+    captured_args: list = []
+
+    async def mock_run_git(clone_dir: str, *args: str, **kwargs: Any) -> str:
+        captured_args.append(args)
+        if args[0] == "fetch":
+            return ""
+        if args[0] == "rev-parse":
+            return "origin/main"
+        if args[0] == "log":
+            return ""
+        return ""
+
+    with patch(
+        "aquarco_supervisor.pollers.github_source._run_git",
+        side_effect=mock_run_git,
+    ):
+        await poller._poll_commits(
+            "test-repo",
+            str(tmp_path / "repo"),
+            "2024-01-01T00:00:00Z",
+        )
+
+    # Find the log call and verify --no-merges is present
+    log_call = [a for a in captured_args if a[0] == "log"]
+    assert len(log_call) == 1
+    assert "--no-merges" in log_call[0]
+
+
+@pytest.mark.asyncio
 async def test_poll_commits_skips_missing_clone_dir(sample_config: Any, tmp_path: Any) -> None:
     """If the .git directory does not exist, returns 0."""
     mock_tq = AsyncMock(spec=TaskQueue)
@@ -505,6 +614,77 @@ async def test_poll_commits_malformed_line_skipped(
     ):
         result = await poller._poll_commits(
             "test-repo", str(tmp_path / "repo"), "2024-01-01T00:00:00Z",
+        )
+
+    assert result == 0
+    mock_tq.create_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_poll_commits_skips_aquarco_subject(
+    sample_config: Any, tmp_path: Any
+) -> None:
+    """Commits with 'aquarco/' in the subject are skipped (pipeline-created)."""
+    git_dir = tmp_path / "repo" / ".git"
+    git_dir.mkdir(parents=True)
+
+    mock_tq = AsyncMock(spec=TaskQueue)
+    mock_tq.task_exists = AsyncMock(return_value=False)
+    mock_tq.create_task = AsyncMock(return_value=True)
+    mock_db = AsyncMock(spec=Database)
+
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
+
+    # One pipeline commit (should be skipped) and one normal commit
+    commit_lines = (
+        "aaa111222333\tMerge aquarco/task-1/feature\tBot\t2024-06-01T00:00:00+00:00\n"
+        "bbb222333444\tFix actual bug\tDev\t2024-06-01T00:00:00+00:00"
+    )
+
+    with patch(
+        "aquarco_supervisor.pollers.github_source._run_git",
+        new_callable=AsyncMock,
+        side_effect=["", "origin/main", commit_lines],
+    ):
+        result = await poller._poll_commits(
+            "test-repo",
+            str(tmp_path / "repo"),
+            "2024-01-01T00:00:00Z",
+        )
+
+    # Only the non-aquarco commit should create a task
+    assert result == 1
+    call_kwargs = mock_tq.create_task.await_args.kwargs
+    assert call_kwargs["task_id"] == "github-commit-test-repo-bbb222333444"
+
+
+@pytest.mark.asyncio
+async def test_poll_commits_skips_all_aquarco_subjects(
+    sample_config: Any, tmp_path: Any
+) -> None:
+    """When all commits have aquarco/ in subject, none are created."""
+    git_dir = tmp_path / "repo" / ".git"
+    git_dir.mkdir(parents=True)
+
+    mock_tq = AsyncMock(spec=TaskQueue)
+    mock_tq.task_exists = AsyncMock(return_value=False)
+    mock_db = AsyncMock(spec=Database)
+
+    poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
+
+    commit_lines = (
+        "aaa111222333\tfeat: Review aquarco/task-1\tBot\t2024-06-01T00:00:00+00:00"
+    )
+
+    with patch(
+        "aquarco_supervisor.pollers.github_source._run_git",
+        new_callable=AsyncMock,
+        side_effect=["", "origin/main", commit_lines],
+    ):
+        result = await poller._poll_commits(
+            "test-repo",
+            str(tmp_path / "repo"),
+            "2024-01-01T00:00:00Z",
         )
 
     assert result == 0

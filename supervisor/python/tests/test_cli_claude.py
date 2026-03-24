@@ -385,6 +385,109 @@ async def test_execute_claude_no_schema_flags_when_none(tmp_path: Any) -> None:
     assert "--json-schema" not in args_str
 
 
+# --- ClaudeOutput dataclass ---
+
+def test_claude_output_defaults() -> None:
+    """ClaudeOutput has sensible defaults for structured and raw."""
+    output = ClaudeOutput()
+    assert output.structured == {}
+    assert output.raw == ""
+
+
+def test_claude_output_custom_values() -> None:
+    """ClaudeOutput stores both structured data and raw text."""
+    output = ClaudeOutput(structured={"key": "val"}, raw="raw text here")
+    assert output.structured == {"key": "val"}
+    assert output.raw == "raw text here"
+
+
+# --- _parse_output: no _raw_output in any path ---
+
+def test_parse_output_empty_has_no_raw_output_key() -> None:
+    """Empty input should NOT include _raw_output key."""
+    result = _parse_output("", "task-001", 0)
+    assert "_raw_output" not in result
+
+
+def test_parse_output_invalid_json_has_no_raw_output_key() -> None:
+    """Invalid JSON should NOT include _raw_output key."""
+    result = _parse_output("not json", "task-001", 0)
+    assert "_raw_output" not in result
+
+
+def test_parse_output_plain_text_result_has_no_raw_output_key() -> None:
+    """Plain text result should NOT include _raw_output key."""
+    raw = json.dumps({"result": "Just some text"})
+    result = _parse_output(raw, "task-001", 0)
+    assert "_raw_output" not in result
+    assert result["_result_text"] == "Just some text"
+
+
+def test_parse_output_list_format_has_no_raw_output_and_no_parsed_messages() -> None:
+    """List-format output should NOT include _raw_output or _parsed_messages."""
+    messages = [
+        {"type": "result", "result": "Some plain text from assistant"},
+    ]
+    raw = json.dumps(messages)
+    result = _parse_output(raw, "task-001", 0)
+    assert "_raw_output" not in result
+    assert "_parsed_messages" not in result
+    assert result["_no_structured_output"] is True
+    assert result["_result_text"] == "Some plain text from assistant"
+
+
+# --- _parse_output: _result_text truncation ---
+
+def test_parse_output_result_text_truncated_to_2000() -> None:
+    """Long plain text in result field is truncated to 2000 chars."""
+    long_text = "x" * 5000
+    raw = json.dumps({"result": long_text})
+    result = _parse_output(raw, "task-001", 0)
+    assert result["_no_structured_output"] is True
+    assert len(result["_result_text"]) == 2000
+    assert result["_result_text"] == "x" * 2000
+
+
+def test_parse_output_list_result_text_truncated_to_2000() -> None:
+    """Long result text from list-format is truncated to 2000 chars."""
+    long_text = "y" * 5000
+    messages = [{"type": "result", "result": long_text}]
+    raw = json.dumps(messages)
+    result = _parse_output(raw, "task-001", 0)
+    assert len(result["_result_text"]) == 2000
+
+
+# --- execute_claude returns ClaudeOutput with raw ---
+
+@pytest.mark.asyncio
+async def test_execute_claude_returns_claude_output_with_raw(tmp_path: Any) -> None:
+    """execute_claude returns ClaudeOutput with both structured and raw fields."""
+    prompt_file = tmp_path / "system.md"
+    prompt_file.write_text("You are a test agent.")
+
+    structured = {"status": "ok"}
+    raw_json = json.dumps({"result": json.dumps(structured)})
+
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.communicate = AsyncMock(return_value=(raw_json.encode(), b""))
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+         patch("pathlib.Path.mkdir"), \
+         patch("builtins.open", mock_open(read_data=raw_json)):
+        result = await execute_claude(
+            prompt_file=prompt_file,
+            context={"task_id": "t1"},
+            work_dir=str(tmp_path),
+            task_id="t1",
+            stage_num=0,
+        )
+
+    assert isinstance(result, ClaudeOutput)
+    assert result.structured == {"status": "ok"}
+    assert result.raw == raw_json
+
+
 @pytest.mark.asyncio
 async def test_execute_claude_cleans_up_context_file(tmp_path: Any) -> None:
     """Temporary context file is deleted even when an exception occurs."""
