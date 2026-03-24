@@ -7,11 +7,20 @@ import json
 import os
 import re
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ..exceptions import AgentExecutionError, AgentTimeoutError
 from ..logging import get_logger
+
+
+@dataclass
+class ClaudeOutput:
+    """Separated structured and raw output from Claude CLI."""
+
+    structured: dict[str, Any] = field(default_factory=dict)
+    raw: str = ""
 
 log = get_logger("claude-cli")
 
@@ -79,6 +88,9 @@ async def execute_claude(
         debug_log = Path(f"/var/log/aquarco/claude-{safe_id}-stage{stage_num}.log")
         debug_log.parent.mkdir(parents=True, exist_ok=True)
 
+        stderr_log = Path(f"/var/log/aquarco/claude-{safe_id}-stage{stage_num}.stderr")
+        args.extend(["--debug-file", str(debug_log)])
+
         log.info(
             "executing_claude",
             task_id=task_id,
@@ -92,7 +104,7 @@ async def execute_claude(
         if extra_env:
             proc_env = {**os.environ, **extra_env}
 
-        with open(context_file) as stdin_f, open(debug_log, "w") as stderr_f:
+        with open(context_file) as stdin_f, open(stderr_log, "w") as stderr_f:
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 stdin=stdin_f,
@@ -115,27 +127,49 @@ async def execute_claude(
                 )
 
         if proc.returncode != 0:
+            raw_stdout = stdout.decode("utf-8", errors="replace").strip() if stdout else ""
+            raw_stderr = ""
+            for log_file in (stderr_log, debug_log):
+                try:
+                    content = log_file.read_text().strip()
+                    if content:
+                        raw_stderr += content[-500:]
+                        break
+                except OSError:
+                    pass
+            log.warning(
+                "claude_cli_failed",
+                task_id=task_id,
+                stage=stage_num,
+                returncode=proc.returncode,
+                stdout_tail=raw_stdout[:500],
+                stderr_tail=raw_stderr,
+            )
             raise AgentExecutionError(
                 f"Claude CLI exited with code {proc.returncode} "
                 f"(task={task_id}, stage={stage_num})"
             )
 
         raw_output = stdout.decode("utf-8", errors="replace") if stdout else ""
-        return _parse_output(raw_output, task_id, stage_num)
+        structured = _parse_output(raw_output, task_id, stage_num)
+        return ClaudeOutput(structured=structured, raw=raw_output)
 
     finally:
         context_file.unlink(missing_ok=True)
 
 
 def _parse_output(raw_output: str, task_id: str, stage_num: int) -> dict[str, Any]:
-    """Parse Claude CLI JSON output and extract structured result."""
+    """Parse Claude CLI JSON output and extract structured result.
+
+    Returns only the structured data — raw output is stored separately.
+    """
     if not raw_output.strip():
-        return {"_raw_output": "", "_no_structured_output": True}
+        return {"_no_structured_output": True}
 
     try:
         parsed = json.loads(raw_output)
     except json.JSONDecodeError:
-        return {"_raw_output": raw_output, "_no_structured_output": True}
+        return {"_no_structured_output": True}
 
     # Claude CLI --output-format json may return a list of message objects
     # instead of a single dict. Normalise to a dict before proceeding.
@@ -163,7 +197,7 @@ def _parse_output(raw_output: str, task_id: str, stage_num: int) -> dict[str, An
             structured = _extract_json(result_text)
             if structured is not None:
                 return structured
-        return {"_raw_output": raw_output, "_parsed_messages": parsed}
+        return {"_no_structured_output": True, "_result_text": result_text[:2000]}
 
     # Extract the result text from the JSON output
     result_text = parsed.get("result", "")
@@ -175,7 +209,7 @@ def _parse_output(raw_output: str, task_id: str, stage_num: int) -> dict[str, An
     if structured is not None:
         return structured
 
-    return {"_raw_output": result_text, "_no_structured_output": True}
+    return {"_no_structured_output": True, "_result_text": result_text[:2000]}
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:

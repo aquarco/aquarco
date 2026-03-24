@@ -165,6 +165,7 @@ mkdir -p \
   "${AGENT_HOME}/.claude" \
   "/etc/aquarco"
 
+chown "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}"
 chown -R "${AGENT_USER}:${AGENT_USER}" \
   "${DATA_DIR}" \
   "${LOG_DIR}" \

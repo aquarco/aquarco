@@ -177,6 +177,9 @@ class TaskQueue:
         validation_items_out: list[dict[str, Any]] | None = None,
     ) -> None:
         """Upsert a completed stage record and advance the task's current_stage."""
+        # Separate raw output from structured data to avoid bloating context
+        raw_output = output.pop("_raw_output", None)
+        structured_json = json.dumps(output)
         if stage_key:
             # New path: use stage_key + iteration for upsert
             await self._db.execute(
@@ -184,6 +187,7 @@ class TaskQueue:
                 UPDATE stages
                 SET agent = %(agent)s, status = 'completed',
                     structured_output = %(output)s::jsonb,
+                    raw_output = %(raw)s,
                     validation_items_in = %(vi_in)s::jsonb,
                     validation_items_out = %(vi_out)s::jsonb,
                     started_at = COALESCE(stages.started_at, NOW()),
@@ -196,7 +200,8 @@ class TaskQueue:
                     "stage_key": stage_key,
                     "iteration": iteration,
                     "agent": agent,
-                    "output": json.dumps(output),
+                    "output": structured_json,
+                    "raw": raw_output,
                     "vi_in": json.dumps(validation_items_in) if validation_items_in else None,
                     "vi_out": json.dumps(validation_items_out) if validation_items_out else None,
                 },
@@ -206,12 +211,13 @@ class TaskQueue:
             await self._db.execute(
                 """
                 INSERT INTO stages (task_id, stage_number, category, agent, status,
-                                   structured_output, started_at, completed_at)
+                                   structured_output, raw_output, started_at, completed_at)
                 VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s, 'completed',
-                        %(output)s::jsonb, NOW(), NOW())
+                        %(output)s::jsonb, %(raw)s, NOW(), NOW())
                 ON CONFLICT (task_id, stage_number) DO UPDATE
                 SET agent = %(agent)s, status = 'completed',
                     structured_output = %(output)s::jsonb,
+                    raw_output = %(raw)s,
                     started_at = COALESCE(stages.started_at, NOW()),
                     completed_at = NOW()
                 """,
@@ -220,7 +226,8 @@ class TaskQueue:
                     "stage": stage_num,
                     "category": category,
                     "agent": agent,
-                    "output": json.dumps(output),
+                    "output": structured_json,
+                    "raw": raw_output,
                 },
             )
         await self._db.execute(

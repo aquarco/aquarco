@@ -104,6 +104,7 @@ class GitHubSourcePoller(BasePoller):
         output = await _run_git(
             clone_dir, "log", f"origin/{default_branch}",
             f"--since={cursor}",
+            "--no-merges",
             "--pretty=format:%H\t%s\t%an\t%aI",
         )
 
@@ -118,6 +119,11 @@ class GitHubSourcePoller(BasePoller):
 
             sha, subject, author, date = parts
             task_id = f"github-commit-{repo_name}-{sha[:12]}"
+
+            # Skip merge commits from pipeline-created branches
+            if "aquarco/" in subject:
+                log.debug("skip_pipeline_merge", sha=sha[:12], subject=subject)
+                continue
 
             if await self._tq.task_exists(task_id):
                 continue

@@ -708,7 +708,7 @@ class PipelineExecutor:
             "previous_stage_output": previous_output,
         }
 
-        output = await execute_claude(
+        claude_output = await execute_claude(
             prompt_file=prompt_file,
             context=agent_context,
             work_dir=clone_dir,
@@ -721,7 +721,9 @@ class PipelineExecutor:
             output_schema=cfg.get_agent_output_schema(agent_name),
         )
 
+        output = claude_output.structured
         output["_agent_name"] = agent_name
+        output["_raw_output"] = claude_output.raw
 
         # Save output log (sanitize task_id to prevent path traversal)
         safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)

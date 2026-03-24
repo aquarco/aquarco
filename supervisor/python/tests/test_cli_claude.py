@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 
-from aquarco_supervisor.cli.claude import _extract_json, _parse_output, execute_claude
+from aquarco_supervisor.cli.claude import ClaudeOutput, _extract_json, _parse_output, execute_claude
 from aquarco_supervisor.exceptions import AgentExecutionError, AgentTimeoutError
 
 # --- _extract_json ---
@@ -56,7 +56,6 @@ def test_extract_json_returns_first_valid_dict() -> None:
 def test_parse_output_empty_string() -> None:
     result = _parse_output("", "task-001", 0)
     assert result["_no_structured_output"] is True
-    assert result["_raw_output"] == ""
 
 
 def test_parse_output_whitespace_only() -> None:
@@ -67,7 +66,6 @@ def test_parse_output_whitespace_only() -> None:
 def test_parse_output_invalid_json() -> None:
     result = _parse_output("not json at all", "task-001", 0)
     assert result["_no_structured_output"] is True
-    assert result["_raw_output"] == "not json at all"
 
 
 def test_parse_output_valid_json_no_result_key() -> None:
@@ -94,11 +92,11 @@ def test_parse_output_result_with_code_block_json() -> None:
 
 
 def test_parse_output_result_plain_text() -> None:
-    """When result is plain text (no JSON), returns raw output wrapper."""
+    """When result is plain text (no JSON), returns _result_text snippet."""
     raw = json.dumps({"result": "Everything looks fine."})
     result = _parse_output(raw, "task-001", 0)
     assert result["_no_structured_output"] is True
-    assert result["_raw_output"] == "Everything looks fine."
+    assert result["_result_text"] == "Everything looks fine."
 
 
 def test_parse_output_result_empty_string() -> None:
@@ -203,8 +201,8 @@ async def test_execute_claude_returns_parsed_output(tmp_path: Any) -> None:
             stage_num=0,
         )
 
-    assert result["complexity"] == "low"
-    assert result["summary"] == "Done"
+    assert result.structured["complexity"] == "low"
+    assert result.structured["summary"] == "Done"
 
 
 @pytest.mark.asyncio

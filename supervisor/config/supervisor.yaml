@@ -80,7 +80,7 @@ spec:
         processedDir: /var/lib/aquarco/triggers/processed
 
   health:
-    enabled: true
+    enabled: false
     reportIntervalMinutes: 30
     reportDestination: github-issue
     issueNumber: 1
