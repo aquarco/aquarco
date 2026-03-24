@@ -717,6 +717,9 @@ class PipelineExecutor:
         cumulative_cost = 0.0
         resume_session_id: str | None = None
         iteration = 0
+        max_resume_iterations = 10
+        last_successful_output: dict[str, Any] | None = None
+        raw_outputs: list[str] = []
 
         while True:
             claude_output = await execute_claude(
@@ -735,10 +738,23 @@ class PipelineExecutor:
             )
 
             output = claude_output.structured
+            raw_outputs.append(claude_output.raw)
             iteration_cost = output.get("_cost_usd", 0.0)
+            if "_cost_usd" not in output:
+                log.warning(
+                    "cost_usd_missing_from_output",
+                    task_id=task_id,
+                    stage=stage_num,
+                    agent=agent_name,
+                    iteration=iteration,
+                )
             cumulative_cost += iteration_cost
             output["_cumulative_cost_usd"] = cumulative_cost
             iteration += 1
+
+            # Preserve last successful structured output (non-error)
+            if not output.get("_no_structured_output"):
+                last_successful_output = dict(output)
 
             # Check if agent hit max_turns and can be continued
             if output.get("_subtype") == "error_max_turns":
@@ -764,6 +780,17 @@ class PipelineExecutor:
                     )
                     break
 
+                if iteration >= max_resume_iterations:
+                    log.warning(
+                        "max_resume_iterations_reached",
+                        task_id=task_id,
+                        stage=stage_num,
+                        agent=agent_name,
+                        iterations=iteration,
+                        max_resume_iterations=max_resume_iterations,
+                    )
+                    break
+
                 log.info(
                     "max_turns_continuing",
                     task_id=task_id,
@@ -780,8 +807,14 @@ class PipelineExecutor:
             # Normal completion
             break
 
+        # If final iteration lacks structured data, fall back to last successful output
+        if output.get("_no_structured_output") and last_successful_output:
+            last_successful_output["_cumulative_cost_usd"] = cumulative_cost
+            output = last_successful_output
+
         output["_agent_name"] = agent_name
-        output["_raw_output"] = claude_output.raw
+        output["_raw_output"] = raw_outputs[-1] if raw_outputs else claude_output.raw
+        output["_raw_outputs_all"] = raw_outputs
         output["_iterations"] = iteration
 
         # Save output log (sanitize task_id to prevent path traversal)
