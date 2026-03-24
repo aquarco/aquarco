@@ -270,6 +270,18 @@ system prompt path, and output schema. Key fields under `spec`:
 - `systemPrompt` — path to agent's markdown prompt template
 - `outputSchema` — structured output contract
 
+Agents come from three sources:
+
+| Source       | Description                                    | Modifiable | Disableable |
+|--------------|------------------------------------------------|------------|-------------|
+| `DEFAULT`    | Built-in agent definitions shipped with Aquarco | No         | Yes         |
+| `GLOBAL`     | Definitions from global config repositories     | Yes (DB)   | Yes         |
+| `REPOSITORY` | Repo-specific agent definitions                 | Yes (DB)   | Yes         |
+
+Modifications persist to the `agent_overrides` database table. The web UI
+provides an edit dialog for modifying agent specs and a reset button to revert
+to the original definition.
+
 ### Pipelines (`config/pipelines.yaml`)
 
 Standalone file with pipeline definitions. Each pipeline has ordered stages

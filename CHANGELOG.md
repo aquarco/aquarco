@@ -1,5 +1,24 @@
 # Changelog
 
+## [2026-03-24] — Redesign agents page (github-issue-aquarco-1)
+
+### Added
+- **Agents page redesigned** with two distinct sections: **Global Agents** and **Repository Agents**
+- Agents are now categorised by source: `DEFAULT` (built-in), `GLOBAL` (from config repositories), and `REPOSITORY` (repo-specific)
+- Per-agent **disable/enable** toggle — works for both global and repository-scoped agents
+- Per-agent **spec modification** — edits persist to the database via the `agent_overrides` table; a separate action can create a PR to push changes back to the config repository
+- **Reset override** action to revert an agent to its original definition
+- New GraphQL queries: `agentDefinitions(source)`, `repositoriesWithAgents`
+- New GraphQL mutations: `setAgentDisabled`, `updateAgentSpec`, `resetAgentOverride`
+- New GraphQL types: `AgentDefinition`, `AgentOverride`, `RepositoryAgents`, `AgentSource` enum
+- New frontend components: `GlobalAgentsSection`, `RepositoryAgentsSection`, `AgentEditDialog`, `AgentCard`
+- Database migration `019_agent_overrides.sql` — adds `source`/`source_repository` columns to `agent_definitions` and creates `agent_overrides` table
+
+### Changed
+- `web/src/app/agents/page.tsx` — complete rewrite from flat agent-instance table to two-section layout
+- `api/src/schema.graphql` — extended with agent definition types, queries, and mutations
+- `api/src/resolvers/queries.ts` and `api/src/resolvers/mutations.ts` — new resolvers for agent management
+
 ## [2026-03-20] — Rebrand: ai-fishtank → aquarco
 
 ### Breaking Changes
