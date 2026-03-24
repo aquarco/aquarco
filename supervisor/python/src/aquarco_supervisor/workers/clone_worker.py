@@ -100,8 +100,10 @@ class CloneWorker:
         to suppress interactive prompts.
         SSH URLs use deploy-key auth via GIT_SSH_COMMAND and return an empty dict.
         """
-        if not self._github_token or url.startswith("git@"):
+        if not self._github_token or url.startswith("git@") or url.startswith("ssh://"):
             return {}
+        # Security note: Token is passed via subprocess env vars (GIT_CONFIG_*),
+        # scoped to the child git process only — not written to disk or global config.
         return {
             "GIT_CONFIG_COUNT": "1",
             "GIT_CONFIG_KEY_0": "http.extraheader",
@@ -112,7 +114,7 @@ class CloneWorker:
 
     def _get_ssh_command(self, url: str) -> str | None:
         """Get SSH command with deploy key if available."""
-        if not url.startswith("git@"):
+        if not url.startswith("git@") and not url.startswith("ssh://"):
             return None
 
         key_name = _url_to_key_name(url)
@@ -201,7 +203,10 @@ class CloneWorker:
 
 
 def _url_to_ssh(url: str) -> str:
-    """Convert an HTTPS GitHub URL to SSH format; pass through SSH URLs unchanged."""
+    """Convert an HTTPS GitHub URL to SSH format; pass through SSH URLs unchanged.
+
+    # TODO: Wire this into the production clone path (e.g. for SSH-preferred repos).
+    """
     if url.startswith("git@"):
         return url
     # https://github.com/owner/repo[.git] → git@github.com:owner/repo[.git]

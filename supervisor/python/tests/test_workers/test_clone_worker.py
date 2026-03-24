@@ -33,9 +33,21 @@ def test_url_to_ssh_non_matching_returns_unchanged() -> None:
     assert _url_to_ssh(url) == url
 
 
+def test_url_to_ssh_http_non_https() -> None:
+    """Plain http:// URLs are also converted to SSH format."""
+    assert _url_to_ssh("http://github.com/owner/repo.git") == "git@github.com:owner/repo.git"
+
+
 def test_url_to_key_name() -> None:
     assert _url_to_key_name("git@github.com:owner/repo.git") == "github.com-owner-repo"
     assert _url_to_key_name("https://github.com/owner/repo.git") == "github.com-owner-repo"
+
+
+def test_url_to_key_name_ssh_scheme() -> None:
+    """ssh:// URLs produce a filesystem-safe key name."""
+    result = _url_to_key_name("ssh://git@github.com/owner/repo.git")
+    assert "/" not in result
+    assert ":" not in result
 
 
 def test_get_auth_env_with_token() -> None:
@@ -57,6 +69,14 @@ def test_get_auth_env_ssh_url() -> None:
     db = AsyncMock(spec=Database)
     worker = CloneWorker(db, github_token="ghp_test123")
     env = worker._get_auth_env("git@github.com:owner/repo.git")
+    assert env == {}
+
+
+def test_get_auth_env_ssh_scheme_url() -> None:
+    """ssh:// URLs should also skip token auth (review finding #2 fix)."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db, github_token="ghp_test123")
+    env = worker._get_auth_env("ssh://git@github.com/owner/repo.git")
     assert env == {}
 
 
@@ -86,6 +106,30 @@ def test_get_ssh_command_https_returns_none() -> None:
     db = AsyncMock(spec=Database)
     worker = CloneWorker(db)
     result = worker._get_ssh_command("https://github.com/owner/repo.git")
+    assert result is None
+
+
+def test_get_ssh_command_ssh_scheme_url_with_key(tmp_path: Any) -> None:
+    """ssh:// URLs should also look up deploy keys (review finding #2 fix)."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db)
+
+    with patch.object(Path, "exists", return_value=True):
+        result = worker._get_ssh_command("ssh://git@github.com/owner/repo.git")
+
+    assert result is not None
+    assert "ssh -i" in result
+    assert "IdentitiesOnly=yes" in result
+
+
+def test_get_ssh_command_ssh_scheme_url_no_key() -> None:
+    """ssh:// URLs without deploy keys return None."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db)
+
+    with patch.object(Path, "exists", return_value=False):
+        result = worker._get_ssh_command("ssh://git@github.com/owner/repo.git")
+
     assert result is None
 
 
@@ -280,6 +324,98 @@ async def test_do_clone_with_ssh_command_sets_env(tmp_path: Any) -> None:
     env = captured_kwargs.get("env", {})
     assert "GIT_SSH_COMMAND" in env
     assert "/key/path" in env["GIT_SSH_COMMAND"]
+
+
+@pytest.mark.asyncio
+async def test_do_clone_with_env_extras_sets_auth_env(tmp_path: Any) -> None:
+    """When env_extras is provided (e.g. token auth), vars are passed to git."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db)
+
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 0
+    mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+    captured_kwargs: dict = {}
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        captured_kwargs.update(kwargs)
+        return mock_proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        await worker._do_clone(
+            "https://github.com/org/repo.git",
+            "main",
+            str(tmp_path / "dest"),
+            ssh_command=None,
+            env_extras={
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "http.extraheader",
+                "GIT_CONFIG_VALUE_0": "Authorization: Bearer ghp_test",
+            },
+        )
+
+    env = captured_kwargs.get("env", {})
+    assert env["GIT_CONFIG_VALUE_0"] == "Authorization: Bearer ghp_test"
+    assert env["GIT_CONFIG_COUNT"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_do_clone_with_ssh_command_and_env_extras(tmp_path: Any) -> None:
+    """Both ssh_command and env_extras can coexist in the process environment."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db)
+
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 0
+    mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+    captured_kwargs: dict = {}
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        captured_kwargs.update(kwargs)
+        return mock_proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        await worker._do_clone(
+            "git@github.com:org/repo.git",
+            "main",
+            str(tmp_path / "dest"),
+            ssh_command='ssh -i "/key/path"',
+            env_extras={"CUSTOM_VAR": "hello"},
+        )
+
+    env = captured_kwargs.get("env", {})
+    assert "GIT_SSH_COMMAND" in env
+    assert env["CUSTOM_VAR"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_do_clone_no_branch_omits_branch_flags(tmp_path: Any) -> None:
+    """When branch is None/empty, clone command should not include --branch."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db)
+
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 0
+    mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+    captured_args: list = []
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        captured_args.extend(args)
+        return mock_proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        await worker._do_clone(
+            "https://github.com/org/repo.git",
+            None,
+            str(tmp_path / "dest"),
+            ssh_command=None,
+        )
+
+    assert "--branch" not in captured_args
+    assert "--single-branch" not in captured_args
 
 
 # --- _mark_ready ---
