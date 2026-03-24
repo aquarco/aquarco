@@ -30,6 +30,8 @@ spec:
     maxTokens: 100000
     timeoutMinutes: 30
     maxConcurrent: 2
+    maxTurns: 30
+    maxCost: 2.0
 
   environment:
     AGENT_MODE: "review"

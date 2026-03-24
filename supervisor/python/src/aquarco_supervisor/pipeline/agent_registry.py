@@ -165,6 +165,20 @@ class AgentRegistry:
         timeout: int = resources.get("timeoutMinutes", 30)
         return timeout
 
+    def get_agent_max_turns(self, agent_name: str) -> int:
+        """Get max conversation turns for an agent."""
+        spec = self._agents.get(agent_name, {})
+        resources: dict[str, Any] = spec.get("resources", {})
+        max_turns: int = resources.get("maxTurns", 30)
+        return max_turns
+
+    def get_agent_max_cost(self, agent_name: str) -> float:
+        """Get max cost in USD for a single stage invocation (including continuations)."""
+        spec = self._agents.get(agent_name, {})
+        resources: dict[str, Any] = spec.get("resources", {})
+        max_cost: float = resources.get("maxCost", 5.0)
+        return max_cost
+
     def get_allowed_tools(self, agent_name: str) -> list[str]:
         """Get the list of allowed tools for an agent."""
         spec = self._agents.get(agent_name, {})

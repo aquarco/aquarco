@@ -31,6 +31,8 @@ spec:
     maxTokens: 100000
     timeoutMinutes: 20
     maxConcurrent: 2
+    maxTurns: 20
+    maxCost: 1.0
 
   environment:
     AGENT_MODE: "planning"

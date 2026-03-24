@@ -50,13 +50,18 @@ async def execute_claude(
     stage_num: int = 0,
     extra_env: dict[str, str] | None = None,
     output_schema: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+    max_turns: int = 30,
+    resume_session_id: str | None = None,
+) -> ClaudeOutput:
     """Invoke the Claude CLI and return structured output.
 
     Runs claude with --print --dangerously-skip-permissions --output-format json,
     feeding context via stdin.
+
+    When resume_session_id is provided, uses --resume to continue a prior session
+    instead of starting fresh (no --system-prompt-file or schema flags needed).
     """
-    if not prompt_file.exists():
+    if not resume_session_id and not prompt_file.exists():
         raise AgentExecutionError(f"Prompt file not found: {prompt_file}")
 
     # Write context to temp file (use mkstemp for security)
@@ -64,25 +69,40 @@ async def execute_claude(
     context_file = Path(context_path)
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump(context, f, indent=2)
+            if resume_session_id:
+                # For resume, stdin is just a continuation prompt
+                f.write("Continue where you left off. Complete the remaining work.")
+            else:
+                json.dump(context, f, indent=2)
 
-        args = [
-            "claude",
-            "--print",
-            "--dangerously-skip-permissions",
-            "--output-format", "json",
-            "--max-turns", "30",
-            "--verbose",
-            "--system-prompt-file", str(prompt_file),
-        ]
+        if resume_session_id:
+            args = [
+                "claude",
+                "--resume", resume_session_id,
+                "--print",
+                "--dangerously-skip-permissions",
+                "--output-format", "json",
+                "--max-turns", str(max_turns),
+                "--verbose",
+            ]
+        else:
+            args = [
+                "claude",
+                "--print",
+                "--dangerously-skip-permissions",
+                "--output-format", "json",
+                "--max-turns", str(max_turns),
+                "--verbose",
+                "--system-prompt-file", str(prompt_file),
+            ]
 
-        if allowed_tools:
-            args.extend(["--allowedTools", ",".join(allowed_tools)])
-        if denied_tools:
-            args.extend(["--disallowedTools", ",".join(denied_tools)])
-        if output_schema:
-            args.extend(["--append-system-prompt", _format_schema_prompt(output_schema)])
-            args.extend(["--json-schema", json.dumps(output_schema)])
+            if allowed_tools:
+                args.extend(["--allowedTools", ",".join(allowed_tools)])
+            if denied_tools:
+                args.extend(["--disallowedTools", ",".join(denied_tools)])
+            if output_schema:
+                args.extend(["--append-system-prompt", _format_schema_prompt(output_schema)])
+                args.extend(["--json-schema", json.dumps(output_schema)])
 
         safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)
         debug_log = Path(f"/var/log/aquarco/claude-{safe_id}-stage{stage_num}.log")
@@ -97,6 +117,7 @@ async def execute_claude(
             stage=stage_num,
             work_dir=work_dir,
             timeout=timeout_seconds,
+            resume=resume_session_id or "",
         )
 
         # Merge extra environment variables from agent definition
@@ -246,6 +267,8 @@ def _extract_from_result_message(msg: dict[str, Any]) -> dict[str, Any]:
             output["_no_structured_output"] = True
 
     # 3. Add execution metadata (prefixed with _ to avoid collisions)
+    if "subtype" in msg:
+        output["_subtype"] = msg["subtype"]
     if "total_cost_usd" in msg:
         output["_cost_usd"] = msg["total_cost_usd"]
     if "usage" in msg:

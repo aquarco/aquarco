@@ -29,6 +29,8 @@ spec:
     maxTokens: 200000
     timeoutMinutes: 60
     maxConcurrent: 1
+    maxTurns: 50
+    maxCost: 5.0
 
   environment:
     AGENT_MODE: "implementation"

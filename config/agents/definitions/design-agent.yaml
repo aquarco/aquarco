@@ -30,6 +30,8 @@ spec:
     maxTokens: 150000
     timeoutMinutes: 45
     maxConcurrent: 1
+    maxTurns: 30
+    maxCost: 2.0
 
   environment:
     AGENT_MODE: "design"

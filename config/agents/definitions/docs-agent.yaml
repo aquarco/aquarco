@@ -28,6 +28,8 @@ spec:
     maxTokens: 80000
     timeoutMinutes: 30
     maxConcurrent: 1
+    maxTurns: 30
+    maxCost: 2.0
 
   environment:
     AGENT_MODE: "docs"

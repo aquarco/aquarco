@@ -693,11 +693,17 @@ class PipelineExecutor:
         work_dir: str | None = None,
         scoped_view: ScopedAgentView | None = None,
     ) -> dict[str, Any]:
-        """Invoke the Claude CLI for an agent."""
+        """Invoke the Claude CLI for an agent, with automatic continuation.
+
+        If the agent hits max_turns, automatically resumes the session until
+        the work is complete or the cumulative cost exceeds maxCost.
+        """
         # Use scoped_view for config lookups when available, fall back to registry
         cfg = scoped_view or self._registry
         prompt_file = cfg.get_agent_prompt_file(agent_name)
         timeout_minutes = cfg.get_agent_timeout(agent_name)
+        max_turns = cfg.get_agent_max_turns(agent_name)
+        max_cost = cfg.get_agent_max_cost(agent_name)
         clone_dir = work_dir or await self._resolve_clone_dir(task_id)
 
         agent_context = {
@@ -708,22 +714,75 @@ class PipelineExecutor:
             "previous_stage_output": previous_output,
         }
 
-        claude_output = await execute_claude(
-            prompt_file=prompt_file,
-            context=agent_context,
-            work_dir=clone_dir,
-            timeout_seconds=timeout_minutes * 60,
-            allowed_tools=cfg.get_allowed_tools(agent_name),
-            denied_tools=cfg.get_denied_tools(agent_name),
-            task_id=task_id,
-            stage_num=stage_num,
-            extra_env=cfg.get_agent_environment(agent_name),
-            output_schema=cfg.get_agent_output_schema(agent_name),
-        )
+        cumulative_cost = 0.0
+        resume_session_id: str | None = None
+        iteration = 0
 
-        output = claude_output.structured
+        while True:
+            claude_output = await execute_claude(
+                prompt_file=prompt_file,
+                context=agent_context,
+                work_dir=clone_dir,
+                timeout_seconds=timeout_minutes * 60,
+                allowed_tools=cfg.get_allowed_tools(agent_name),
+                denied_tools=cfg.get_denied_tools(agent_name),
+                task_id=task_id,
+                stage_num=stage_num,
+                extra_env=cfg.get_agent_environment(agent_name),
+                output_schema=cfg.get_agent_output_schema(agent_name),
+                max_turns=max_turns,
+                resume_session_id=resume_session_id,
+            )
+
+            output = claude_output.structured
+            iteration_cost = output.get("_cost_usd", 0.0)
+            cumulative_cost += iteration_cost
+            output["_cumulative_cost_usd"] = cumulative_cost
+            iteration += 1
+
+            # Check if agent hit max_turns and can be continued
+            if output.get("_subtype") == "error_max_turns":
+                session_id = output.get("_session_id")
+                if not session_id:
+                    log.warning(
+                        "max_turns_no_session_id",
+                        task_id=task_id,
+                        stage=stage_num,
+                        agent=agent_name,
+                    )
+                    break
+
+                if cumulative_cost >= max_cost:
+                    log.warning(
+                        "max_turns_cost_exceeded",
+                        task_id=task_id,
+                        stage=stage_num,
+                        agent=agent_name,
+                        cumulative_cost=cumulative_cost,
+                        max_cost=max_cost,
+                        iterations=iteration,
+                    )
+                    break
+
+                log.info(
+                    "max_turns_continuing",
+                    task_id=task_id,
+                    stage=stage_num,
+                    agent=agent_name,
+                    session_id=session_id,
+                    cumulative_cost=cumulative_cost,
+                    max_cost=max_cost,
+                    iteration=iteration,
+                )
+                resume_session_id = session_id
+                continue
+
+            # Normal completion
+            break
+
         output["_agent_name"] = agent_name
         output["_raw_output"] = claude_output.raw
+        output["_iterations"] = iteration
 
         # Save output log (sanitize task_id to prevent path traversal)
         safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)

@@ -31,6 +31,8 @@ spec:
     maxTokens: 50000
     timeoutMinutes: 15
     maxConcurrent: 3
+    maxTurns: 20
+    maxCost: 1.0
 
   environment:
     AGENT_MODE: "analyze"

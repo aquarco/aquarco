@@ -116,6 +116,19 @@
               "type": "integer",
               "minimum": 128,
               "description": "Memory limit for the agent process in megabytes"
+            },
+            "maxTurns": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 30,
+              "description": "Maximum conversation turns per Claude CLI invocation"
+            },
+            "maxCost": {
+              "type": "number",
+              "minimum": 0.01,
+              "default": 5.0,
+              "description": "Maximum cumulative cost in USD per stage (including continuations after max_turns)"
             }
           }
         },
