@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from aquarco_supervisor.cli.claude import _extract_json, _parse_output
+import json
+
+from aquarco_supervisor.cli.claude import (
+    ClaudeOutput,
+    _extract_from_result_message,
+    _extract_json,
+    _find_result_message,
+    _parse_output,
+)
 
 
 def test_extract_json_code_block() -> None:
