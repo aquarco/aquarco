@@ -184,6 +184,54 @@ async def test_store_stage_output(
 
 
 @pytest.mark.asyncio
+async def test_store_stage_output_separates_raw_output_legacy(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Legacy path: _raw_output is popped from output and passed separately."""
+    output = {"summary": "ok", "_raw_output": "long raw text here"}
+    await task_queue.store_stage_output("task-1", 0, "review", "agent-1", output)
+
+    first_params = mock_db.execute.call_args_list[0][0][1]
+    # _raw_output should NOT be in the structured JSON
+    structured = json.loads(first_params["output"])
+    assert "_raw_output" not in structured
+    assert structured["summary"] == "ok"
+    # raw should be passed separately
+    assert first_params["raw"] == "long raw text here"
+
+
+@pytest.mark.asyncio
+async def test_store_stage_output_separates_raw_output_stage_key(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Stage-key path: _raw_output is popped and passed as raw parameter."""
+    output = {"verdict": "pass", "_raw_output": "raw blob"}
+    await task_queue.store_stage_output(
+        "task-1", 1, "test", "test-agent", output,
+        stage_key="1:test:test-agent", iteration=1,
+    )
+
+    first_params = mock_db.execute.call_args_list[0][0][1]
+    first_sql = mock_db.execute.call_args_list[0][0][0]
+    assert "UPDATE stages" in first_sql
+    structured = json.loads(first_params["output"])
+    assert "_raw_output" not in structured
+    assert first_params["raw"] == "raw blob"
+
+
+@pytest.mark.asyncio
+async def test_store_stage_output_no_raw_output(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """When _raw_output is absent, raw parameter is None."""
+    output = {"summary": "clean"}
+    await task_queue.store_stage_output("task-1", 0, "review", "agent-1", output)
+
+    first_params = mock_db.execute.call_args_list[0][0][1]
+    assert first_params["raw"] is None
+
+
+@pytest.mark.asyncio
 async def test_assign_agent(task_queue: TaskQueue, mock_db: AsyncMock) -> None:
     await task_queue.assign_agent("task-1", "analyzer-agent")
 

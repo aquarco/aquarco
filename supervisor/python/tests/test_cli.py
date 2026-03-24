@@ -59,7 +59,7 @@ def test_parse_output_plain_text_result() -> None:
     raw = json.dumps({"result": "Just text, no JSON"})
     result = _parse_output(raw, "task-1", 0)
     assert result["_no_structured_output"] is True
-    assert result["_raw_output"] == "Just text, no JSON"
+    assert result["_result_text"] == "Just text, no JSON"
 
 
 def test_parse_output_invalid_json_string() -> None:
