@@ -24,18 +24,26 @@ import CircularProgress from '@mui/material/CircularProgress'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
 import LogoutIcon from '@mui/icons-material/Logout'
-import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import IconButton from '@mui/material/IconButton'
-import Tooltip from '@mui/material/Tooltip'
+import Tab from '@mui/material/Tab'
+import Tabs from '@mui/material/Tabs'
 import {
   GET_AGENT_INSTANCES,
+  GET_AGENT_DEFINITIONS,
+  GET_REPOSITORIES_WITH_AGENTS,
   CLAUDE_AUTH_STATUS,
   CLAUDE_LOGIN_START,
   CLAUDE_LOGIN_POLL,
   CLAUDE_SUBMIT_CODE,
   CLAUDE_LOGOUT,
+  SET_AGENT_DISABLED,
+  UPDATE_AGENT_SPEC,
+  RESET_AGENT_OVERRIDE,
 } from '@/lib/graphql/queries'
 import { formatDate, formatNumber } from '@/lib/format'
+import GlobalAgentsSection from '@/components/agents/GlobalAgentsSection'
+import RepositoryAgentsSection from '@/components/agents/RepositoryAgentsSection'
+import AgentEditDialog from '@/components/agents/AgentEditDialog'
+import type { AgentDefinition } from '@/components/agents/AgentCard'
 
 interface AgentInstance {
   agentName: string
@@ -65,9 +73,45 @@ function ActiveDot({ active }: { active: boolean }) {
 type LoginStep = 'idle' | 'starting' | 'authorize' | 'paste-code' | 'submitting' | 'done'
 
 export default function AgentsPage() {
-  const { data, loading, error } = useQuery(GET_AGENT_INSTANCES)
+  const [tabIndex, setTabIndex] = useState(0)
+
+  // Runtime instances tab
+  const { data: instancesData, loading: instancesLoading, error: instancesError } = useQuery(GET_AGENT_INSTANCES)
+
+  // Definitions tab
+  const {
+    data: defsData,
+    loading: defsLoading,
+    error: defsError,
+    refetch: refetchDefs,
+  } = useQuery(GET_AGENT_DEFINITIONS)
+
+  const {
+    data: repoAgentsData,
+    loading: repoAgentsLoading,
+    refetch: refetchRepoAgents,
+  } = useQuery(GET_REPOSITORIES_WITH_AGENTS)
+
+  // Auth
   const { data: authData, loading: authLoading, refetch: refetchAuth } = useQuery(CLAUDE_AUTH_STATUS)
 
+  // Edit dialog state
+  const [editAgent, setEditAgent] = useState<AgentDefinition | null>(null)
+  const [editError, setEditError] = useState<string | null>(null)
+
+  // Mutations
+  const [setAgentDisabled] = useMutation(SET_AGENT_DISABLED, {
+    onCompleted: () => { refetchDefs(); refetchRepoAgents() },
+  })
+  const [updateAgentSpec, { loading: savingSpec }] = useMutation(UPDATE_AGENT_SPEC, {
+    onCompleted: () => { setEditAgent(null); refetchDefs(); refetchRepoAgents() },
+    onError: (err) => setEditError(err.message),
+  })
+  const [resetAgentOverride] = useMutation(RESET_AGENT_OVERRIDE, {
+    onCompleted: () => { refetchDefs(); refetchRepoAgents() },
+  })
+
+  // Claude auth
   const [loginDialogOpen, setLoginDialogOpen] = useState(false)
   const [loginStep, setLoginStep] = useState<LoginStep>('idle')
   const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null)
@@ -100,10 +144,47 @@ export default function AgentsPage() {
     return () => stopPolling()
   }, [stopPolling])
 
-  const agents: AgentInstance[] = (data?.agentInstances ?? []).slice().sort(
+  const agents: AgentInstance[] = (instancesData?.agentInstances ?? []).slice().sort(
     (a: AgentInstance, b: AgentInstance) => a.agentName.localeCompare(b.agentName)
   )
 
+  const globalAgents: AgentDefinition[] = (defsData?.agentDefinitions ?? []).filter(
+    (a: AgentDefinition) => a.source === 'DEFAULT' || a.source === 'GLOBAL'
+  )
+
+  // --- Handlers ---
+
+  function handleToggleDisabledGlobal(agentName: string, isDisabled: boolean) {
+    setAgentDisabled({
+      variables: { input: { agentName, isDisabled, scope: 'global', scopeRepository: null } },
+    })
+  }
+
+  function handleToggleDisabledRepo(agentName: string, isDisabled: boolean, scopeRepository: string) {
+    setAgentDisabled({
+      variables: { input: { agentName, isDisabled, scope: 'repository', scopeRepository } },
+    })
+  }
+
+  function handleEdit(agent: AgentDefinition) {
+    setEditError(null)
+    setEditAgent(agent)
+  }
+
+  function handleSaveSpec(agentName: string, spec: unknown, scope: string, scopeRepository: string | null) {
+    updateAgentSpec({
+      variables: { input: { agentName, spec, scope, scopeRepository } },
+    })
+  }
+
+  function handleReset(agent: AgentDefinition) {
+    const scope = agent.source === 'REPOSITORY' ? 'repository' : 'global'
+    resetAgentOverride({
+      variables: { agentName: agent.name, scope, scopeRepository: agent.sourceRepository ?? null },
+    })
+  }
+
+  // Claude auth handlers
   async function handleClaudeLogin() {
     setLoginError(null)
     setLoginSuccess(null)
@@ -149,7 +230,6 @@ export default function AgentsPage() {
         setLoginError(result.error)
         updateLoginStep('paste-code')
       } else {
-        // Start polling auth status to confirm
         pollTimerRef.current = setInterval(async () => {
           try {
             const { data: pollData } = await claudeLoginPoll()
@@ -165,7 +245,6 @@ export default function AgentsPage() {
           }
         }, 3000)
 
-        // Stop polling after 30s (use ref to avoid stale closure)
         setTimeout(() => {
           if (loginStepRef.current === 'submitting') {
             stopPolling()
@@ -224,57 +303,104 @@ export default function AgentsPage() {
         </Stack>
       </Stack>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          Failed to load agents: {error.message}
-        </Alert>
+      <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} sx={{ mb: 2 }}>
+        <Tab label="Definitions" />
+        <Tab label="Runtime Instances" />
+      </Tabs>
+
+      {/* Tab 0: Agent Definitions (Global + Repository) */}
+      {tabIndex === 0 && (
+        <Stack spacing={3}>
+          {(defsError) && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              Failed to load agent definitions: {defsError?.message}
+            </Alert>
+          )}
+
+          <GlobalAgentsSection
+            agents={globalAgents}
+            loading={defsLoading}
+            onToggleDisabled={handleToggleDisabledGlobal}
+            onEdit={handleEdit}
+            onReset={handleReset}
+          />
+
+          <RepositoryAgentsSection
+            repositoriesWithAgents={repoAgentsData?.repositoriesWithAgents ?? []}
+            loading={repoAgentsLoading}
+            onToggleDisabled={handleToggleDisabledRepo}
+            onEdit={handleEdit}
+            onReset={handleReset}
+          />
+        </Stack>
       )}
 
-      <TableContainer component={Paper} variant="outlined">
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Agent Name</TableCell>
-              <TableCell align="right">Active Instances</TableCell>
-              <TableCell align="right">Total Executions</TableCell>
-              <TableCell align="right">Total Tokens Used</TableCell>
-              <TableCell>Last Execution</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {loading
-              ? [...Array(6)].map((_, i) => (
-                  <TableRow key={i}>
-                    {[...Array(5)].map((_, j) => (
-                      <TableCell key={j}>
-                        <Skeleton variant="text" />
-                      </TableCell>
+      {/* Tab 1: Runtime Instances (original table) */}
+      {tabIndex === 1 && (
+        <>
+          {instancesError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              Failed to load agents: {instancesError.message}
+            </Alert>
+          )}
+
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Agent Name</TableCell>
+                  <TableCell align="right">Active Instances</TableCell>
+                  <TableCell align="right">Total Executions</TableCell>
+                  <TableCell align="right">Total Tokens Used</TableCell>
+                  <TableCell>Last Execution</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {instancesLoading
+                  ? [...Array(6)].map((_, i) => (
+                      <TableRow key={i}>
+                        {[...Array(5)].map((_, j) => (
+                          <TableCell key={j}>
+                            <Skeleton variant="text" />
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  : agents.map((agent) => (
+                      <TableRow key={agent.agentName} data-testid={`agent-row-${agent.agentName}`}>
+                        <TableCell>
+                          <ActiveDot active={agent.activeCount > 0} />
+                          {agent.agentName}
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography
+                            variant="body2"
+                            fontWeight={agent.activeCount > 0 ? 700 : 400}
+                            color={agent.activeCount > 0 ? 'success.main' : 'text.primary'}
+                          >
+                            {agent.activeCount}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">{formatNumber(agent.totalExecutions)}</TableCell>
+                        <TableCell align="right">{formatNumber(agent.totalTokensUsed)}</TableCell>
+                        <TableCell>{formatDate(agent.lastExecutionAt)}</TableCell>
+                      </TableRow>
                     ))}
-                  </TableRow>
-                ))
-              : agents.map((agent) => (
-                  <TableRow key={agent.agentName} data-testid={`agent-row-${agent.agentName}`}>
-                    <TableCell>
-                      <ActiveDot active={agent.activeCount > 0} />
-                      {agent.agentName}
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography
-                        variant="body2"
-                        fontWeight={agent.activeCount > 0 ? 700 : 400}
-                        color={agent.activeCount > 0 ? 'success.main' : 'text.primary'}
-                      >
-                        {agent.activeCount}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right">{formatNumber(agent.totalExecutions)}</TableCell>
-                    <TableCell align="right">{formatNumber(agent.totalTokensUsed)}</TableCell>
-                    <TableCell>{formatDate(agent.lastExecutionAt)}</TableCell>
-                  </TableRow>
-                ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </>
+      )}
+
+      {/* Agent Edit Dialog */}
+      <AgentEditDialog
+        open={editAgent !== null}
+        agent={editAgent}
+        onClose={() => setEditAgent(null)}
+        onSave={handleSaveSpec}
+        saving={savingSpec}
+        error={editError}
+      />
 
       {/* Claude Login dialog */}
       <Dialog open={loginDialogOpen} onClose={handleLoginDialogClose} maxWidth="sm" fullWidth>

@@ -358,6 +358,130 @@ export const Mutation = {
     }
   },
 
+  async setAgentDisabled(
+    _: unknown,
+    args: {
+      input: {
+        agentName: string
+        isDisabled: boolean
+        scope: string
+        scopeRepository?: string | null
+      }
+    },
+    ctx: Context
+  ) {
+    const { agentName, isDisabled, scope, scopeRepository } = args.input
+    try {
+      const result = await ctx.pool.query<Record<string, unknown>>(
+        `INSERT INTO agent_overrides (agent_name, agent_version, scope, scope_repository, is_disabled, updated_at)
+         SELECT $1, ad.version, $2, $3, $4, NOW()
+         FROM agent_definitions ad
+         WHERE ad.name = $1 AND ad.is_active = true
+         ON CONFLICT (agent_name, scope, scope_repository)
+         DO UPDATE SET is_disabled = $4, updated_at = NOW()
+         RETURNING *`,
+        [agentName, scope, scopeRepository ?? null, isDisabled]
+      )
+      if (result.rows.length === 0) {
+        return { override: null, errors: [{ field: 'agentName', message: `Agent "${agentName}" not found` }] }
+      }
+      const row = result.rows[0]
+      return {
+        override: {
+          agentName: row.agent_name,
+          scope: row.scope,
+          scopeRepository: row.scope_repository ?? null,
+          isDisabled: row.is_disabled,
+          modifiedSpec: row.modified_spec ?? null,
+          modifiedAt: row.modified_at ?? null,
+        },
+        errors: [],
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update agent'
+      return { override: null, errors: [{ field: null, message }] }
+    }
+  },
+
+  async updateAgentSpec(
+    _: unknown,
+    args: {
+      input: {
+        agentName: string
+        spec: unknown
+        scope: string
+        scopeRepository?: string | null
+      }
+    },
+    ctx: Context
+  ) {
+    const { agentName, spec, scope, scopeRepository } = args.input
+    try {
+      const result = await ctx.pool.query<Record<string, unknown>>(
+        `INSERT INTO agent_overrides (agent_name, agent_version, scope, scope_repository, modified_spec, modified_at, updated_at)
+         SELECT $1, ad.version, $2, $3, $4, NOW(), NOW()
+         FROM agent_definitions ad
+         WHERE ad.name = $1 AND ad.is_active = true
+         ON CONFLICT (agent_name, scope, scope_repository)
+         DO UPDATE SET modified_spec = $4, modified_at = NOW(), updated_at = NOW()
+         RETURNING *`,
+        [agentName, scope, scopeRepository ?? null, JSON.stringify(spec)]
+      )
+      if (result.rows.length === 0) {
+        return { override: null, errors: [{ field: 'agentName', message: `Agent "${agentName}" not found` }] }
+      }
+      const row = result.rows[0]
+      return {
+        override: {
+          agentName: row.agent_name,
+          scope: row.scope,
+          scopeRepository: row.scope_repository ?? null,
+          isDisabled: row.is_disabled,
+          modifiedSpec: row.modified_spec ?? null,
+          modifiedAt: row.modified_at ?? null,
+        },
+        errors: [],
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update agent spec'
+      return { override: null, errors: [{ field: null, message }] }
+    }
+  },
+
+  async resetAgentOverride(
+    _: unknown,
+    args: { agentName: string; scope: string; scopeRepository?: string | null },
+    ctx: Context
+  ) {
+    try {
+      const result = await ctx.pool.query<Record<string, unknown>>(
+        `DELETE FROM agent_overrides
+         WHERE agent_name = $1 AND scope = $2
+           AND (scope_repository = $3 OR ($3 IS NULL AND scope_repository IS NULL))
+         RETURNING *`,
+        [args.agentName, args.scope, args.scopeRepository ?? null]
+      )
+      if (result.rows.length === 0) {
+        return { override: null, errors: [{ field: 'agentName', message: 'No override found' }] }
+      }
+      const row = result.rows[0]
+      return {
+        override: {
+          agentName: row.agent_name,
+          scope: row.scope,
+          scopeRepository: row.scope_repository ?? null,
+          isDisabled: row.is_disabled,
+          modifiedSpec: row.modified_spec ?? null,
+          modifiedAt: row.modified_at ?? null,
+        },
+        errors: [],
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to reset agent override'
+      return { override: null, errors: [{ field: null, message }] }
+    }
+  },
+
   async unblockTask(
     _: unknown,
     args: { id: string; resolution: string },

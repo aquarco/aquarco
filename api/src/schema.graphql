@@ -13,6 +13,10 @@ type Query {
   # Agent instances
   agentInstances: [AgentInstance!]!
 
+  # Agent definitions (by source)
+  agentDefinitions(source: AgentSource): [AgentDefinition!]!
+  repositoriesWithAgents: [RepositoryAgents!]!
+
   # Pipeline status
   pipelineStatus(taskId: ID!): PipelineStatus
 
@@ -56,6 +60,11 @@ type Mutation {
 
   # Intervention
   unblockTask(id: ID!, resolution: String!): TaskPayload!
+
+  # Agent management
+  setAgentDisabled(input: SetAgentDisabledInput!): AgentOverridePayload!
+  updateAgentSpec(input: UpdateAgentSpecInput!): AgentOverridePayload!
+  resetAgentOverride(agentName: String!, scope: String!, scopeRepository: String): AgentOverridePayload!
 }
 
 type Subscription {
@@ -286,4 +295,59 @@ enum CloneStatus {
   CLONING
   READY
   ERROR
+}
+
+# --- Agent Definitions ---
+
+enum AgentSource {
+  DEFAULT
+  GLOBAL
+  REPOSITORY
+}
+
+type AgentDefinition {
+  name: String!
+  version: String!
+  description: String
+  source: AgentSource!
+  sourceRepository: String
+  spec: JSON!
+  labels: JSON
+  isActive: Boolean!
+  isDisabled: Boolean!
+  hasOverride: Boolean!
+  modifiedSpec: JSON
+}
+
+type AgentOverride {
+  agentName: String!
+  scope: String!
+  scopeRepository: String
+  isDisabled: Boolean!
+  modifiedSpec: JSON
+  modifiedAt: DateTime
+}
+
+type RepositoryAgents {
+  repository: Repository!
+  agents: [AgentDefinition!]!
+}
+
+type AgentOverridePayload {
+  override: AgentOverride
+  errors: [Error!]
+}
+
+input SetAgentDisabledInput {
+  agentName: String!
+  isDisabled: Boolean!
+  scope: String!
+  scopeRepository: String
+}
+
+input UpdateAgentSpecInput {
+  agentName: String!
+  spec: JSON!
+  scope: String!
+  scopeRepository: String
 }

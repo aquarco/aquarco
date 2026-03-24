@@ -309,6 +309,98 @@ export const GET_AGENT_INSTANCES = gql`
   }
 `
 
+export const GET_AGENT_DEFINITIONS = gql`
+  query GetAgentDefinitions($source: AgentSource) {
+    agentDefinitions(source: $source) {
+      name
+      version
+      description
+      source
+      sourceRepository
+      spec
+      labels
+      isActive
+      isDisabled
+      hasOverride
+      modifiedSpec
+    }
+  }
+`
+
+export const GET_REPOSITORIES_WITH_AGENTS = gql`
+  query GetRepositoriesWithAgents {
+    repositoriesWithAgents {
+      repository {
+        name
+        url
+        branch
+        isConfigRepo
+        cloneStatus
+      }
+      agents {
+        name
+        version
+        description
+        source
+        sourceRepository
+        spec
+        labels
+        isActive
+        isDisabled
+        hasOverride
+        modifiedSpec
+      }
+    }
+  }
+`
+
+export const SET_AGENT_DISABLED = gql`
+  mutation SetAgentDisabled($input: SetAgentDisabledInput!) {
+    setAgentDisabled(input: $input) {
+      override {
+        agentName
+        scope
+        scopeRepository
+        isDisabled
+      }
+      errors {
+        field
+        message
+      }
+    }
+  }
+`
+
+export const UPDATE_AGENT_SPEC = gql`
+  mutation UpdateAgentSpec($input: UpdateAgentSpecInput!) {
+    updateAgentSpec(input: $input) {
+      override {
+        agentName
+        modifiedSpec
+        modifiedAt
+      }
+      errors {
+        field
+        message
+      }
+    }
+  }
+`
+
+export const RESET_AGENT_OVERRIDE = gql`
+  mutation ResetAgentOverride($agentName: String!, $scope: String!, $scopeRepository: String) {
+    resetAgentOverride(agentName: $agentName, scope: $scope, scopeRepository: $scopeRepository) {
+      override {
+        agentName
+      }
+      errors {
+        field
+        message
+      }
+    }
+  }
+`
+
 // ── Task mutations ────────────────────────────────────────────────────────────
 
 export const CREATE_TASK = gql`

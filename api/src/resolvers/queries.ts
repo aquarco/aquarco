@@ -113,6 +113,81 @@ export const Query = {
     }))
   },
 
+  async agentDefinitions(
+    _: unknown,
+    args: { source?: string | null },
+    ctx: Context
+  ) {
+    let whereClause = 'WHERE ad.is_active = true'
+    const params: unknown[] = []
+
+    if (args.source) {
+      params.push(args.source.toLowerCase())
+      whereClause += ` AND ad.source = $${params.length}`
+    }
+
+    const result = await ctx.pool.query<Record<string, unknown>>(
+      `SELECT ad.*,
+              ao.is_disabled AS override_disabled,
+              ao.modified_spec AS override_modified_spec,
+              ao.modified_at AS override_modified_at,
+              CASE WHEN ao.id IS NOT NULL THEN true ELSE false END AS has_override
+       FROM agent_definitions ad
+       LEFT JOIN agent_overrides ao
+         ON ao.agent_name = ad.name
+         AND ao.scope = CASE
+           WHEN ad.source = 'repository' THEN 'repository'
+           ELSE 'global'
+         END
+         AND (ao.scope_repository = ad.source_repository OR (ao.scope_repository IS NULL AND ad.source_repository IS NULL))
+       ${whereClause}
+       ORDER BY ad.source, ad.name`,
+      params
+    )
+
+    return result.rows.map(mapAgentDefinition)
+  },
+
+  async repositoriesWithAgents(_: unknown, __: unknown, ctx: Context) {
+    // Get repos that have repo-specific agents
+    const repoResult = await ctx.pool.query<Record<string, unknown>>(
+      `SELECT DISTINCT r.*
+       FROM repositories r
+       INNER JOIN agent_definitions ad ON ad.source_repository = r.name AND ad.source = 'repository' AND ad.is_active = true
+       ORDER BY r.name`
+    )
+
+    const repos = repoResult.rows.map(mapRepository)
+
+    // For each repo, get its agents with overrides
+    const result = []
+    for (const repo of repos) {
+      const agentResult = await ctx.pool.query<Record<string, unknown>>(
+        `SELECT ad.*,
+                ao.is_disabled AS override_disabled,
+                ao.modified_spec AS override_modified_spec,
+                ao.modified_at AS override_modified_at,
+                CASE WHEN ao.id IS NOT NULL THEN true ELSE false END AS has_override
+         FROM agent_definitions ad
+         LEFT JOIN agent_overrides ao
+           ON ao.agent_name = ad.name
+           AND ao.scope = 'repository'
+           AND ao.scope_repository = ad.source_repository
+         WHERE ad.source = 'repository'
+           AND ad.source_repository = $1
+           AND ad.is_active = true
+         ORDER BY ad.name`,
+        [repo.name]
+      )
+      result.push({
+        repository: repo,
+        agents: agentResult.rows.map(mapAgentDefinition),
+      })
+    }
+
+    return result
+  },
+
   async pipelineStatus(_: unknown, args: { taskId: string }, ctx: Context) {
     const taskResult = await ctx.pool.query<Record<string, unknown>>(
       'SELECT * FROM tasks WHERE id = $1',
@@ -207,6 +282,22 @@ export const Query = {
       })),
     }
   },
+}
+
+export function mapAgentDefinition(row: Record<string, unknown>) {
+  return {
+    name: row.name,
+    version: row.version,
+    description: row.description ?? null,
+    source: (row.source as string).toUpperCase(),
+    sourceRepository: row.source_repository ?? null,
+    spec: row.override_modified_spec ?? row.spec,
+    labels: row.labels ?? null,
+    isActive: row.is_active ?? true,
+    isDisabled: row.override_disabled ?? false,
+    hasOverride: row.has_override ?? false,
+    modifiedSpec: row.override_modified_spec ?? null,
+  }
 }
 
 export function mapRepository(row: Record<string, unknown>) {
