@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from aquarco_supervisor.cli.claude import ClaudeOutput
 from aquarco_supervisor.database import Database
 from aquarco_supervisor.exceptions import PipelineError, StageError
 from aquarco_supervisor.pipeline.executor import (
@@ -338,7 +339,7 @@ async def test_execute_pipeline_no_pipeline_name_uses_task_pipeline(
     with patch(
         "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
-        return_value={"result": "ok"},
+        return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
         "aquarco_supervisor.pipeline.executor.load_overlay",
         return_value=None,
@@ -520,7 +521,7 @@ async def test_execute_stage_success(sample_pipelines: Any) -> None:
     with patch(
         "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
-        return_value={"result": "done"},
+        return_value=ClaudeOutput(structured={"result": "done"}, raw='{"result": "done"}'),
     ), patch(
         "aquarco_supervisor.pipeline.executor.Path",
     ):
@@ -594,7 +595,7 @@ async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
     with patch(
         "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
-        return_value={"result": "ok"},
+        return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
         "aquarco_supervisor.pipeline.executor.load_overlay",
         return_value=None,
@@ -654,7 +655,7 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
     with patch(
         "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
-        return_value={"result": "ok"},
+        return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
         "aquarco_supervisor.pipeline.executor.load_overlay",
         return_value=None,
@@ -797,7 +798,7 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
         # First call (analyze) fails, second call (implementation) succeeds
         mock_claude.side_effect = [
             RuntimeError("optional stage exploded"),
-            {"summary": "ok"},
+            ClaudeOutput(structured={"summary": "ok"}, raw='{"summary": "ok"}'),
         ]
         await executor.execute_pipeline("feature-pipeline", "task-1", {})
 
