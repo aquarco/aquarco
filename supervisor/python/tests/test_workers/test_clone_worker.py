@@ -536,3 +536,120 @@ async def test_ensure_deploy_key_generation_fails(tmp_path: Any) -> None:
         result = await worker._ensure_deploy_key("git@github.com:owner/repo.git")
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_deploy_key_keygen_succeeds_but_no_pub_file(tmp_path: Any) -> None:
+    """Returns None when ssh-keygen exits 0 but pub file is not created."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db)
+
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 0
+    mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+    # Don't create the pub file — simulates a keygen that succeeds but produces nothing
+    with patch.object(Path, "home", return_value=tmp_path), \
+         patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+        result = await worker._ensure_deploy_key("git@github.com:owner/repo.git")
+
+    assert result is None
+
+
+def test_url_to_ssh_ssh_scheme_passthrough() -> None:
+    """ssh:// URLs are passed through unchanged (not git@ format)."""
+    url = "ssh://git@github.com/owner/repo.git"
+    assert _url_to_ssh(url) == url
+
+
+def test_url_to_key_name_strips_git_suffix() -> None:
+    """The .git suffix is removed from key names."""
+    assert _url_to_key_name("https://github.com/org/my-project.git") == "github.com-org-my-project"
+    assert _url_to_key_name("git@github.com:org/my-project.git") == "github.com-org-my-project"
+
+
+def test_url_to_key_name_no_git_suffix() -> None:
+    """URLs without .git suffix also work correctly."""
+    result = _url_to_key_name("https://github.com/org/my-project")
+    assert result == "github.com-org-my-project"
+
+
+@pytest.mark.asyncio
+async def test_do_clone_with_branch_includes_branch_flags(tmp_path: Any) -> None:
+    """When branch is provided, clone command includes --branch and --single-branch."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db)
+
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 0
+    mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+    captured_args: list = []
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        captured_args.extend(args)
+        return mock_proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        await worker._do_clone(
+            "https://github.com/org/repo.git",
+            "develop",
+            str(tmp_path / "dest"),
+            ssh_command=None,
+        )
+
+    assert "--branch" in captured_args
+    assert "develop" in captured_args
+    assert "--single-branch" in captured_args
+
+
+@pytest.mark.asyncio
+async def test_do_clone_creates_parent_directory(tmp_path: Any) -> None:
+    """_do_clone creates the parent directory of clone_dir if it doesn't exist."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db)
+
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 0
+    mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+    nested_dir = str(tmp_path / "deep" / "nested" / "repo")
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+        await worker._do_clone(
+            "https://github.com/org/repo.git",
+            "main",
+            nested_dir,
+            ssh_command=None,
+        )
+
+    # Parent directory should have been created
+    assert Path(nested_dir).parent.exists()
+
+
+@pytest.mark.asyncio
+async def test_do_clone_no_env_when_no_extras_and_no_ssh(tmp_path: Any) -> None:
+    """When neither ssh_command nor env_extras are provided, env should be None."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db)
+
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 0
+    mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+    captured_kwargs: dict = {}
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        captured_kwargs.update(kwargs)
+        return mock_proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        await worker._do_clone(
+            "https://github.com/org/repo.git",
+            "main",
+            str(tmp_path / "dest"),
+            ssh_command=None,
+            env_extras=None,
+        )
+
+    assert captured_kwargs.get("env") is None
