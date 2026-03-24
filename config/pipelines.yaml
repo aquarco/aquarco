@@ -8,7 +8,7 @@ pipelines:
       labels: [feature, enhancement]
     stages:
       - { category: analyze, required: true }
-      - { category: design, required: true, conditions: ["analysis.estimated_complexity >= medium"] }
+      - { category: design, required: true, conditions: ["estimated_complexity >= medium"] }
       - { category: implementation, required: true }
       - { category: test, required: true }
       - { category: docs, required: false }
@@ -30,5 +30,5 @@ pipelines:
       events: [pr_opened, pr_updated]
     stages:
       - { category: review, required: true }
-      - { category: implementation, required: true }
-      - { category: test, required: true }
+      - { category: implementation, required: true, conditions: ["recommendation == request_changes"] }
+      - { category: test, required: true, conditions: ["recommendation == request_changes"] }
