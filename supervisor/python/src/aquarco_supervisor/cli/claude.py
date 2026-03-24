@@ -71,7 +71,11 @@ async def execute_claude(
         with os.fdopen(fd, "w") as f:
             if resume_session_id:
                 # For resume, stdin is just a continuation prompt
-                f.write("Continue where you left off. Complete the remaining work.")
+                f.write(
+                    "Continue where you left off. Complete the remaining work. "
+                    "Remember to produce your final response using the structured "
+                    "output format specified in your original instructions."
+                )
             else:
                 json.dump(context, f, indent=2)
 

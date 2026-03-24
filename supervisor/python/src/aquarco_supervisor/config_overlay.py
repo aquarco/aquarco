@@ -170,6 +170,18 @@ class ScopedAgentView:
         resources: dict[str, Any] = s.get("resources", {})
         return resources.get("timeoutMinutes", 30)
 
+    def get_agent_max_turns(self, agent_name: str) -> int:
+        spec = self._resolved.agents.get(agent_name, {})
+        s = spec.get("spec", spec)
+        resources: dict[str, Any] = s.get("resources", {})
+        return resources.get("maxTurns", 30)
+
+    def get_agent_max_cost(self, agent_name: str) -> float:
+        spec = self._resolved.agents.get(agent_name, {})
+        s = spec.get("spec", spec)
+        resources: dict[str, Any] = s.get("resources", {})
+        return resources.get("maxCost", 5.0)
+
     def get_allowed_tools(self, agent_name: str) -> list[str]:
         spec = self._resolved.agents.get(agent_name, {})
         s = spec.get("spec", spec)
