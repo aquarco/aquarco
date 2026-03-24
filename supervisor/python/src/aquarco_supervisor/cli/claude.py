@@ -162,6 +162,11 @@ def _parse_output(raw_output: str, task_id: str, stage_num: int) -> dict[str, An
     """Parse Claude CLI JSON output and extract structured result.
 
     Returns only the structured data — raw output is stored separately.
+    The result message from Claude CLI (--output-format json) contains:
+    - structured_output: the JSON schema response (when --json-schema used)
+    - result: the assistant's final text reply
+    - total_cost_usd, usage, modelUsage: token/cost metrics
+    - duration_ms, num_turns: execution metadata
     """
     if not raw_output.strip():
         return {"_no_structured_output": True}
@@ -171,45 +176,92 @@ def _parse_output(raw_output: str, task_id: str, stage_num: int) -> dict[str, An
     except json.JSONDecodeError:
         return {"_no_structured_output": True}
 
-    # Claude CLI --output-format json may return a list of message objects
-    # instead of a single dict. Normalise to a dict before proceeding.
+    # Claude CLI --output-format json returns a list of message objects.
+    # Find the "result" message which contains structured_output, usage, etc.
     if isinstance(parsed, list):
-        # Try to find the assistant result in the message list
-        result_text = ""
+        result_msg = _find_result_message(parsed)
+        if result_msg:
+            return _extract_from_result_message(result_msg)
+
+        # Fallback: concatenate all assistant text content
+        texts = []
         for msg in parsed:
-            if isinstance(msg, dict) and msg.get("type") == "result":
-                result_text = msg.get("result", "")
-                break
-        if not result_text:
-            # Fallback: concatenate all assistant text content
-            texts = []
-            for msg in parsed:
-                if isinstance(msg, dict) and msg.get("role") == "assistant":
-                    content = msg.get("content", [])
-                    if isinstance(content, list):
-                        for block in content:
-                            if isinstance(block, dict) and block.get("type") == "text":
-                                texts.append(block.get("text", ""))
-                    elif isinstance(content, str):
-                        texts.append(content)
-            result_text = "\n".join(texts)
+            if isinstance(msg, dict) and msg.get("role") == "assistant":
+                content = msg.get("content", [])
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            texts.append(block.get("text", ""))
+                elif isinstance(content, str):
+                    texts.append(content)
+        result_text = "\n".join(texts)
         if result_text:
             structured = _extract_json(result_text)
             if structured is not None:
                 return structured
         return {"_no_structured_output": True, "_result_text": result_text[:2000]}
 
-    # Extract the result text from the JSON output
-    result_text = parsed.get("result", "")
-    if not result_text:
-        return dict(parsed)
+    # Single dict format (older CLI versions)
+    return _extract_from_result_message(parsed)
 
-    # Try to extract JSON from the result text
-    structured = _extract_json(result_text)
-    if structured is not None:
-        return structured
 
-    return {"_no_structured_output": True, "_result_text": result_text[:2000]}
+def _find_result_message(messages: list[Any]) -> dict[str, Any] | None:
+    """Find the result message in a Claude CLI message list."""
+    for msg in messages:
+        if isinstance(msg, dict) and msg.get("type") == "result":
+            return msg
+    return None
+
+
+def _extract_from_result_message(msg: dict[str, Any]) -> dict[str, Any]:
+    """Extract structured output and metadata from a Claude CLI result message."""
+    output: dict[str, Any] = {}
+
+    # 1. Prefer structured_output (from --json-schema)
+    structured = msg.get("structured_output")
+    if isinstance(structured, dict):
+        output.update(structured)
+    elif isinstance(structured, str):
+        try:
+            parsed_structured = json.loads(structured)
+            if isinstance(parsed_structured, dict):
+                output.update(parsed_structured)
+        except json.JSONDecodeError:
+            pass
+
+    # 2. If no structured_output, try to extract JSON from result text
+    if not output:
+        result_text = msg.get("result", "")
+        if result_text:
+            extracted = _extract_json(result_text)
+            if extracted is not None:
+                output.update(extracted)
+            else:
+                output["_no_structured_output"] = True
+                output["_result_text"] = result_text[:2000]
+        elif not msg.get("result") and not structured:
+            # No result and no structured_output
+            return dict(msg)
+        else:
+            output["_no_structured_output"] = True
+
+    # 3. Add execution metadata (prefixed with _ to avoid collisions)
+    if "total_cost_usd" in msg:
+        output["_cost_usd"] = msg["total_cost_usd"]
+    if "usage" in msg:
+        usage = msg["usage"]
+        if isinstance(usage, dict):
+            output["_input_tokens"] = usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
+            output["_output_tokens"] = usage.get("output_tokens", 0)
+            output["_cache_creation_tokens"] = usage.get("cache_creation_input_tokens", 0)
+    if "duration_ms" in msg:
+        output["_duration_ms"] = msg["duration_ms"]
+    if "num_turns" in msg:
+        output["_num_turns"] = msg["num_turns"]
+    if "session_id" in msg:
+        output["_session_id"] = msg["session_id"]
+
+    return output
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:

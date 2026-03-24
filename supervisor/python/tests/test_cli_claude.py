@@ -106,6 +106,83 @@ def test_parse_output_result_empty_string() -> None:
     assert result == {"result": "", "other": "data"}
 
 
+# --- _parse_output with list format (Claude CLI --output-format json) ---
+
+def test_parse_output_list_with_structured_output() -> None:
+    """Extracts structured_output from result message in list format."""
+    messages = [
+        {"type": "system", "subtype": "init"},
+        {"type": "assistant", "content": [{"type": "text", "text": "reviewing..."}]},
+        {
+            "type": "result",
+            "subtype": "success",
+            "result": "Here is my review summary.",
+            "structured_output": {"summary": "all good", "recommendation": "approve"},
+            "total_cost_usd": 0.25,
+            "usage": {"input_tokens": 100, "cache_read_input_tokens": 500, "output_tokens": 200, "cache_creation_input_tokens": 50},
+            "duration_ms": 5000,
+            "num_turns": 3,
+            "session_id": "test-session-123",
+        },
+    ]
+    result = _parse_output(json.dumps(messages), "task-001", 0)
+    assert result["summary"] == "all good"
+    assert result["recommendation"] == "approve"
+    assert result["_cost_usd"] == 0.25
+    assert result["_input_tokens"] == 600  # 100 + 500 cache_read
+    assert result["_output_tokens"] == 200
+    assert result["_cache_creation_tokens"] == 50
+    assert result["_duration_ms"] == 5000
+    assert result["_num_turns"] == 3
+    assert result["_session_id"] == "test-session-123"
+
+
+def test_parse_output_list_structured_output_as_string() -> None:
+    """Handles structured_output as a JSON string (some CLI versions)."""
+    messages = [
+        {
+            "type": "result",
+            "result": "Done.",
+            "structured_output": json.dumps({"verdict": "pass"}),
+        },
+    ]
+    result = _parse_output(json.dumps(messages), "task-001", 0)
+    assert result["verdict"] == "pass"
+
+
+def test_parse_output_list_no_structured_output_falls_back_to_result() -> None:
+    """When no structured_output, extracts JSON from result text."""
+    messages = [
+        {
+            "type": "result",
+            "result": '```json\n{"status": "ok"}\n```',
+            "total_cost_usd": 0.1,
+            "usage": {"input_tokens": 50, "cache_read_input_tokens": 0, "output_tokens": 100},
+        },
+    ]
+    result = _parse_output(json.dumps(messages), "task-001", 0)
+    assert result["status"] == "ok"
+    assert result["_cost_usd"] == 0.1
+
+
+def test_parse_output_list_plain_text_result_with_metadata() -> None:
+    """Plain text result still captures metadata."""
+    messages = [
+        {
+            "type": "result",
+            "result": "Everything looks fine.",
+            "total_cost_usd": 0.05,
+            "usage": {"input_tokens": 10, "cache_read_input_tokens": 0, "output_tokens": 50},
+            "duration_ms": 2000,
+        },
+    ]
+    result = _parse_output(json.dumps(messages), "task-001", 0)
+    assert result["_no_structured_output"] is True
+    assert result["_result_text"] == "Everything looks fine."
+    assert result["_cost_usd"] == 0.05
+    assert result["_duration_ms"] == 2000
+
+
 # --- execute_claude ---
 
 @pytest.mark.asyncio
