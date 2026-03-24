@@ -5,6 +5,7 @@
  * The mock is typed to match the subset of pg.Pool used by the resolvers.
  */
 
+import { jest, describe, it, expect } from '@jest/globals'
 import { Query, mapRepository, mapStage } from '../resolvers/queries.js'
 import type { Context } from '../context.js'
 

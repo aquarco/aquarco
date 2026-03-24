@@ -8,6 +8,7 @@
  *   - Timestamp side effects: status transitions set the right timestamp columns
  */
 
+import { jest, describe, it, expect } from '@jest/globals'
 import { Mutation } from '../resolvers/mutations.js'
 import type { Context } from '../context.js'
 
