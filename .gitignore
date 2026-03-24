@@ -36,6 +36,7 @@ pgdata/
 __pycache__/
 *.pyc
 .coverage
+coverage.json
 *.egg-info/
 
 # Test coverage
