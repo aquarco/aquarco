@@ -161,7 +161,20 @@ The Agents page provides two tabs for managing agent definitions:
 - **Global Agents** — lists all default agents and agents from global config repositories. Each agent can be individually disabled/enabled, and non-default agents can be edited. Modified agents are stored in the `agent_overrides` table. A "Create PR" button commits changes back to the config repository.
 - **Repository Agents** — lists repositories with custom agents in an accordion layout. Agents can be disabled, edited, and reset. PR creation targets the specific repository.
 
-Agent sources are distinguished by an `AgentSource` enum: `DEFAULT` (built-in), `GLOBAL_CONFIG` (from a global config repo), and `REPOSITORY` (repo-specific).
+Agent sources are distinguished by an `AgentSource` enum: `DEFAULT` (built-in), `GLOBAL_CONFIG` (from a global config repo), `REPOSITORY` (repo-specific), and `AUTOLOADED` (discovered from `.claude/agents/`).
+
+### Agent Autoloading
+
+Repositories containing a `.claude/agents/` directory with `.md` prompt files are automatically detected. The autoloader:
+
+1. **Scans** the directory for valid `.md` files (max 20 per repo, 50KB size limit)
+2. **Analyzes** each prompt via Claude CLI to infer agent metadata (categories, tools, description)
+3. **Generates** aquarco agent YAML definitions and writes them to `aquarco-config/agents/` in the repo
+4. **Stores** agents in the database with `source='autoload:<repo_name>'`
+
+Autoloaded agents are merged as a 4th config layer: `default → global_overlay → repo_overlay → autoloaded`. They inherit conservative default tools (`Read`, `Grep`, `Glob`) which can be overridden via the `modifyAgent` mutation.
+
+A **Reload Agents** button on the Repositories page allows on-demand rescanning. Scans are rate-limited to once per 5 minutes per repository.
 
 ### Claude Login (PKCE OAuth via IPC)
 
