@@ -38,6 +38,7 @@ class GitHubSourcePoller(BasePoller):
             cursor = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
 
         total_created = 0
+        head_sha_updates: dict[str, str] = {}
 
         for repo in await self._get_repositories(self.name):
             slug = _url_to_slug(repo["url"])
@@ -51,17 +52,18 @@ class GitHubSourcePoller(BasePoller):
                 log.error("pr_poll_failed", repo=slug, error=str(e))
 
             try:
-                created = await self._poll_commits(repo["name"], repo["clone_dir"], cursor)
+                created, new_sha = await self._poll_commits(
+                    repo["name"], repo["clone_dir"], cursor,
+                )
                 total_created += created
+                if new_sha:
+                    head_sha_updates[f"head_sha:{repo['name']}"] = new_sha
             except Exception as e:
                 log.error("commit_poll_failed", repo=repo["name"], error=str(e))
 
         new_cursor = datetime.now(timezone.utc).isoformat()
-        await self._tq.update_poll_state(
-            self.name,
-            new_cursor,
-            {"tasks_created": total_created},
-        )
+        state = {"tasks_created": total_created, **head_sha_updates}
+        await self._tq.update_poll_state(self.name, new_cursor, state)
 
         if total_created > 0:
             log.info("poll_complete", tasks_created=total_created)
@@ -85,13 +87,30 @@ class GitHubSourcePoller(BasePoller):
 
         return created
 
-    async def _poll_commits(self, repo_name: str, clone_dir: str, cursor: str) -> int:
-        """Poll recent commits for a repository."""
-        if not Path(clone_dir).joinpath(".git").exists():
-            return 0
+    async def _poll_commits(
+        self, repo_name: str, clone_dir: str, cursor: str,
+    ) -> tuple[int, str | None]:
+        """Poll recent commits for a repository.
 
-        # Fetch latest
-        await _run_git(clone_dir, "fetch", "--quiet", "origin")
+        Returns (tasks_created, new_head_sha).
+        """
+        if not Path(clone_dir).joinpath(".git").exists():
+            return 0, None
+
+        # Get the last processed sha from poll state (not repositories.head_sha
+        # which the pull worker updates independently).
+        state_row = await self._db.fetch_one(
+            "SELECT state_data FROM poll_state WHERE poller_name = %(name)s",
+            {"name": self.name},
+        )
+        state_data = state_row["state_data"] if state_row else {}
+        if isinstance(state_data, str):
+            import json as _json
+            state_data = _json.loads(state_data)
+        old_head_sha = state_data.get(f"head_sha:{repo_name}")
+
+        # Use the local repo state (pull_worker keeps it up to date via git fetch).
+        # No git-fetch here — avoids auth issues and duplicate fetches.
 
         # Get default branch
         try:
@@ -100,53 +119,97 @@ class GitHubSourcePoller(BasePoller):
         except Exception:
             default_branch = "main"
 
-        # Get recent commits
-        output = await _run_git(
-            clone_dir, "log", f"origin/{default_branch}",
-            f"--since={cursor}",
-            "--no-merges",
-            "--pretty=format:%H\t%s\t%an\t%aI",
+        # Get current head sha from local refs (updated by pull_worker)
+        new_head_sha = await _run_git(
+            clone_dir, "rev-parse", f"origin/{default_branch}",
         )
 
-        if not output.strip():
-            return 0
+        # No new commits if head hasn't changed
+        if old_head_sha and old_head_sha == new_head_sha:
+            return 0, None
 
-        created = 0
+        log.info(
+            "commit_poll_head_changed",
+            repo=repo_name,
+            old_sha=old_head_sha[:12] if old_head_sha else None,
+            new_sha=new_head_sha[:12],
+        )
+
+        # Get commits between old head and new head (sha-based, not time-based)
+        if old_head_sha:
+            rev_range = f"{old_head_sha}..origin/{default_branch}"
+        else:
+            rev_range = f"origin/{default_branch}"
+
+        args = [
+            clone_dir, "log", rev_range,
+            "--no-merges",
+            "--pretty=format:%H\t%s\t%an\t%aI",
+        ]
+        if not old_head_sha:
+            args.extend([f"--since={cursor}"])
+
+        output = await _run_git(*args)
+
+        if not output.strip():
+            return 0, new_head_sha
+
+        # Collect commits, filtering out pipeline merges
+        commits: list[dict[str, str]] = []
         for line in output.strip().split("\n"):
             parts = line.split("\t", 3)
             if len(parts) < 4:
                 continue
-
             sha, subject, author, date = parts
-            task_id = f"github-commit-{repo_name}-{sha[:12]}"
-
-            # Skip merge commits from pipeline-created branches
             if "aquarco/" in subject:
                 log.debug("skip_pipeline_merge", sha=sha[:12], subject=subject)
                 continue
+            commits.append({
+                "sha": sha, "subject": subject,
+                "author": author, "date": date,
+            })
 
-            if await self._tq.task_exists(task_id):
-                continue
+        if not commits:
+            return 0, new_head_sha
 
-            context = {
-                "commit_sha": sha,
-                "commit_subject": subject,
-                "commit_author": author,
-                "commit_date": date,
-            }
+        # Create a single task per push (batch of commits)
+        task_id = f"github-push-{repo_name}-{new_head_sha[:12]}"
+        if await self._tq.task_exists(task_id):
+            return 0, new_head_sha
 
-            if await self._tq.create_task(
-                task_id=task_id,
-                title=f"Review commit: {subject[:80]}",
-                source="github-commits",
-                source_ref=sha,
-                repository=repo_name,
-                pipeline="pr-review-pipeline",
-                context=context,
-            ):
-                created += 1
+        # Build a summary for the task title
+        if len(commits) == 1:
+            title = f"Review push: {commits[0]['subject'][:80]}"
+        else:
+            title = f"Review push: {len(commits)} commits ({old_head_sha[:8] if old_head_sha else '?'}..{new_head_sha[:8]})"
 
-        return created
+        context: dict[str, Any] = {
+            "push_old_sha": old_head_sha,
+            "push_new_sha": new_head_sha,
+            "commit_count": len(commits),
+            "commits": commits,
+        }
+
+        log.info(
+            "commit_poll_creating_push_task",
+            repo=repo_name,
+            commit_count=len(commits),
+            task_id=task_id,
+        )
+
+        created = 0
+        if await self._tq.create_task(
+            task_id=task_id,
+            title=title,
+            source="github-commits",
+            source_ref=new_head_sha,
+            repository=repo_name,
+            pipeline="pr-review-pipeline",
+            context=context,
+        ):
+            created = 1
+
+        return created, new_head_sha
 
     async def _process_pr(
         self,

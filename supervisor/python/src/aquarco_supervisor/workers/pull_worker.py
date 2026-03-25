@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
 
@@ -10,6 +11,27 @@ from ..logging import get_logger
 from ..utils import run_git as _run_git
 
 log = get_logger("pull-worker")
+
+_FETCH_TIMEOUT = 30  # seconds
+
+
+async def _fetch_with_timeout(clone_dir: str, branch: str) -> None:
+    """Run git fetch with a hard timeout, killing the process if it hangs."""
+    proc = await asyncio.create_subprocess_exec(
+        "git", "-C", clone_dir, "fetch", "origin", branch, "--quiet",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=_FETCH_TIMEOUT)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError(f"git fetch timed out after {_FETCH_TIMEOUT}s")
+    if proc.returncode != 0:
+        err = stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"git fetch failed ({proc.returncode}): {err}")
+
 
 # Branch names must be safe git ref components: no spaces, no shell metacharacters,
 # no leading dashes (which git would interpret as flags).
@@ -67,7 +89,7 @@ class PullWorker:
 
             try:
                 old_sha = await _run_git(clone_dir, "rev-parse", "HEAD")
-                await _run_git(clone_dir, "fetch", "origin", branch, "--quiet")
+                await _fetch_with_timeout(clone_dir, branch)
                 await _run_git(clone_dir, "reset", "--hard", "--quiet", f"origin/{branch}")
                 new_sha = await _run_git(clone_dir, "rev-parse", "HEAD")
 
