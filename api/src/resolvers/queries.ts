@@ -1,36 +1,10 @@
 import { Pool } from 'pg'
 import { Context } from '../context.js'
+import { mapTask } from './mappers.js'
 
 // GraphQL enum values are UPPER_CASE; DB stores lower_case
 function toDbEnum(value: string | null | undefined): string | null {
   return value ? value.toLowerCase() : null
-}
-
-// Map a raw DB task row to the GraphQL Task shape (camelCase)
-function mapTask(row: Record<string, unknown>) {
-  return {
-    id: row.id,
-    title: row.title,
-    status: (row.status as string).toUpperCase(),
-    priority: row.priority,
-    source: row.source,
-    sourceRef: row.source_ref ?? null,
-    pipeline: row.pipeline ?? 'feature-pipeline',
-    // repository is resolved by the Task field resolver via DataLoader
-    _repositoryName: row.repository,
-    initialContext: row.initial_context ?? null,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    startedAt: row.started_at ?? null,
-    completedAt: row.completed_at ?? null,
-    assignedAgent: row.assigned_agent ?? null,
-    currentStage: row.current_stage,
-    retryCount: row.retry_count,
-    errorMessage: row.error_message ?? null,
-    parentTaskId: row.parent_task_id ?? null,
-    prNumber: row.pr_number ?? null,
-    branchName: row.branch_name ?? null,
-  }
 }
 
 export const Query = {

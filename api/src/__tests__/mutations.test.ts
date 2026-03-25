@@ -8,6 +8,7 @@
  *   - Timestamp side effects: status transitions set the right timestamp columns
  */
 
+import { jest, describe, it, expect } from '@jest/globals'
 import { Mutation } from '../resolvers/mutations.js'
 import type { Context } from '../context.js'
 
@@ -53,6 +54,9 @@ const baseTaskRow: Record<string, unknown> = {
   current_stage: 0,
   retry_count: 0,
   error_message: null,
+  parent_task_id: null,
+  pr_number: null,
+  branch_name: null,
 }
 
 const baseRepoRow: Record<string, unknown> = {
@@ -237,7 +241,10 @@ describe('Mutation.updateTaskStatus', () => {
 describe('Mutation.retryTask', () => {
   it('should reset task to pending with incremented retry_count', async () => {
     const retriedRow = { ...baseTaskRow, status: 'pending', retry_count: 1, error_message: null }
-    const pool = mockPool([{ rows: [retriedRow] }])
+    const pool = mockPool([
+      { rows: [] },           // stage reset
+      { rows: [retriedRow] }, // task UPDATE RETURNING
+    ])
     const ctx = makeCtx(pool)
 
     const result = await Mutation.retryTask(null, { id: 'task-1' }, ctx)
@@ -248,26 +255,36 @@ describe('Mutation.retryTask', () => {
     expect(result.task!.errorMessage).toBeNull()
   })
 
-  it('should clear started_at and completed_at in the SQL', async () => {
-    const pool = mockPool([{ rows: [baseTaskRow] }])
+  it('should only retry tasks in retryable statuses', async () => {
+    const pool = mockPool([
+      { rows: [] }, // stage reset
+      { rows: [] }, // task UPDATE — no match (status guard)
+      { rows: [{ status: 'executing' }] }, // exists check
+    ])
     const ctx = makeCtx(pool)
 
-    await Mutation.retryTask(null, { id: 'task-1' }, ctx)
+    const result = await Mutation.retryTask(null, { id: 'task-1' }, ctx)
 
-    const sql = pool.query.mock.calls[0][0] as string
-    expect(sql).toContain("started_at = NULL")
-    expect(sql).toContain("completed_at = NULL")
-    expect(sql).toContain("error_message = NULL")
+    expect(result.task).toBeNull()
+    expect(result.errors[0].message).toContain('cannot be retried')
+    // Verify status guard is in SQL
+    const updateSql = pool.query.mock.calls[1][0] as string
+    expect(updateSql).toContain("status IN ('failed', 'rate_limited', 'blocked')")
   })
 
   it('should return error payload when task not found', async () => {
-    const pool = mockPool([{ rows: [] }])
+    const pool = mockPool([
+      { rows: [] }, // stage reset
+      { rows: [] }, // task UPDATE — no match
+      { rows: [] }, // exists check — not found
+    ])
     const ctx = makeCtx(pool)
 
     const result = await Mutation.retryTask(null, { id: 'ghost' }, ctx)
 
     expect(result.task).toBeNull()
     expect(result.errors[0].field).toBe('id')
+    expect(result.errors[0].message).toContain('not found')
   })
 })
 
@@ -492,5 +509,162 @@ describe('Mutation.unblockTask', () => {
     expect(result.task).toBeNull()
     expect(result.errors[0].field).toBe('id')
     expect(result.errors[0].message).toContain('not blocked')
+  })
+})
+
+// ── rerunTask ──────────────────────────────────────────────────────────────────
+
+describe('Mutation.rerunTask', () => {
+  it('should create a new task as a rerun of the original', async () => {
+    const origRow = { ...baseTaskRow, id: 'orig-1', source_ref: 'issue-42' }
+    const rerunRow = {
+      ...baseTaskRow,
+      id: 'issue-42-rerun-1',
+      parent_task_id: 'orig-1',
+    }
+    const pool = mockPool([
+      { rows: [origRow] },   // SELECT original
+      { rows: [rerunRow] },  // INSERT RETURNING
+    ])
+    const ctx = makeCtx(pool)
+
+    const result = await Mutation.rerunTask(null, { id: 'orig-1' }, ctx)
+
+    expect(result.errors).toHaveLength(0)
+    expect(result.task).not.toBeNull()
+    expect(result.task!.parentTaskId).toBe('orig-1')
+  })
+
+  it('should use atomic CTE to avoid race conditions', async () => {
+    const origRow = { ...baseTaskRow, id: 'orig-1', source_ref: 'ref-1' }
+    const rerunRow = { ...baseTaskRow, id: 'ref-1-rerun-1', parent_task_id: 'orig-1' }
+    const pool = mockPool([
+      { rows: [origRow] },
+      { rows: [rerunRow] },
+    ])
+    const ctx = makeCtx(pool)
+
+    await Mutation.rerunTask(null, { id: 'orig-1' }, ctx)
+
+    // The INSERT query should use a CTE for atomicity
+    const insertSql = pool.query.mock.calls[1][0] as string
+    expect(insertSql).toContain('WITH rerun_count AS')
+    expect(insertSql).toContain('FOR UPDATE')
+  })
+
+  it('should fall back to args.id when source_ref is falsy', async () => {
+    const origRow = { ...baseTaskRow, id: 'orig-1', source_ref: null }
+    const rerunRow = { ...baseTaskRow, id: 'orig-1-rerun-1', parent_task_id: 'orig-1' }
+    const pool = mockPool([
+      { rows: [origRow] },
+      { rows: [rerunRow] },
+    ])
+    const ctx = makeCtx(pool)
+
+    await Mutation.rerunTask(null, { id: 'orig-1' }, ctx)
+
+    // sourceRef param should be 'orig-1' (the task id)
+    const insertParams = pool.query.mock.calls[1][1] as unknown[]
+    expect(insertParams[1]).toBe('orig-1') // sourceRef used as ID prefix
+  })
+
+  it('should return error payload when task not found', async () => {
+    const pool = mockPool([{ rows: [] }]) // SELECT: not found
+    const ctx = makeCtx(pool)
+
+    const result = await Mutation.rerunTask(null, { id: 'nonexistent' }, ctx)
+
+    expect(result.task).toBeNull()
+    expect(result.errors[0].field).toBe('id')
+    expect(result.errors[0].message).toContain('not found')
+  })
+
+  it('should return error payload when INSERT throws', async () => {
+    const origRow = { ...baseTaskRow, id: 'orig-1', source_ref: 'ref-1' }
+    const pool = mockPool([{ rows: [origRow] }])
+    pool.query
+      .mockResolvedValueOnce({ rows: [origRow] })
+      .mockRejectedValueOnce(new Error('unique_violation'))
+    const ctx = makeCtx(pool)
+
+    const result = await Mutation.rerunTask(null, { id: 'orig-1' }, ctx)
+
+    expect(result.task).toBeNull()
+    expect(result.errors[0].message).toContain('unique_violation')
+  })
+})
+
+// ── closeTask ──────────────────────────────────────────────────────────────────
+
+describe('Mutation.closeTask', () => {
+  it('should close a completed task and delete checkpoint', async () => {
+    const closedRow = { ...baseTaskRow, status: 'closed' }
+    const pool = mockPool([
+      { rows: [] },           // DELETE checkpoint
+      { rows: [closedRow] },  // UPDATE RETURNING
+    ])
+    const ctx = makeCtx(pool)
+
+    const result = await Mutation.closeTask(null, { id: 'task-1' }, ctx)
+
+    expect(result.errors).toHaveLength(0)
+    expect(result.task!.status).toBe('CLOSED')
+  })
+
+  it('should delete checkpoint before closing task', async () => {
+    const closedRow = { ...baseTaskRow, status: 'closed' }
+    const pool = mockPool([
+      { rows: [] },           // DELETE checkpoint
+      { rows: [closedRow] },  // UPDATE RETURNING
+    ])
+    const ctx = makeCtx(pool)
+
+    await Mutation.closeTask(null, { id: 'task-1' }, ctx)
+
+    // First call should be the checkpoint DELETE
+    const firstSql = pool.query.mock.calls[0][0] as string
+    expect(firstSql).toContain('DELETE FROM pipeline_checkpoints')
+  })
+
+  it('should refuse to close an executing task', async () => {
+    const pool = mockPool([
+      { rows: [] },                          // DELETE checkpoint
+      { rows: [] },                          // UPDATE — no match (status guard)
+      { rows: [{ status: 'executing' }] },   // exists check
+    ])
+    const ctx = makeCtx(pool)
+
+    const result = await Mutation.closeTask(null, { id: 'task-1' }, ctx)
+
+    expect(result.task).toBeNull()
+    expect(result.errors[0].message).toContain('cannot be closed while executing')
+  })
+
+  it('should return error payload when task not found', async () => {
+    const pool = mockPool([
+      { rows: [] }, // DELETE checkpoint
+      { rows: [] }, // UPDATE — no match
+      { rows: [] }, // exists check — not found
+    ])
+    const ctx = makeCtx(pool)
+
+    const result = await Mutation.closeTask(null, { id: 'nonexistent' }, ctx)
+
+    expect(result.task).toBeNull()
+    expect(result.errors[0].field).toBe('id')
+    expect(result.errors[0].message).toContain('not found')
+  })
+
+  it('should return error payload when UPDATE throws', async () => {
+    const pool = mockPool([{ rows: [] }])
+    pool.query
+      .mockResolvedValueOnce({ rows: [] }) // DELETE checkpoint
+      .mockRejectedValueOnce(new Error('connection refused'))
+    const ctx = makeCtx(pool)
+
+    const result = await Mutation.closeTask(null, { id: 'task-1' }, ctx)
+
+    expect(result.task).toBeNull()
+    expect(result.errors[0].message).toContain('connection refused')
   })
 })

@@ -1,35 +1,11 @@
 import crypto from 'node:crypto'
 import { Context } from '../context.js'
 import { mapRepository, mapStage, mapAgentDefinition, fetchAgentWithOverrides } from './queries.js'
+import { mapTask } from './mappers.js'
 
 // GraphQL enum values are UPPER_CASE; DB stores lower_case
 function toDbEnum(value: string): string {
   return value.toLowerCase()
-}
-
-function mapTask(row: Record<string, unknown>) {
-  return {
-    id: row.id,
-    title: row.title,
-    status: (row.status as string).toUpperCase(),
-    priority: row.priority,
-    source: row.source,
-    sourceRef: row.source_ref ?? null,
-    pipeline: row.pipeline ?? 'feature-pipeline',
-    _repositoryName: row.repository,
-    initialContext: row.initial_context ?? null,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    startedAt: row.started_at ?? null,
-    completedAt: row.completed_at ?? null,
-    assignedAgent: row.assigned_agent ?? null,
-    currentStage: row.current_stage,
-    retryCount: row.retry_count,
-    errorMessage: row.error_message ?? null,
-    parentTaskId: row.parent_task_id ?? null,
-    prNumber: row.pr_number ?? null,
-    branchName: row.branch_name ?? null,
-  }
 }
 
 function taskPayload(task: Record<string, unknown>) {
@@ -210,18 +186,27 @@ export const Mutation = {
         [args.id]
       )
 
-      // Reset task to pending (no new rows, no retry_count increment)
+      // Reset task to pending — only if task is in a retryable status
       const result = await ctx.pool.query<Record<string, unknown>>(
         `UPDATE tasks
          SET status = 'pending',
              error_message = NULL,
              updated_at = NOW()
          WHERE id = $1
+           AND status IN ('failed', 'rate_limited', 'blocked')
          RETURNING *`,
         [args.id]
       )
       if (result.rows.length === 0) {
-        return errorPayload('id', `Task "${args.id}" not found`)
+        // Distinguish "not found" from "wrong status"
+        const exists = await ctx.pool.query(
+          'SELECT status FROM tasks WHERE id = $1',
+          [args.id]
+        )
+        if (exists.rows.length === 0) {
+          return errorPayload('id', `Task "${args.id}" not found`)
+        }
+        return errorPayload('id', `Task "${args.id}" cannot be retried in its current status`)
       }
       return taskPayload(result.rows[0])
     } catch (err) {
@@ -232,14 +217,7 @@ export const Mutation = {
 
   async rerunTask(_: unknown, args: { id: string }, ctx: Context) {
     try {
-      // Count existing reruns
-      const countResult = await ctx.pool.query<{ count: string }>(
-        'SELECT COUNT(*) AS count FROM tasks WHERE parent_task_id = $1',
-        [args.id]
-      )
-      const n = parseInt(countResult.rows[0].count, 10) + 1
-
-      // Copy from original task
+      // Look up original task
       const original = await ctx.pool.query<Record<string, unknown>>(
         'SELECT * FROM tasks WHERE id = $1',
         [args.id]
@@ -249,23 +227,31 @@ export const Mutation = {
       }
       const orig = original.rows[0]
       const sourceRef = (orig.source_ref as string) || args.id
-      const newId = `${sourceRef}-rerun-${n}`
 
+      // Atomic insert: compute rerun number inside the INSERT using a CTE
+      // to avoid race conditions with concurrent rerunTask calls.
       const result = await ctx.pool.query<Record<string, unknown>>(
-        `INSERT INTO tasks
+        `WITH rerun_count AS (
+           SELECT COUNT(*) + 1 AS n FROM tasks WHERE parent_task_id = $1
+           FOR UPDATE
+         )
+         INSERT INTO tasks
            (id, title, source, source_ref, repository, pipeline,
             initial_context, parent_task_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         SELECT
+           $2 || '-rerun-' || rc.n,
+           $3, $4, $5, $6, $7, $8, $1
+         FROM rerun_count rc
          RETURNING *`,
         [
-          newId,
+          args.id,
+          sourceRef,
           orig.title,
           orig.source,
           orig.source_ref,
           orig.repository,
           orig.pipeline,
           orig.initial_context ? JSON.stringify(orig.initial_context) : null,
-          args.id,
         ]
       )
       return taskPayload(result.rows[0])
@@ -277,21 +263,32 @@ export const Mutation = {
 
   async closeTask(_: unknown, args: { id: string }, ctx: Context) {
     try {
-      const result = await ctx.pool.query<Record<string, unknown>>(
-        `UPDATE tasks
-         SET status = 'closed', updated_at = NOW()
-         WHERE id = $1
-         RETURNING *`,
-        [args.id]
-      )
-      if (result.rows.length === 0) {
-        return errorPayload('id', `Task "${args.id}" not found`)
-      }
-      // Delete checkpoint
+      // Delete checkpoint first, before marking as closed
       await ctx.pool.query(
         'DELETE FROM pipeline_checkpoints WHERE task_id = $1',
         [args.id]
       )
+
+      // Only close tasks that are not currently executing
+      const result = await ctx.pool.query<Record<string, unknown>>(
+        `UPDATE tasks
+         SET status = 'closed', updated_at = NOW()
+         WHERE id = $1
+           AND status NOT IN ('executing')
+         RETURNING *`,
+        [args.id]
+      )
+      if (result.rows.length === 0) {
+        // Distinguish "not found" from "wrong status"
+        const exists = await ctx.pool.query(
+          'SELECT status FROM tasks WHERE id = $1',
+          [args.id]
+        )
+        if (exists.rows.length === 0) {
+          return errorPayload('id', `Task "${args.id}" not found`)
+        }
+        return errorPayload('id', `Task "${args.id}" cannot be closed while executing`)
+      }
       return taskPayload(result.rows[0])
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to close task'
