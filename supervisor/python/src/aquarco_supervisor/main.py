@@ -255,8 +255,15 @@ class Supervisor:
         try:
             await self._tq.assign_agent(task_id, "pending-assignment")
             await self._executor.execute_pipeline(pipeline, task_id, initial_context)
-        except RateLimitError:
-            # Already handled inside execute_pipeline (task marked rate_limited).
+        except RateLimitError as e:
+            # Defensively mark task as rate_limited in case the error propagated
+            # before execute_pipeline had a chance to call rate_limit_task().
+            try:
+                task = await self._tq.get_task(task_id) if self._tq else None
+                if task and task.status.value != "rate_limited":
+                    await self._tq.rate_limit_task(task_id, str(e))
+            except Exception:
+                log.exception("rate_limit_task_fallback_error", task_id=task_id)
             log.info("task_rate_limited_stopped", task_id=task_id)
         except Exception:
             log.exception("task_execution_error", task_id=task_id)
@@ -321,7 +328,7 @@ class Supervisor:
                 if proc.returncode != 0:
                     continue
 
-                import json as _json
+                import json as _json  # noqa: F811 — local alias avoids shadowing module-level json
                 pr_data = _json.loads(stdout.decode())
                 if pr_data.get("state") == "MERGED":
                     log.info(

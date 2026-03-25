@@ -2,8 +2,9 @@
 -- Add 'closed' to task status, add parent_task_id, pr_number, branch_name columns
 
 -- Extend status CHECK constraint to include 'closed'
-ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
-ALTER TABLE tasks ADD CONSTRAINT tasks_status_check
+-- Migration 017 created the constraint as 'valid_status', so drop that name.
+ALTER TABLE tasks DROP CONSTRAINT IF EXISTS valid_status;
+ALTER TABLE tasks ADD CONSTRAINT valid_status
   CHECK (status IN ('pending','queued','executing','completed','failed','timeout','blocked','rate_limited','closed'));
 
 -- Add lifecycle columns
