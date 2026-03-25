@@ -26,6 +26,9 @@ function mapTask(row: Record<string, unknown>) {
     currentStage: row.current_stage,
     retryCount: row.retry_count,
     errorMessage: row.error_message ?? null,
+    parentTaskId: row.parent_task_id ?? null,
+    prNumber: row.pr_number ?? null,
+    branchName: row.branch_name ?? null,
   }
 }
 
@@ -171,13 +174,25 @@ export const Mutation = {
 
   async retryTask(_: unknown, args: { id: string }, ctx: Context) {
     try {
+      // Reset the latest failed/rate_limited stage
+      await ctx.pool.query(
+        `UPDATE stages
+         SET status = 'pending', error_message = NULL,
+             started_at = NULL, completed_at = NULL,
+             structured_output = NULL, raw_output = NULL, live_output = NULL
+         WHERE task_id = $1 AND id = (
+           SELECT id FROM stages WHERE task_id = $1
+           AND status IN ('failed', 'rate_limited')
+           ORDER BY stage_number DESC, run DESC LIMIT 1
+         )`,
+        [args.id]
+      )
+
+      // Reset task to pending (no new rows, no retry_count increment)
       const result = await ctx.pool.query<Record<string, unknown>>(
         `UPDATE tasks
          SET status = 'pending',
-             retry_count = retry_count + 1,
              error_message = NULL,
-             started_at = NULL,
-             completed_at = NULL,
              updated_at = NOW()
          WHERE id = $1
          RETURNING *`,
@@ -189,6 +204,75 @@ export const Mutation = {
       return taskPayload(result.rows[0])
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to retry task'
+      return errorPayload(null, message)
+    }
+  },
+
+  async rerunTask(_: unknown, args: { id: string }, ctx: Context) {
+    try {
+      // Count existing reruns
+      const countResult = await ctx.pool.query<{ count: string }>(
+        'SELECT COUNT(*) AS count FROM tasks WHERE parent_task_id = $1',
+        [args.id]
+      )
+      const n = parseInt(countResult.rows[0].count, 10) + 1
+
+      // Copy from original task
+      const original = await ctx.pool.query<Record<string, unknown>>(
+        'SELECT * FROM tasks WHERE id = $1',
+        [args.id]
+      )
+      if (original.rows.length === 0) {
+        return errorPayload('id', `Task "${args.id}" not found`)
+      }
+      const orig = original.rows[0]
+      const sourceRef = (orig.source_ref as string) || args.id
+      const newId = `${sourceRef}-rerun-${n}`
+
+      const result = await ctx.pool.query<Record<string, unknown>>(
+        `INSERT INTO tasks
+           (id, title, source, source_ref, repository, pipeline,
+            initial_context, parent_task_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *`,
+        [
+          newId,
+          orig.title,
+          orig.source,
+          orig.source_ref,
+          orig.repository,
+          orig.pipeline,
+          orig.initial_context ? JSON.stringify(orig.initial_context) : null,
+          args.id,
+        ]
+      )
+      return taskPayload(result.rows[0])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to rerun task'
+      return errorPayload(null, message)
+    }
+  },
+
+  async closeTask(_: unknown, args: { id: string }, ctx: Context) {
+    try {
+      const result = await ctx.pool.query<Record<string, unknown>>(
+        `UPDATE tasks
+         SET status = 'closed', updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [args.id]
+      )
+      if (result.rows.length === 0) {
+        return errorPayload('id', `Task "${args.id}" not found`)
+      }
+      // Delete checkpoint
+      await ctx.pool.query(
+        'DELETE FROM pipeline_checkpoints WHERE task_id = $1',
+        [args.id]
+      )
+      return taskPayload(result.rows[0])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to close task'
       return errorPayload(null, message)
     }
   },

@@ -30,6 +30,7 @@ export interface StageRow {
   tokens_output: number | null
   error_message: string | null
   retry_count: number
+  live_output: string | null
 }
 
 export interface ContextRow {
@@ -68,8 +69,13 @@ export function createLoaders(pool: Pool): Loaders {
 
   const stagesByTaskLoader = new DataLoader<string, StageRow[]>(
     async (taskIds) => {
+      // Only return the latest run per (stage_key, iteration) to hide superseded failed runs.
+      // For legacy rows without stage_key, falls back to stage_number.
       const result = await pool.query<StageRow>(
-        'SELECT * FROM stages WHERE task_id = ANY($1) ORDER BY task_id, stage_number ASC',
+        `SELECT DISTINCT ON (s.task_id, COALESCE(s.stage_key, s.stage_number::text), s.iteration) s.*
+         FROM stages s
+         WHERE s.task_id = ANY($1)
+         ORDER BY s.task_id, COALESCE(s.stage_key, s.stage_number::text), s.iteration, s.run DESC`,
         [taskIds as string[]]
       )
       const byTaskId = new Map<string, StageRow[]>()

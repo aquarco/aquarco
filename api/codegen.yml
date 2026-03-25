@@ -20,12 +20,15 @@ generates:
           FAILED: failed
           TIMEOUT: timeout
           BLOCKED: blocked
+          RATE_LIMITED: rate_limited
+          CLOSED: closed
         StageStatus:
           PENDING: pending
           EXECUTING: executing
           COMPLETED: completed
           FAILED: failed
           SKIPPED: skipped
+          RATE_LIMITED: rate_limited
         CloneStatus:
           PENDING: pending
           CLONING: cloning

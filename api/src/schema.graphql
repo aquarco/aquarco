@@ -37,6 +37,8 @@ type Mutation {
   createTask(input: CreateTaskInput!): TaskPayload!
   updateTaskStatus(id: ID!, status: TaskStatus!): TaskPayload!
   retryTask(id: ID!): TaskPayload!
+  rerunTask(id: ID!): TaskPayload!
+  closeTask(id: ID!): TaskPayload!
   cancelTask(id: ID!): TaskPayload!
 
   # Repository management
@@ -93,6 +95,9 @@ type Task {
   currentStage: Int!
   retryCount: Int!
   errorMessage: String
+  parentTaskId: ID
+  prNumber: Int
+  branchName: String
   stages: [Stage!]!
   context: [ContextEntry!]!
 }
@@ -113,6 +118,7 @@ type Stage {
   tokensOutput: Int
   errorMessage: String
   retryCount: Int!
+  liveOutput: String
 }
 
 type Repository {
@@ -236,6 +242,8 @@ enum TaskStatus {
   FAILED
   TIMEOUT
   BLOCKED
+  RATE_LIMITED
+  CLOSED
 }
 
 enum StageStatus {
@@ -244,6 +252,7 @@ enum StageStatus {
   COMPLETED
   FAILED
   SKIPPED
+  RATE_LIMITED
 }
 
 # --- GitHub Auth ---

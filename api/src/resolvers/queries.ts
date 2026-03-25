@@ -26,6 +26,9 @@ function mapTask(row: Record<string, unknown>) {
     currentStage: row.current_stage,
     retryCount: row.retry_count,
     errorMessage: row.error_message ?? null,
+    parentTaskId: row.parent_task_id ?? null,
+    prNumber: row.pr_number ?? null,
+    branchName: row.branch_name ?? null,
   }
 }
 
@@ -181,7 +184,10 @@ export const Query = {
     const task = taskResult.rows[0]
 
     const stagesResult = await ctx.pool.query<Record<string, unknown>>(
-      'SELECT * FROM stages WHERE task_id = $1 ORDER BY stage_number ASC',
+      `SELECT DISTINCT ON (COALESCE(s.stage_key, s.stage_number::text), s.iteration) s.*
+       FROM stages s
+       WHERE s.task_id = $1
+       ORDER BY COALESCE(s.stage_key, s.stage_number::text), s.iteration, s.run DESC`,
       [args.taskId]
     )
 
@@ -331,5 +337,6 @@ export function mapStage(row: Record<string, unknown>) {
     tokensOutput: row.tokens_output ?? null,
     errorMessage: row.error_message ?? null,
     retryCount: row.retry_count,
+    liveOutput: row.live_output ?? null,
   }
 }
