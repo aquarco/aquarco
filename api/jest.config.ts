@@ -27,7 +27,7 @@ const config: Config = {
     '!src/db.ts',      // thin pool factory
     '!src/**/*.d.ts',
   ],
-  coverageThresholds: {
+  coverageThreshold: {
     global: {
       statements: 80,
       branches: 75,

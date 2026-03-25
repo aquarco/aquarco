@@ -4,15 +4,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useMutation } from '@apollo/client'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
-import Table from '@mui/material/Table'
-import TableBody from '@mui/material/TableBody'
-import TableCell from '@mui/material/TableCell'
-import TableContainer from '@mui/material/TableContainer'
-import TableHead from '@mui/material/TableHead'
-import TableRow from '@mui/material/TableRow'
-import Paper from '@mui/material/Paper'
-import Skeleton from '@mui/material/Skeleton'
-import Alert from '@mui/material/Alert'
+import Tab from '@mui/material/Tab'
+import Tabs from '@mui/material/Tabs'
 import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
 import Dialog from '@mui/material/Dialog'
@@ -20,54 +13,41 @@ import DialogTitle from '@mui/material/DialogTitle'
 import DialogContent from '@mui/material/DialogContent'
 import DialogActions from '@mui/material/DialogActions'
 import TextField from '@mui/material/TextField'
+import Alert from '@mui/material/Alert'
 import CircularProgress from '@mui/material/CircularProgress'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
 import LogoutIcon from '@mui/icons-material/Logout'
-import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import IconButton from '@mui/material/IconButton'
-import Tooltip from '@mui/material/Tooltip'
 import {
-  GET_AGENT_INSTANCES,
   CLAUDE_AUTH_STATUS,
   CLAUDE_LOGIN_START,
   CLAUDE_LOGIN_POLL,
   CLAUDE_SUBMIT_CODE,
   CLAUDE_LOGOUT,
 } from '@/lib/graphql/queries'
-import { formatDate, formatNumber } from '@/lib/format'
+import GlobalAgentsTab from '@/components/agents/GlobalAgentsTab'
+import RepoAgentsTab from '@/components/agents/RepoAgentsTab'
 
-interface AgentInstance {
-  agentName: string
-  activeCount: number
-  totalExecutions: number
-  totalTokensUsed: number
-  lastExecutionAt: string | null
+interface TabPanelProps {
+  children?: React.ReactNode
+  index: number
+  value: number
 }
 
-function ActiveDot({ active }: { active: boolean }) {
+function TabPanel({ children, value, index }: TabPanelProps) {
   return (
-    <Box
-      component="span"
-      sx={{
-        display: 'inline-block',
-        width: 10,
-        height: 10,
-        borderRadius: '50%',
-        backgroundColor: active ? 'success.main' : 'grey.400',
-        mr: 1,
-        verticalAlign: 'middle',
-      }}
-    />
+    <Box role="tabpanel" hidden={value !== index} sx={{ pt: 2 }}>
+      {value === index && children}
+    </Box>
   )
 }
 
 type LoginStep = 'idle' | 'starting' | 'authorize' | 'paste-code' | 'submitting' | 'done'
 
 export default function AgentsPage() {
-  const { data, loading, error } = useQuery(GET_AGENT_INSTANCES)
   const { data: authData, loading: authLoading, refetch: refetchAuth } = useQuery(CLAUDE_AUTH_STATUS)
 
+  const [tabIndex, setTabIndex] = useState(0)
   const [loginDialogOpen, setLoginDialogOpen] = useState(false)
   const [loginStep, setLoginStep] = useState<LoginStep>('idle')
   const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null)
@@ -99,10 +79,6 @@ export default function AgentsPage() {
   useEffect(() => {
     return () => stopPolling()
   }, [stopPolling])
-
-  const agents: AgentInstance[] = (data?.agentInstances ?? []).slice().sort(
-    (a: AgentInstance, b: AgentInstance) => a.agentName.localeCompare(b.agentName)
-  )
 
   async function handleClaudeLogin() {
     setLoginError(null)
@@ -224,57 +200,22 @@ export default function AgentsPage() {
         </Stack>
       </Stack>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          Failed to load agents: {error.message}
-        </Alert>
-      )}
+      <Tabs
+        value={tabIndex}
+        onChange={(_, newValue) => setTabIndex(newValue)}
+        sx={{ borderBottom: 1, borderColor: 'divider' }}
+      >
+        <Tab label="Global Agents" data-testid="tab-global-agents" />
+        <Tab label="Repository Agents" data-testid="tab-repo-agents" />
+      </Tabs>
 
-      <TableContainer component={Paper} variant="outlined">
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Agent Name</TableCell>
-              <TableCell align="right">Active Instances</TableCell>
-              <TableCell align="right">Total Executions</TableCell>
-              <TableCell align="right">Total Tokens Used</TableCell>
-              <TableCell>Last Execution</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {loading
-              ? [...Array(6)].map((_, i) => (
-                  <TableRow key={i}>
-                    {[...Array(5)].map((_, j) => (
-                      <TableCell key={j}>
-                        <Skeleton variant="text" />
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              : agents.map((agent) => (
-                  <TableRow key={agent.agentName} data-testid={`agent-row-${agent.agentName}`}>
-                    <TableCell>
-                      <ActiveDot active={agent.activeCount > 0} />
-                      {agent.agentName}
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography
-                        variant="body2"
-                        fontWeight={agent.activeCount > 0 ? 700 : 400}
-                        color={agent.activeCount > 0 ? 'success.main' : 'text.primary'}
-                      >
-                        {agent.activeCount}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right">{formatNumber(agent.totalExecutions)}</TableCell>
-                    <TableCell align="right">{formatNumber(agent.totalTokensUsed)}</TableCell>
-                    <TableCell>{formatDate(agent.lastExecutionAt)}</TableCell>
-                  </TableRow>
-                ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+      <TabPanel value={tabIndex} index={0}>
+        <GlobalAgentsTab />
+      </TabPanel>
+
+      <TabPanel value={tabIndex} index={1}>
+        <RepoAgentsTab />
+      </TabPanel>
 
       {/* Claude Login dialog */}
       <Dialog open={loginDialogOpen} onClose={handleLoginDialogClose} maxWidth="sm" fullWidth>

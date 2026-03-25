@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { Context } from '../context.js'
-import { mapRepository, mapStage } from './queries.js'
+import { mapRepository, mapStage, mapAgentDefinition } from './queries.js'
 
 // GraphQL enum values are UPPER_CASE; DB stores lower_case
 function toDbEnum(value: string): string {
@@ -39,6 +39,14 @@ function errorPayload(field: string | null, message: string) {
 
 function repoErrorPayload(field: string | null, message: string) {
   return { repository: null, errors: [{ field, message }] }
+}
+
+function agentErrorPayload(field: string | null, message: string) {
+  return { agent: null, errors: [{ field, message }] }
+}
+
+function prErrorPayload(message: string) {
+  return { prUrl: null, errors: [{ field: null, message }] }
 }
 
 export const Mutation = {
@@ -396,6 +404,160 @@ export const Mutation = {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to unblock task'
       return errorPayload(null, message)
+    }
+  },
+
+  // --- Agent override mutations ---
+
+  async setAgentDisabled(
+    _: unknown,
+    args: { name: string; scope: string; disabled: boolean },
+    ctx: Context
+  ) {
+    try {
+      // Verify agent exists
+      const agentCheck = await ctx.pool.query(
+        'SELECT name FROM agent_definitions WHERE name = $1 AND is_active = true',
+        [args.name]
+      )
+      if (agentCheck.rows.length === 0) {
+        return agentErrorPayload('name', `Agent "${args.name}" not found`)
+      }
+
+      // Upsert the override
+      await ctx.pool.query(
+        `INSERT INTO agent_overrides (agent_name, scope, is_disabled)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (agent_name, scope) DO UPDATE SET
+           is_disabled = EXCLUDED.is_disabled`,
+        [args.name, args.scope, args.disabled]
+      )
+
+      // Return the updated agent definition
+      const result = await ctx.pool.query<Record<string, unknown>>(
+        `SELECT
+           ad.name, ad.version, ad.description, ad.spec, ad.source,
+           COALESCE(ao.is_disabled, false) AS is_disabled,
+           ao.modified_spec,
+           COALESCE(ai.active_count, 0) AS active_count,
+           COALESCE(ai.total_executions, 0) AS total_executions,
+           COALESCE(ai.total_tokens_used, 0) AS total_tokens_used,
+           ai.last_execution_at
+         FROM agent_definitions ad
+         LEFT JOIN agent_overrides ao ON ao.agent_name = ad.name AND ao.scope = $2
+         LEFT JOIN agent_instances ai ON ai.agent_name = ad.name
+         WHERE ad.name = $1 AND ad.is_active = true
+         LIMIT 1`,
+        [args.name, args.scope]
+      )
+      return { agent: mapAgentDefinition(result.rows[0]), errors: [] }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update agent disabled state'
+      return agentErrorPayload(null, message)
+    }
+  },
+
+  async modifyAgent(
+    _: unknown,
+    args: { name: string; scope: string; spec: unknown },
+    ctx: Context
+  ) {
+    try {
+      // Verify agent exists and is not default (default agents cannot be modified)
+      const agentCheck = await ctx.pool.query<Record<string, unknown>>(
+        'SELECT name, source FROM agent_definitions WHERE name = $1 AND is_active = true',
+        [args.name]
+      )
+      if (agentCheck.rows.length === 0) {
+        return agentErrorPayload('name', `Agent "${args.name}" not found`)
+      }
+      if (agentCheck.rows[0].source === 'default') {
+        return agentErrorPayload('name', 'Default agents cannot be modified. You can only disable them.')
+      }
+
+      // Upsert the override with modified_spec
+      await ctx.pool.query(
+        `INSERT INTO agent_overrides (agent_name, scope, modified_spec)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (agent_name, scope) DO UPDATE SET
+           modified_spec = EXCLUDED.modified_spec`,
+        [args.name, args.scope, JSON.stringify(args.spec)]
+      )
+
+      // Return the updated agent definition
+      const result = await ctx.pool.query<Record<string, unknown>>(
+        `SELECT
+           ad.name, ad.version, ad.description, ad.spec, ad.source,
+           COALESCE(ao.is_disabled, false) AS is_disabled,
+           ao.modified_spec,
+           COALESCE(ai.active_count, 0) AS active_count,
+           COALESCE(ai.total_executions, 0) AS total_executions,
+           COALESCE(ai.total_tokens_used, 0) AS total_tokens_used,
+           ai.last_execution_at
+         FROM agent_definitions ad
+         LEFT JOIN agent_overrides ao ON ao.agent_name = ad.name AND ao.scope = $2
+         LEFT JOIN agent_instances ai ON ai.agent_name = ad.name
+         WHERE ad.name = $1 AND ad.is_active = true
+         LIMIT 1`,
+        [args.name, args.scope]
+      )
+      return { agent: mapAgentDefinition(result.rows[0]), errors: [] }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to modify agent'
+      return agentErrorPayload(null, message)
+    }
+  },
+
+  async resetAgentModification(
+    _: unknown,
+    args: { name: string; scope: string },
+    ctx: Context
+  ) {
+    try {
+      // Delete the override row
+      await ctx.pool.query(
+        'DELETE FROM agent_overrides WHERE agent_name = $1 AND scope = $2',
+        [args.name, args.scope]
+      )
+
+      // Return the agent definition without overrides
+      const result = await ctx.pool.query<Record<string, unknown>>(
+        `SELECT
+           ad.name, ad.version, ad.description, ad.spec, ad.source,
+           false AS is_disabled,
+           NULL AS modified_spec,
+           COALESCE(ai.active_count, 0) AS active_count,
+           COALESCE(ai.total_executions, 0) AS total_executions,
+           COALESCE(ai.total_tokens_used, 0) AS total_tokens_used,
+           ai.last_execution_at
+         FROM agent_definitions ad
+         LEFT JOIN agent_instances ai ON ai.agent_name = ad.name
+         WHERE ad.name = $1 AND ad.is_active = true
+         LIMIT 1`,
+        [args.name]
+      )
+      if (result.rows.length === 0) {
+        return agentErrorPayload('name', `Agent "${args.name}" not found`)
+      }
+      return { agent: mapAgentDefinition(result.rows[0]), errors: [] }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to reset agent modification'
+      return agentErrorPayload(null, message)
+    }
+  },
+
+  async createAgentPR(
+    _: unknown,
+    args: { repoName: string },
+    ctx: Context
+  ) {
+    try {
+      const { createBranchAndPR } = await import('../github-api.js')
+      const prUrl = await createBranchAndPR(args.repoName, ctx.pool)
+      return { prUrl, errors: [] }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create PR'
+      return prErrorPayload(message)
     }
   },
 }

@@ -113,6 +113,65 @@ export const Query = {
     }))
   },
 
+  async globalAgents(_: unknown, __: unknown, ctx: Context) {
+    const result = await ctx.pool.query<Record<string, unknown>>(
+      `SELECT
+         ad.name, ad.version, ad.description, ad.spec, ad.source,
+         COALESCE(ao.is_disabled, false) AS is_disabled,
+         ao.modified_spec,
+         COALESCE(ai.active_count, 0) AS active_count,
+         COALESCE(ai.total_executions, 0) AS total_executions,
+         COALESCE(ai.total_tokens_used, 0) AS total_tokens_used,
+         ai.last_execution_at
+       FROM agent_definitions ad
+       LEFT JOIN agent_overrides ao
+         ON ao.agent_name = ad.name AND ao.scope = 'global'
+       LEFT JOIN agent_instances ai
+         ON ai.agent_name = ad.name
+       WHERE ad.is_active = true
+         AND (ad.source = 'default' OR ad.source LIKE 'global:%')
+       ORDER BY ad.name ASC`
+    )
+    return result.rows.map(mapAgentDefinition)
+  },
+
+  async repoAgentGroups(_: unknown, __: unknown, ctx: Context) {
+    const result = await ctx.pool.query<Record<string, unknown>>(
+      `SELECT
+         ad.name, ad.version, ad.description, ad.spec, ad.source,
+         COALESCE(ao.is_disabled, false) AS is_disabled,
+         ao.modified_spec,
+         COALESCE(ai.active_count, 0) AS active_count,
+         COALESCE(ai.total_executions, 0) AS total_executions,
+         COALESCE(ai.total_tokens_used, 0) AS total_tokens_used,
+         ai.last_execution_at
+       FROM agent_definitions ad
+       LEFT JOIN agent_overrides ao
+         ON ao.agent_name = ad.name AND ao.scope = CONCAT('repo:', SUBSTRING(ad.source FROM 6))
+       LEFT JOIN agent_instances ai
+         ON ai.agent_name = ad.name
+       WHERE ad.is_active = true
+         AND ad.source LIKE 'repo:%'
+       ORDER BY ad.source, ad.name ASC`
+    )
+
+    // Group by repository
+    const groupMap = new Map<string, Array<ReturnType<typeof mapAgentDefinition>>>()
+    for (const row of result.rows) {
+      const source = row.source as string
+      const repoName = source.replace(/^repo:/, '')
+      if (!groupMap.has(repoName)) {
+        groupMap.set(repoName, [])
+      }
+      groupMap.get(repoName)!.push(mapAgentDefinition(row))
+    }
+
+    return Array.from(groupMap.entries()).map(([repoName, agents]) => ({
+      repoName,
+      agents,
+    }))
+  },
+
   async pipelineStatus(_: unknown, args: { taskId: string }, ctx: Context) {
     const taskResult = await ctx.pool.query<Record<string, unknown>>(
       'SELECT * FROM tasks WHERE id = $1',
@@ -207,6 +266,33 @@ export const Query = {
       })),
     }
   },
+}
+
+function parseAgentSource(source: string): { sourceEnum: string; sourceRepo: string | null } {
+  if (source === 'default') return { sourceEnum: 'DEFAULT', sourceRepo: null }
+  if (source.startsWith('global:')) return { sourceEnum: 'GLOBAL_CONFIG', sourceRepo: source.slice(7) }
+  if (source.startsWith('repo:')) return { sourceEnum: 'REPOSITORY', sourceRepo: source.slice(5) }
+  return { sourceEnum: 'DEFAULT', sourceRepo: null }
+}
+
+export function mapAgentDefinition(row: Record<string, unknown>) {
+  const source = (row.source as string) ?? 'default'
+  const { sourceEnum, sourceRepo } = parseAgentSource(source)
+  return {
+    name: row.name,
+    version: row.version,
+    description: row.description,
+    source: sourceEnum,
+    sourceRepo,
+    spec: row.modified_spec ?? row.spec,
+    isDisabled: row.is_disabled === true,
+    isModified: row.modified_spec != null,
+    modifiedSpec: row.modified_spec ?? null,
+    activeCount: parseInt(String(row.active_count ?? '0'), 10),
+    totalExecutions: parseInt(String(row.total_executions ?? '0'), 10),
+    totalTokensUsed: parseInt(String(row.total_tokens_used ?? '0'), 10),
+    lastExecutionAt: row.last_execution_at ?? null,
+  }
 }
 
 export function mapRepository(row: Record<string, unknown>) {

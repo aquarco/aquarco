@@ -309,6 +309,110 @@ export const GET_AGENT_INSTANCES = gql`
   }
 `
 
+export const GET_GLOBAL_AGENTS = gql`
+  query GetGlobalAgents {
+    globalAgents {
+      name
+      version
+      description
+      source
+      sourceRepo
+      spec
+      isDisabled
+      isModified
+      modifiedSpec
+      activeCount
+      totalExecutions
+      totalTokensUsed
+      lastExecutionAt
+    }
+  }
+`
+
+export const GET_REPO_AGENT_GROUPS = gql`
+  query GetRepoAgentGroups {
+    repoAgentGroups {
+      repoName
+      agents {
+        name
+        version
+        description
+        source
+        sourceRepo
+        spec
+        isDisabled
+        isModified
+        modifiedSpec
+        activeCount
+        totalExecutions
+        totalTokensUsed
+        lastExecutionAt
+      }
+    }
+  }
+`
+
+export const SET_AGENT_DISABLED = gql`
+  mutation SetAgentDisabled($name: String!, $scope: String!, $disabled: Boolean!) {
+    setAgentDisabled(name: $name, scope: $scope, disabled: $disabled) {
+      agent {
+        name
+        isDisabled
+      }
+      errors {
+        field
+        message
+      }
+    }
+  }
+`
+
+export const MODIFY_AGENT = gql`
+  mutation ModifyAgent($name: String!, $scope: String!, $spec: JSON!) {
+    modifyAgent(name: $name, scope: $scope, spec: $spec) {
+      agent {
+        name
+        spec
+        isModified
+        modifiedSpec
+      }
+      errors {
+        field
+        message
+      }
+    }
+  }
+`
+
+export const RESET_AGENT_MODIFICATION = gql`
+  mutation ResetAgentModification($name: String!, $scope: String!) {
+    resetAgentModification(name: $name, scope: $scope) {
+      agent {
+        name
+        spec
+        isModified
+        modifiedSpec
+      }
+      errors {
+        field
+        message
+      }
+    }
+  }
+`
+
+export const CREATE_AGENT_PR = gql`
+  mutation CreateAgentPR($repoName: String!) {
+    createAgentPR(repoName: $repoName) {
+      prUrl
+      errors {
+        field
+        message
+      }
+    }
+  }
+`
+
 // ── Task mutations ────────────────────────────────────────────────────────────
 
 export const CREATE_TASK = gql`
