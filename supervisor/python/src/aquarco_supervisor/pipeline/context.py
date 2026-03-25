@@ -11,19 +11,35 @@ log = get_logger("context")
 # Fields to keep when summarizing older stages
 SUMMARY_FIELDS = ("stage_number", "category", "agent", "status", "summary", "stage_key", "iteration")
 
+# Fields to strip from every stage — they duplicate data already passed to earlier
+# stages and bloat the context window without adding value.
+_STRIP_FIELDS = frozenset(("input", "raw_output"))
+
+# Statuses that provide no useful output for downstream stages
+_USELESS_STATUSES = frozenset(("failed", "pending", "rate_limited"))
+
+
+def _clean_stage(stage: dict[str, Any]) -> dict[str, Any]:
+    """Remove bulky/redundant fields from a stage entry."""
+    return {k: v for k, v in stage.items() if k not in _STRIP_FIELDS}
+
 
 def build_accumulated_context(
     task_context: dict[str, Any],
     current_stage: int,
-    previous_output: dict[str, Any] | None,
     *,
     validation_items: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the accumulated context for a pipeline stage.
 
-    Recent stages (within 2 of current) get full output.
+    Recent completed stages (within 2 of current) get full output.
     Older stages get only summary fields.
-    Multi-agent stages at the same stage_number are grouped together.
+    Failed, pending, and future stages are excluded entirely.
+    The ``input`` field is always stripped — it duplicates data the
+    previous stage already received.
+
+    Agents can find the previous stage's output in the last entry of
+    ``stage_history`` — there is no separate ``previous_output`` key.
     """
     stage_history = []
     stages = task_context.get("stages", [])
@@ -35,21 +51,28 @@ def build_accumulated_context(
         stages_by_num.setdefault(stage_num, []).append(stage)
 
     for stage_num in sorted(stages_by_num):
+        # Skip future stages — they have no output yet
+        if stage_num >= current_stage:
+            continue
+
         group = stages_by_num[stage_num]
         if current_stage - stage_num <= 2:
-            # Recent stages: include full output
+            # Recent stages: include full output (minus redundant fields)
             for stage in group:
-                stage_history.append(stage)
+                if stage.get("status") in _USELESS_STATUSES:
+                    continue
+                stage_history.append(_clean_stage(stage))
         else:
             # Older stages: include only summary
             for stage in group:
+                if stage.get("status") in _USELESS_STATUSES:
+                    continue
                 summary = {k: stage.get(k) for k in SUMMARY_FIELDS if k in stage}
                 stage_history.append(summary)
 
     result: dict[str, Any] = {
         "task": task_context.get("task", {}),
         "current_stage": current_stage,
-        "previous_output": previous_output or {},
         "stage_history": stage_history,
         "context_entries": task_context.get("context_entries", []),
     }

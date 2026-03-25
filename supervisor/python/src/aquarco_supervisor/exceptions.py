@@ -69,6 +69,14 @@ class AgentTimeoutError(AgentExecutionError):
     """Agent exceeded its time limit."""
 
 
+class AgentInactivityError(AgentExecutionError):
+    """Claude process killed due to inactivity after emitting StructuredOutput."""
+
+
+class RateLimitError(AgentExecutionError):
+    """Claude API rate limit (429) hit — task should be postponed."""
+
+
 # --- Agent Registry ---
 
 

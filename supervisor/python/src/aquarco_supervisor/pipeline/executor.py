@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 import shutil
-import tempfile
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +19,7 @@ from ..config_overlay import (
     resolve_config,
 )
 from ..database import Database
-from ..exceptions import NoAvailableAgentError, PipelineError, StageError
+from ..exceptions import NoAvailableAgentError, PipelineError, RateLimitError, StageError
 from ..logging import get_logger
 from ..models import Complexity, PipelineConfig, TaskPhase
 from ..task_queue import TaskQueue
@@ -180,11 +180,53 @@ class PipelineExecutor:
         # --- Phase 3: Running with iteration loops ---
         await self._tq.update_task_phase(task_id, TaskPhase.RUNNING)
         clone_dir = await self._resolve_clone_dir(task_id)
-        branch_name = await self._setup_branch(task_id, context, clone_dir)
+
+        # Create a per-task worktree so parallel tasks on the same repo
+        # don't clobber each other's working directory.  We use --detach
+        # to avoid conflicts when the branch is already checked out in the
+        # main clone or another worktree.
+        #
+        # Worktrees live under /var/lib/aquarco/worktrees (not /tmp) so they
+        # survive service restarts and are not wiped by PrivateTmp or tmpfiles.
+        safe_task_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)
+        worktree_base = Path("/var/lib/aquarco/worktrees")
+        worktree_base.mkdir(parents=True, exist_ok=True)
+        work_dir = str(worktree_base / safe_task_id)
+
+        if Path(work_dir).exists() and start_stage > 0:
+            # Resuming: reuse worktree with previous commits
+            log.info("task_worktree_reused", task_id=task_id, work_dir=work_dir)
+        elif Path(work_dir).exists():
+            # Fresh start but stale worktree — clean and recreate
+            try:
+                await _run_git(clone_dir, "worktree", "remove", work_dir, "--force")
+            except Exception:
+                shutil.rmtree(work_dir, ignore_errors=True)
+            await _run_git(clone_dir, "worktree", "add", "--detach", work_dir)
+        else:
+            await _run_git(clone_dir, "worktree", "add", "--detach", work_dir)
+
+        branch_name = await self._setup_branch(
+            task_id, context, work_dir, resuming=start_stage > 0,
+        )
+
+        # Persist branch_name on the task for later reference
+        await self._db.execute(
+            "UPDATE tasks SET branch_name = %(branch)s WHERE id = %(id)s",
+            {"id": task_id, "branch": branch_name},
+        )
+
+        log.info(
+            "task_worktree_created",
+            task_id=task_id,
+            clone_dir=clone_dir,
+            work_dir=work_dir,
+            branch=branch_name,
+        )
 
         try:
             failed = await self._execute_running_phase(
-                task_id, planned_stages, stages, context, clone_dir, branch_name,
+                task_id, planned_stages, stages, work_dir, branch_name,
                 start_stage=start_stage,
                 scoped_view=scoped_view,
             )
@@ -193,11 +235,33 @@ class PipelineExecutor:
                 scoped_view.cleanup()
 
         if failed:
+            # Keep worktree on failure for debugging / resume.
+            log.info(
+                "task_worktree_kept",
+                task_id=task_id,
+                work_dir=work_dir,
+                reason="pipeline_failed",
+            )
             return
 
-        # Pipeline completed successfully
+        # Pipeline completed successfully — commit any leftovers, then create PR.
+        # Keep worktree alive for potential rerun; close_task_resources() cleans it.
+        # Push directly from the worktree — the branch is checked out here, so
+        # we cannot checkout it in clone_dir (git forbids the same branch in
+        # two worktrees).  The worktree shares the object store and remotes.
+        try:
+            await _run_git(work_dir, "add", "-A")
+            status = await _run_git(work_dir, "status", "--porcelain")
+            if status.strip():
+                await _run_git(
+                    work_dir, "commit", "-m",
+                    f"chore(aquarco): uncommitted changes for {task_id}",
+                )
+        except Exception:
+            log.warning("task_worktree_final_commit_failed", task_id=task_id)
+
         await self._tq.update_task_phase(task_id, TaskPhase.COMPLETED)
-        await self._create_pipeline_pr(task_id, branch_name, clone_dir, {})
+        await self._create_pipeline_pr(task_id, branch_name, work_dir, {})
         await self._tq.complete_task(task_id)
         await self._tq.delete_checkpoint(task_id)
         log.info("pipeline_completed", task_id=task_id, pipeline=pipeline_name)
@@ -296,7 +360,6 @@ class PipelineExecutor:
         task_id: str,
         planned_stages: list[dict[str, Any]],
         stage_defs: list[dict[str, Any]],
-        context: dict[str, Any],
         clone_dir: str,
         branch_name: str,
         *,
@@ -341,7 +404,7 @@ class PipelineExecutor:
                 if parallel and len(agents) > 1:
                     stage_output = await self._execute_parallel_agents(
                         task_id, stage_num, category, agents,
-                        context, previous_output, clone_dir, branch_name,
+                        clone_dir, branch_name,
                         scoped_view=scoped_view,
                     )
                 else:
@@ -350,12 +413,13 @@ class PipelineExecutor:
                     for agent_name in agents:
                         task_context = await self._tq.get_task_context(task_id) or {}
                         accumulated = build_accumulated_context(
-                            task_context, stage_num, previous_output,
+                            task_context, stage_num,
                         )
                         out = await self._execute_planned_stage(
                             task_id, stage_num, category, agent_name,
-                            accumulated, previous_output, iteration=1,
+                            accumulated, iteration=1,
                             scoped_view=scoped_view,
+                            work_dir=clone_dir,
                         )
                         stage_output.update(out)
 
@@ -394,15 +458,16 @@ class PipelineExecutor:
                         )
                         task_context = await self._tq.get_task_context(task_id) or {}
                         accumulated = build_accumulated_context(
-                            task_context, stage_num, previous_output,
+                            task_context, stage_num,
                             validation_items=vi_in,
                         )
                         out = await self._execute_planned_stage(
                             task_id, stage_num, category, agent_name,
-                            accumulated, previous_output,
+                            accumulated,
                             iteration=current_iteration,
                             validation_items_in=vi_in,
                             scoped_view=scoped_view,
+                            work_dir=clone_dir,
                         )
                         stage_output.update(out)
                         await self._process_validation_items(task_id, sk, out)
@@ -412,6 +477,27 @@ class PipelineExecutor:
                 # Checkpoint and auto-commit
                 await self._tq.checkpoint_pipeline(task_id, stage_num)
                 await _auto_commit(clone_dir, task_id, stage_num, category)
+
+            except RateLimitError as e:
+                # Rate limited — checkpoint progress and postpone the task.
+                await self._tq.checkpoint_pipeline(task_id, stage_num - 1 if stage_num > 0 else 0)
+                await self._tq.rate_limit_task(task_id, str(e))
+                # Mark the latest run of each agent's stage as rate_limited.
+                for agent_name in agents:
+                    sk = f"{stage_num}:{category}:{agent_name}"
+                    await self._db.execute(
+                        """
+                        UPDATE stages SET status = 'rate_limited', completed_at = NOW(),
+                               error_message = %(error)s
+                        WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
+                              AND run = (
+                                  SELECT MAX(run) FROM stages
+                                  WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
+                              )
+                        """,
+                        {"task_id": task_id, "stage_key": sk, "error": str(e)},
+                    )
+                return True
 
             except (StageError, NoAvailableAgentError) as e:
                 if required:
@@ -440,42 +526,73 @@ class PipelineExecutor:
         category: str,
         agent_name: str,
         context: dict[str, Any],
-        previous_output: dict[str, Any],
         *,
         iteration: int = 1,
         validation_items_in: list[dict[str, Any]] | None = None,
         scoped_view: ScopedAgentView | None = None,
+        work_dir: str | None = None,
     ) -> dict[str, Any]:
         """Execute a single planned stage with a specific agent."""
         stage_key = f"{stage_num}:{category}:{agent_name}"
 
+        # Determine run number: if a previous run failed/rate_limited, create a retry
+        run = 1
+        latest = await self._tq.get_latest_stage_run(task_id, stage_key, iteration)
+        if latest and latest["status"] in ("failed", "rate_limited"):
+            run = latest["run"] + 1
+            await self._tq.create_rerun_stage(
+                task_id, stage_num, category, agent_name,
+                stage_key, iteration, run,
+            )
+            log.info(
+                "stage_retry_run",
+                task_id=task_id,
+                stage_key=stage_key,
+                iteration=iteration,
+                run=run,
+                previous_status=latest["status"],
+            )
+        elif latest and latest["status"] == "pending":
+            run = latest["run"]
+
         await self._tq.record_stage_executing(
             task_id, stage_num, category, agent_name,
-            stage_key=stage_key, iteration=iteration,
+            stage_key=stage_key, iteration=iteration, run=run,
             input_context=context,
         )
         await self._registry.increment_agent_instances(agent_name)
 
+        # Build live-output callback so CLI pushes debug log tail to DB
+        async def _live_output_cb(tail: str) -> None:
+            try:
+                await self._tq.update_stage_live_output(
+                    task_id, stage_key, iteration, run, tail,
+                )
+            except Exception:
+                pass  # best-effort, don't break execution
+
         try:
             output = await self._execute_agent(
-                agent_name, task_id, context, previous_output, stage_num,
+                agent_name, task_id, context, stage_num,
+                work_dir=work_dir,
                 scoped_view=scoped_view,
+                on_live_output=_live_output_cb,
             )
             await self._tq.store_stage_output(
                 task_id, stage_num, category, agent_name, output,
-                stage_key=stage_key, iteration=iteration,
+                stage_key=stage_key, iteration=iteration, run=run,
                 validation_items_in=validation_items_in,
                 validation_items_out=output.get("validation_items_new"),
             )
             return output
-        except StageError:
+        except (StageError, RateLimitError):
             raise
         except asyncio.CancelledError:
             raise
         except Exception as e:
             await self._tq.record_stage_failed(
                 task_id, stage_num, str(e),
-                stage_key=stage_key, iteration=iteration,
+                stage_key=stage_key, iteration=iteration, run=run,
             )
             raise StageError(
                 f"Stage {stage_num} ({category}/{agent_name}) failed: {e}"
@@ -489,8 +606,6 @@ class PipelineExecutor:
         stage_num: int,
         category: str,
         agents: list[str],
-        context: dict[str, Any],
-        previous_output: dict[str, Any],
         clone_dir: str,
         branch_name: str,
         *,
@@ -511,9 +626,16 @@ class PipelineExecutor:
             # Create a worktree per agent
             for agent_name in agents:
                 safe_agent = re.sub(r"[^a-zA-Z0-9._-]", "-", agent_name)
-                wt_dir = tempfile.mkdtemp(
-                    prefix=f"wt-{safe_task_id}-{safe_agent}-"
+                wt_base = Path("/var/lib/aquarco/worktrees")
+                wt_base.mkdir(parents=True, exist_ok=True)
+                wt_dir = str(
+                    wt_base / f"{safe_task_id}-{safe_agent}-s{stage_num}"
                 )
+                if Path(wt_dir).exists():
+                    try:
+                        await _run_git(clone_dir, "worktree", "remove", wt_dir, "--force")
+                    except Exception:
+                        shutil.rmtree(wt_dir, ignore_errors=True)
                 await _run_git(
                     clone_dir, "worktree", "add", wt_dir, branch_name,
                 )
@@ -525,12 +647,13 @@ class PipelineExecutor:
             ) -> dict[str, Any]:
                 task_context = await self._tq.get_task_context(task_id) or {}
                 accumulated = build_accumulated_context(
-                    task_context, stage_num, previous_output,
+                    task_context, stage_num,
                 )
                 return await self._execute_planned_stage(
                     task_id, stage_num, category, agent_name,
-                    accumulated, previous_output, iteration=1,
+                    accumulated, iteration=1,
                     scoped_view=scoped_view,
+                    work_dir=wt_dir,
                 )
 
             results = await asyncio.gather(
@@ -659,7 +782,6 @@ class PipelineExecutor:
         category: str,
         task_id: str,
         context: dict[str, Any],
-        previous_output: dict[str, Any],
         stage_num: int,
     ) -> dict[str, Any]:
         """Execute a single pipeline stage (legacy path, dynamic agent selection)."""
@@ -669,7 +791,7 @@ class PipelineExecutor:
 
         try:
             output = await self._execute_agent(
-                agent_name, task_id, context, previous_output, stage_num
+                agent_name, task_id, context, stage_num
             )
             return output
         except StageError:
@@ -687,11 +809,11 @@ class PipelineExecutor:
         agent_name: str,
         task_id: str,
         context: dict[str, Any],
-        previous_output: dict[str, Any],
         stage_num: int,
         *,
         work_dir: str | None = None,
         scoped_view: ScopedAgentView | None = None,
+        on_live_output: Callable[[str], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Invoke the Claude CLI for an agent, with automatic continuation.
 
@@ -711,7 +833,6 @@ class PipelineExecutor:
             "agent": agent_name,
             "stage_number": stage_num,
             "accumulated_context": context,
-            "previous_stage_output": previous_output,
         }
 
         cumulative_cost = 0.0
@@ -719,7 +840,6 @@ class PipelineExecutor:
         iteration = 0
         max_resume_iterations = 10
         last_successful_output: dict[str, Any] | None = None
-        raw_outputs: list[str] = []
 
         while True:
             claude_output = await execute_claude(
@@ -735,10 +855,10 @@ class PipelineExecutor:
                 output_schema=cfg.get_agent_output_schema(agent_name),
                 max_turns=max_turns,
                 resume_session_id=resume_session_id,
+                on_live_output=on_live_output,
             )
 
             output = claude_output.structured
-            raw_outputs.append(claude_output.raw)
             iteration_cost = output.get("_cost_usd", 0.0)
             if "_cost_usd" not in output:
                 log.warning(
@@ -813,8 +933,6 @@ class PipelineExecutor:
             output = last_successful_output
 
         output["_agent_name"] = agent_name
-        output["_raw_output"] = raw_outputs[-1] if raw_outputs else claude_output.raw
-        output["_raw_outputs_all"] = raw_outputs
         output["_iterations"] = iteration
 
         # Save output log (sanitize task_id to prevent path traversal)
@@ -845,21 +963,30 @@ class PipelineExecutor:
         return clone_dir
 
     async def _setup_branch(
-        self, task_id: str, context: dict[str, Any], clone_dir: str
+        self,
+        task_id: str,
+        context: dict[str, Any],
+        work_dir: str,
+        *,
+        resuming: bool = False,
     ) -> str:
-        """Set up the git branch for pipeline execution."""
+        """Set up the git branch for pipeline execution.
+
+        ``work_dir`` may be the main clone **or** a detached worktree.
+        When *resuming* a checkpointed pipeline, the branch already has
+        commits from previous stages — we must **not** reset it to
+        origin/base.
+        """
         head_branch: str | None = context.get("head_branch")
         if head_branch:
-            # Validate branch name from external context before passing to git.
             if not _SAFE_BRANCH_RE.match(head_branch):
                 raise PipelineError(
                     f"Rejected unsafe head_branch value: '{head_branch}'"
                 )
-            # PR review: use existing branch
-            await _git_checkout(clone_dir, head_branch)
+            await _run_git(work_dir, "checkout", "-B", head_branch, head_branch)
             return head_branch
 
-        # Feature pipeline: create new branch
+        # Feature pipeline
         task = await self._tq.get_task(task_id)
         if not task:
             raise PipelineError(f"Task {task_id} not found")
@@ -867,15 +994,18 @@ class PipelineExecutor:
         slug = re.sub(r"[^a-z0-9]+", "-", task.title.lower()).strip("-")[:50]
         branch_name = f"aquarco/{task_id}/{slug}"
 
-        # Use the repo's configured default branch
-        base_branch = await self._get_repo_branch(task_id)
-        await _run_git(clone_dir, "fetch", "origin")
-        try:
-            await _run_git(clone_dir, "checkout", "-b", branch_name, f"origin/{base_branch}")
-        except RuntimeError:
-            # Branch already exists from a previous (failed/timed-out) attempt — reuse it
-            await _run_git(clone_dir, "checkout", branch_name)
-            await _run_git(clone_dir, "reset", "--hard", f"origin/{base_branch}")
+        await _run_git(work_dir, "fetch", "origin")
+
+        if resuming:
+            # Branch already exists with work from earlier stages — just
+            # check it out without resetting to origin/base.
+            await _run_git(work_dir, "checkout", "-B", branch_name, branch_name)
+        else:
+            # Fresh start: create or reset the branch from origin/base.
+            base_branch = await self._get_repo_branch(task_id)
+            await _run_git(
+                work_dir, "checkout", "-B", branch_name, f"origin/{base_branch}",
+            )
         return branch_name
 
     async def _get_repo_branch(self, task_id: str) -> str:
@@ -927,16 +1057,49 @@ class PipelineExecutor:
                 log.info("no_commits_to_push", task_id=task_id)
                 return
 
+            await _run_git(
+                clone_dir, "fetch", "origin",
+                f"+refs/heads/{branch_name}:refs/remotes/origin/{branch_name}",
+                check=False,
+            )
             await _run_git(clone_dir, "push", "origin", branch_name, "--force-with-lease")
             repo_slug = await self._get_repo_slug(task_id)
             if repo_slug:
-                await _run_cmd(
+                pr_output = await _run_cmd(
                     "gh", "pr", "create",
                     "--repo", repo_slug,
                     "--head", branch_name,
                     "--title", f"feat: {task.title}",
                     "--body", f"Automated PR for task {task_id}",
                 )
+                # Parse PR number from URL (e.g. https://github.com/.../pull/42)
+                if pr_output:
+                    pr_match = re.search(r"/pull/(\d+)", pr_output)
+                    if pr_match:
+                        pr_number = int(pr_match.group(1))
+                        await self._tq.store_pr_info(
+                            task_id, pr_number, branch_name,
+                        )
+
+    async def close_task_resources(self, task_id: str) -> None:
+        """Remove worktrees for a closed task."""
+        safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)
+        worktree_base = Path("/var/lib/aquarco/worktrees")
+        work_dir = worktree_base / safe_id
+
+        if work_dir.exists():
+            clone_dir = await self._resolve_clone_dir(task_id)
+            try:
+                await _run_git(
+                    clone_dir, "worktree", "remove", str(work_dir), "--force",
+                )
+            except Exception:
+                shutil.rmtree(work_dir, ignore_errors=True)
+            log.info("task_worktree_cleaned", task_id=task_id, work_dir=str(work_dir))
+
+        # Clean parallel agent worktrees
+        for wt in worktree_base.glob(f"{safe_id}-*"):
+            shutil.rmtree(wt, ignore_errors=True)
 
     async def _get_repo_slug(self, task_id: str) -> str | None:
         """Get the owner/repo slug for a task's repository."""

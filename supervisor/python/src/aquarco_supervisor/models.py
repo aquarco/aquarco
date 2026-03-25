@@ -18,6 +18,8 @@ class TaskStatus(str, enum.Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     TIMEOUT = "timeout"
+    RATE_LIMITED = "rate_limited"
+    CLOSED = "closed"
 
 
 class StageStatus(str, enum.Enum):
@@ -26,6 +28,7 @@ class StageStatus(str, enum.Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+    RATE_LIMITED = "rate_limited"
 
 
 class CloneStatus(str, enum.Enum):
@@ -103,7 +106,11 @@ class Task(BaseModel):
     assigned_agent: str | None = None
     current_stage: int = 0
     retry_count: int = 0
+    rate_limit_count: int = 0
     error_message: str | None = None
+    parent_task_id: str | None = None
+    pr_number: int | None = None
+    branch_name: str | None = None
 
 
 class Stage(BaseModel):

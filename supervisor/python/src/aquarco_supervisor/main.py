@@ -13,6 +13,7 @@ from typing import Any
 import typer
 
 from .cli.agents import app as agents_app
+from .exceptions import RateLimitError
 from .cli.auth_helper import auth_watch
 from .cli.repo_manager import repo_app
 from .cli.status import status
@@ -167,6 +168,14 @@ class Supervisor:
                 # Check timed-out tasks
                 await self._check_timed_out_tasks()
 
+                # Resume rate-limited tasks whose cooldown has elapsed
+                await self._resume_rate_limited_tasks()
+
+                # Close completed tasks whose PRs have been merged
+                if self._should_run("close-merged", 300):
+                    await self._close_merged_tasks()
+                    self._mark_ran("close-merged")
+
                 # Health report
                 await self._maybe_report_health()
 
@@ -242,6 +251,9 @@ class Supervisor:
         try:
             await self._tq.assign_agent(task_id, "pending-assignment")
             await self._executor.execute_pipeline(pipeline, task_id, initial_context)
+        except RateLimitError:
+            # Already handled inside execute_pipeline (task marked rate_limited).
+            log.info("task_rate_limited_stopped", task_id=task_id)
         except Exception:
             log.exception("task_execution_error", task_id=task_id)
             if self._tq:
@@ -255,6 +267,68 @@ class Supervisor:
         for task_id in timed_out:
             log.warning("task_timed_out", task_id=task_id)
             await self._tq.fail_task(task_id, "Task execution timed out (90 min)")
+
+    async def _resume_rate_limited_tasks(self) -> None:
+        """Move rate-limited tasks back to pending after cooldown (1 hour)."""
+        if not self._tq:
+            return
+        task_ids = await self._tq.get_rate_limited_tasks(cooldown_minutes=60)
+        for task_id in task_ids:
+            log.info("resuming_rate_limited_task", task_id=task_id)
+            await self._tq.resume_rate_limited_task(task_id)
+
+    async def _close_merged_tasks(self) -> None:
+        """Auto-close completed tasks whose PRs have been merged."""
+        if not self._tq or not self._executor or not self._db:
+            return
+        tasks = await self._tq.get_tasks_pending_close()
+        for task_info in tasks:
+            task_id = task_info["id"]
+            pr_number = task_info["pr_number"]
+            repository = task_info["repository"]
+            try:
+                # Look up repo slug
+                row = await self._db.fetch_one(
+                    "SELECT url FROM repositories WHERE name = %(name)s",
+                    {"name": repository},
+                )
+                if not row:
+                    continue
+                slug = url_to_slug(row["url"])
+                if not slug:
+                    continue
+
+                proc = await asyncio.create_subprocess_exec(
+                    "gh", "pr", "view", str(pr_number),
+                    "--repo", slug,
+                    "--json", "state",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    stdout, _ = await asyncio.wait_for(
+                        proc.communicate(), timeout=15,
+                    )
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    continue
+
+                if proc.returncode != 0:
+                    continue
+
+                import json as _json
+                pr_data = _json.loads(stdout.decode())
+                if pr_data.get("state") == "MERGED":
+                    log.info(
+                        "auto_closing_merged_task",
+                        task_id=task_id,
+                        pr_number=pr_number,
+                    )
+                    await self._tq.close_task(task_id)
+                    await self._executor.close_task_resources(task_id)
+            except Exception:
+                log.exception("close_merged_task_error", task_id=task_id)
 
     async def _maybe_report_health(self) -> None:
         """Post a health report if the interval has elapsed."""

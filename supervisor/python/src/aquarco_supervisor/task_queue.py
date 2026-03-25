@@ -71,7 +71,8 @@ class TaskQueue:
                       status, phase, priority, initial_context, planned_stages,
                       created_at, updated_at,
                       started_at, completed_at, assigned_agent, current_stage,
-                      retry_count, error_message
+                      retry_count, error_message,
+                      parent_task_id, pr_number, branch_name
             """
         )
         if row is None:
@@ -120,7 +121,8 @@ class TaskQueue:
                    pipeline, repository, initial_context, planned_stages,
                    created_at, updated_at,
                    started_at, completed_at, assigned_agent, current_stage,
-                   retry_count, error_message
+                   retry_count, error_message,
+                   parent_task_id, pr_number, branch_name
             FROM tasks WHERE id = %(id)s
             """,
             {"id": task_id},
@@ -151,6 +153,85 @@ class TaskQueue:
         )
         log.warning("task_failed", task_id=task_id, error=error_message)
 
+    async def rate_limit_task(
+        self, task_id: str, error_message: str, *, max_rate_limit_retries: int = 24,
+    ) -> None:
+        """Mark task as rate-limited, or fail it if retries exhausted.
+
+        Each rate-limit hit increments ``rate_limit_count``.  After
+        *max_rate_limit_retries* (default 24 ≈ 1 day at 1 h cooldown) the
+        task is marked ``failed`` instead.
+        """
+        await self._db.execute(
+            """
+            UPDATE tasks
+            SET rate_limit_count = rate_limit_count + 1,
+                error_message = %(error)s,
+                status = CASE
+                    WHEN rate_limit_count + 1 >= %(max)s THEN 'failed'
+                    ELSE 'rate_limited'
+                END,
+                completed_at = CASE
+                    WHEN rate_limit_count + 1 >= %(max)s THEN NOW()
+                    ELSE NULL
+                END,
+                updated_at = NOW()
+            WHERE id = %(id)s
+            """,
+            {"id": task_id, "error": error_message, "max": max_rate_limit_retries},
+        )
+        row = await self._db.fetch_one(
+            "SELECT status, rate_limit_count FROM tasks WHERE id = %(id)s",
+            {"id": task_id},
+        )
+        if row and row["status"] == "failed":
+            log.warning(
+                "task_rate_limit_exhausted",
+                task_id=task_id,
+                rate_limit_count=row["rate_limit_count"],
+            )
+        else:
+            log.warning(
+                "task_rate_limited",
+                task_id=task_id,
+                rate_limit_count=row["rate_limit_count"] if row else 0,
+            )
+
+    async def get_rate_limited_tasks(self, cooldown_minutes: int = 60) -> list[str]:
+        """Return task IDs that have been rate-limited for longer than cooldown."""
+        rows = await self._db.fetch_all(
+            """
+            SELECT id FROM tasks
+            WHERE status = 'rate_limited'
+              AND updated_at < NOW() - make_interval(mins := %(cooldown)s)
+            ORDER BY updated_at ASC
+            """,
+            {"cooldown": cooldown_minutes},
+        )
+        return [r["id"] for r in rows]
+
+    async def resume_rate_limited_task(self, task_id: str) -> None:
+        """Move a rate-limited task back to pending for retry."""
+        await self._db.execute(
+            """
+            UPDATE tasks
+            SET status = 'pending', started_at = NULL, updated_at = NOW()
+            WHERE id = %(id)s AND status = 'rate_limited'
+            """,
+            {"id": task_id},
+        )
+        # Reset rate-limited stages back to pending
+        await self._db.execute(
+            """
+            UPDATE stages
+            SET status = 'pending', started_at = NULL, completed_at = NULL,
+                error_message = NULL
+            WHERE task_id = %(id)s AND status = 'rate_limited'
+            """,
+            {"id": task_id},
+        )
+        log.info("task_rate_limit_resumed", task_id=task_id)
+
     async def complete_task(self, task_id: str) -> None:
         """Mark a task as completed."""
         await self._db.execute(
@@ -173,6 +254,7 @@ class TaskQueue:
         *,
         stage_key: str | None = None,
         iteration: int = 1,
+        run: int = 1,
         validation_items_in: list[dict[str, Any]] | None = None,
         validation_items_out: list[dict[str, Any]] | None = None,
     ) -> None:
@@ -181,7 +263,7 @@ class TaskQueue:
         raw_output = output.pop("_raw_output", None)
         structured_json = json.dumps(output)
         if stage_key:
-            # New path: use stage_key + iteration for upsert
+            # New path: use stage_key + iteration + run for upsert
             await self._db.execute(
                 """
                 UPDATE stages
@@ -190,15 +272,17 @@ class TaskQueue:
                     raw_output = %(raw)s,
                     validation_items_in = %(vi_in)s::jsonb,
                     validation_items_out = %(vi_out)s::jsonb,
+                    live_output = NULL,
                     started_at = COALESCE(stages.started_at, NOW()),
                     completed_at = NOW()
                 WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
-                      AND iteration = %(iteration)s
+                      AND iteration = %(iteration)s AND run = %(run)s
                 """,
                 {
                     "task_id": task_id,
                     "stage_key": stage_key,
                     "iteration": iteration,
+                    "run": run,
                     "agent": agent,
                     "output": structured_json,
                     "raw": raw_output,
@@ -320,6 +404,7 @@ class TaskQueue:
         *,
         stage_key: str | None = None,
         iteration: int = 1,
+        run: int = 1,
         input_context: dict[str, Any] | None = None,
     ) -> None:
         """Record that a stage is now executing."""
@@ -331,12 +416,13 @@ class TaskQueue:
                 SET agent = %(agent)s, status = 'executing', started_at = NOW(),
                     input = %(input)s::jsonb
                 WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
-                      AND iteration = %(iteration)s
+                      AND iteration = %(iteration)s AND run = %(run)s
                 """,
                 {
                     "task_id": task_id,
                     "stage_key": stage_key,
                     "iteration": iteration,
+                    "run": run,
                     "agent": agent,
                     "input": json.dumps(input_context) if input_context else None,
                 },
@@ -366,6 +452,7 @@ class TaskQueue:
         *,
         stage_key: str | None = None,
         iteration: int = 1,
+        run: int = 1,
     ) -> None:
         """Record that a stage has failed."""
         if stage_key:
@@ -374,12 +461,13 @@ class TaskQueue:
                 UPDATE stages
                 SET status = 'failed', completed_at = NOW(), error_message = %(error)s
                 WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
-                      AND iteration = %(iteration)s
+                      AND iteration = %(iteration)s AND run = %(run)s
                 """,
                 {
                     "task_id": task_id,
                     "stage_key": stage_key,
                     "iteration": iteration,
+                    "run": run,
                     "error": error_message,
                 },
             )
@@ -587,6 +675,195 @@ class TaskQueue:
                 {"task_id": task_id},
             )
         return [ValidationItem.model_validate(r) for r in rows]
+
+    async def update_stage_live_output(
+        self,
+        task_id: str,
+        stage_key: str,
+        iteration: int,
+        run: int,
+        live_output: str,
+    ) -> None:
+        """Update the live_output column for an executing stage."""
+        await self._db.execute(
+            """
+            UPDATE stages
+            SET live_output = %(live_output)s
+            WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
+                  AND iteration = %(iteration)s AND run = %(run)s
+            """,
+            {
+                "task_id": task_id,
+                "stage_key": stage_key,
+                "iteration": iteration,
+                "run": run,
+                "live_output": live_output,
+            },
+        )
+
+    async def get_latest_stage_run(
+        self,
+        task_id: str,
+        stage_key: str,
+        iteration: int = 1,
+    ) -> dict[str, Any] | None:
+        """Return the latest run's status and run number for a stage."""
+        return await self._db.fetch_one(
+            """
+            SELECT status, run, error_message
+            FROM stages
+            WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
+                  AND iteration = %(iteration)s
+            ORDER BY run DESC
+            LIMIT 1
+            """,
+            {"task_id": task_id, "stage_key": stage_key, "iteration": iteration},
+        )
+
+    async def create_rerun_stage(
+        self,
+        task_id: str,
+        stage_num: int,
+        category: str,
+        agent: str,
+        stage_key: str,
+        iteration: int,
+        run: int,
+    ) -> None:
+        """Insert a new stage row for a rerun."""
+        await self._db.execute(
+            """
+            INSERT INTO stages
+                (task_id, stage_number, category, agent, status,
+                 stage_key, iteration, run)
+            VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s,
+                    'pending', %(stage_key)s, %(iteration)s, %(run)s)
+            """,
+            {
+                "task_id": task_id,
+                "stage": stage_num,
+                "category": category,
+                "agent": agent,
+                "stage_key": stage_key,
+                "iteration": iteration,
+                "run": run,
+            },
+        )
+
+    async def retry_task(self, task_id: str) -> None:
+        """Reset the latest failed/rate_limited stage and task to pending (RETRY semantics)."""
+        # Reset latest failed/rate_limited stage
+        await self._db.execute(
+            """
+            UPDATE stages
+            SET status = 'pending', error_message = NULL,
+                started_at = NULL, completed_at = NULL,
+                structured_output = NULL, raw_output = NULL, live_output = NULL
+            WHERE task_id = %(id)s AND id = (
+                SELECT id FROM stages WHERE task_id = %(id)s
+                AND status IN ('failed', 'rate_limited')
+                ORDER BY stage_number DESC, run DESC LIMIT 1
+            )
+            """,
+            {"id": task_id},
+        )
+        # Reset task to pending
+        await self._db.execute(
+            """
+            UPDATE tasks
+            SET status = 'pending', error_message = NULL, updated_at = NOW()
+            WHERE id = %(id)s
+            """,
+            {"id": task_id},
+        )
+        log.info("task_retried", task_id=task_id)
+
+    async def rerun_task(self, task_id: str) -> str:
+        """Create a new task referencing the original (RERUN semantics). Returns new task ID."""
+        # Count existing reruns to generate unique ID
+        count_row = await self._db.fetch_val(
+            """
+            SELECT COUNT(*) FROM tasks WHERE parent_task_id = %(id)s
+            """,
+            {"id": task_id},
+        )
+        n = (count_row or 0) + 1
+
+        original = await self._db.fetch_one(
+            """
+            SELECT id, title, source, source_ref, repository, pipeline, initial_context
+            FROM tasks WHERE id = %(id)s
+            """,
+            {"id": task_id},
+        )
+        if not original:
+            raise ValueError(f"Task {task_id} not found")
+
+        source_ref = original["source_ref"] or task_id
+        new_id = f"{source_ref}-rerun-{n}"
+
+        await self._db.execute(
+            """
+            INSERT INTO tasks
+                (id, title, source, source_ref, repository, pipeline,
+                 initial_context, parent_task_id)
+            VALUES (%(new_id)s, %(title)s, %(source)s, %(source_ref)s,
+                    %(repository)s, %(pipeline)s, %(context)s::jsonb,
+                    %(parent_id)s)
+            """,
+            {
+                "new_id": new_id,
+                "title": original["title"],
+                "source": original["source"],
+                "source_ref": original["source_ref"],
+                "repository": original["repository"],
+                "pipeline": original["pipeline"],
+                "context": json.dumps(original["initial_context"] or {}),
+                "parent_id": task_id,
+            },
+        )
+        log.info("task_rerun_created", task_id=task_id, new_task_id=new_id)
+        return new_id
+
+    async def close_task(self, task_id: str) -> None:
+        """Mark a task as closed and delete its checkpoint."""
+        await self._db.execute(
+            """
+            UPDATE tasks SET status = 'closed', updated_at = NOW()
+            WHERE id = %(id)s
+            """,
+            {"id": task_id},
+        )
+        await self._db.execute(
+            "DELETE FROM pipeline_checkpoints WHERE task_id = %(id)s",
+            {"id": task_id},
+        )
+        log.info("task_closed", task_id=task_id)
+
+    async def store_pr_info(
+        self, task_id: str, pr_number: int, branch_name: str
+    ) -> None:
+        """Save PR details after creation."""
+        await self._db.execute(
+            """
+            UPDATE tasks
+            SET pr_number = %(pr_number)s, branch_name = %(branch)s, updated_at = NOW()
+            WHERE id = %(id)s
+            """,
+            {"id": task_id, "pr_number": pr_number, "branch": branch_name},
+        )
+
+    async def get_tasks_pending_close(self) -> list[dict[str, Any]]:
+        """Find completed tasks with PR numbers (candidates for auto-close)."""
+        rows = await self._db.fetch_all(
+            """
+            SELECT id, pr_number, repository
+            FROM tasks
+            WHERE status = 'completed' AND pr_number IS NOT NULL
+            ORDER BY completed_at ASC
+            """
+        )
+        return [dict(r) for r in rows]
 
     async def get_max_iteration(self, task_id: str, stage_key: str) -> int:
         """Get the current max iteration count for a stage_key."""

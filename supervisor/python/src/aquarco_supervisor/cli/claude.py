@@ -7,11 +7,12 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..exceptions import AgentExecutionError, AgentTimeoutError
+from ..exceptions import AgentExecutionError, AgentInactivityError, AgentTimeoutError, RateLimitError
 from ..logging import get_logger
 
 
@@ -23,6 +24,103 @@ class ClaudeOutput:
     raw: str = ""
 
 log = get_logger("claude-cli")
+
+_STRUCTURED_OUTPUT_MARKER = "StructuredOutput"
+
+
+async def _monitor_for_inactivity(
+    debug_log: Path,
+    proc: asyncio.subprocess.Process,
+    *,
+    inactivity_timeout: float = 90.0,
+    poll_interval: float = 5.0,
+    task_id: str = "",
+    stage_num: int = 0,
+) -> bool:
+    """Monitor a Claude process for inactivity after StructuredOutput.
+
+    Polls the debug log's mtime. Once StructuredOutput is detected in the log
+    and mtime stops advancing for *inactivity_timeout* seconds, kills the process.
+
+    Returns True if the process was killed for inactivity, False otherwise.
+    """
+    structured_output_seen = False
+    last_mtime: float = 0.0
+    stale_since: float | None = None
+
+    while proc.returncode is None:
+        await asyncio.sleep(poll_interval)
+
+        # Process may have exited during sleep
+        if proc.returncode is not None:
+            return False
+
+        try:
+            current_mtime = debug_log.stat().st_mtime
+        except OSError:
+            continue
+
+        # Check for StructuredOutput marker if not yet seen
+        if not structured_output_seen:
+            try:
+                # Read only the tail of the file to avoid reading large logs
+                size = debug_log.stat().st_size
+                read_size = min(size, 8192)
+                with open(debug_log, "rb") as f:
+                    if size > read_size:
+                        f.seek(size - read_size)
+                    tail = f.read().decode("utf-8", errors="replace")
+                if _STRUCTURED_OUTPUT_MARKER in tail:
+                    structured_output_seen = True
+                    last_mtime = current_mtime
+                    stale_since = None
+            except OSError:
+                continue
+            continue
+
+        # StructuredOutput has been seen — track inactivity
+        if current_mtime != last_mtime:
+            last_mtime = current_mtime
+            stale_since = None
+        else:
+            if stale_since is None:
+                stale_since = asyncio.get_event_loop().time()
+            elif asyncio.get_event_loop().time() - stale_since >= inactivity_timeout:
+                log.warning(
+                    "claude_killed_inactivity",
+                    task_id=task_id,
+                    stage=stage_num,
+                    seconds_idle=inactivity_timeout,
+                )
+                proc.kill()
+                return True
+
+    return False
+
+
+async def _tail_debug_log(
+    debug_log: Path,
+    proc: asyncio.subprocess.Process,
+    callback: Callable[[str], Awaitable[None]],
+    *,
+    interval: float = 10.0,
+    max_bytes: int = 4096,
+) -> None:
+    """Periodically read the tail of the debug log and send it via callback."""
+    while proc.returncode is None:
+        await asyncio.sleep(interval)
+        if proc.returncode is not None:
+            break
+        try:
+            size = debug_log.stat().st_size
+            read_size = min(size, max_bytes)
+            with open(debug_log, "rb") as f:
+                if size > read_size:
+                    f.seek(size - read_size)
+                tail = f.read().decode("utf-8", errors="replace")
+            await callback(tail)
+        except Exception:
+            continue
 
 
 def _format_schema_prompt(schema: dict[str, Any]) -> str:
@@ -52,6 +150,7 @@ async def execute_claude(
     output_schema: dict[str, Any] | None = None,
     max_turns: int = 30,
     resume_session_id: str | None = None,
+    on_live_output: Callable[[str], Awaitable[None]] | None = None,
 ) -> ClaudeOutput:
     """Invoke the Claude CLI and return structured output.
 
@@ -139,15 +238,76 @@ async def execute_claude(
                 env=proc_env,
             )
 
-            try:
-                stdout, _ = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout_seconds
+            comm_task = asyncio.create_task(proc.communicate())
+            monitor_task = asyncio.create_task(
+                _monitor_for_inactivity(
+                    debug_log, proc,
+                    task_id=task_id, stage_num=stage_num,
                 )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                raise AgentTimeoutError(
-                    f"Claude CLI timed out after {timeout_seconds}s "
+            )
+
+            # Fire-and-forget: periodically push debug log tail to DB
+            live_output_task: asyncio.Task[None] | None = None
+            if on_live_output:
+                live_output_task = asyncio.create_task(
+                    _tail_debug_log(debug_log, proc, on_live_output)
+                )
+
+            killed_for_inactivity = False
+            try:
+                done, pending = await asyncio.wait(
+                    {comm_task, monitor_task},
+                    timeout=timeout_seconds,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if not done:
+                    # Overall timeout — neither task finished
+                    proc.kill()
+                    await proc.wait()
+                    for t in pending:
+                        t.cancel()
+                    raise AgentTimeoutError(
+                        f"Claude CLI timed out after {timeout_seconds}s "
+                        f"(task={task_id}, stage={stage_num})"
+                    )
+
+                if monitor_task in done and monitor_task.result():
+                    # Killed for inactivity after StructuredOutput
+                    killed_for_inactivity = True
+                    # Wait for communicate to finish collecting buffered output
+                    try:
+                        await asyncio.wait_for(comm_task, timeout=5.0)
+                    except (asyncio.TimeoutError, asyncio.CancelledError):
+                        pass
+
+                if comm_task.done():
+                    stdout, _ = comm_task.result()
+                else:
+                    # comm_task still pending — cancel and get whatever we can
+                    stdout = b""
+                    comm_task.cancel()
+            finally:
+                # Clean up any remaining tasks
+                bg_tasks: list[asyncio.Task[Any]] = [comm_task, monitor_task]
+                if live_output_task:
+                    bg_tasks.append(live_output_task)
+                for t in bg_tasks:
+                    if not t.done():
+                        t.cancel()
+                        try:
+                            await t
+                        except (asyncio.CancelledError, Exception):
+                            pass
+
+            if killed_for_inactivity:
+                # Try to parse whatever output was buffered
+                raw_output = stdout.decode("utf-8", errors="replace") if stdout else ""
+                if raw_output.strip():
+                    structured = _parse_output(raw_output, task_id, stage_num)
+                    return ClaudeOutput(structured=structured, raw=raw_output)
+                raise AgentInactivityError(
+                    f"Claude CLI killed after inactivity post-StructuredOutput "
                     f"(task={task_id}, stage={stage_num})"
                 )
 
@@ -170,6 +330,14 @@ async def execute_claude(
                 stdout_tail=raw_stdout[:500],
                 stderr_tail=raw_stderr,
             )
+
+            # Detect rate-limit errors from the debug log
+            if _is_rate_limited(debug_log):
+                raise RateLimitError(
+                    f"Claude API rate limited (429) "
+                    f"(task={task_id}, stage={stage_num})"
+                )
+
             raise AgentExecutionError(
                 f"Claude CLI exited with code {proc.returncode} "
                 f"(task={task_id}, stage={stage_num})"
@@ -314,3 +482,12 @@ def _extract_json(text: str) -> dict[str, Any] | None:
                 continue
 
     return None
+
+
+def _is_rate_limited(debug_log: Path) -> bool:
+    """Check whether the Claude CLI debug log contains 429 rate-limit errors."""
+    try:
+        text = debug_log.read_text(errors="replace")
+    except OSError:
+        return False
+    return "rate_limit_error" in text or "status code 429" in text.lower()
