@@ -129,15 +129,15 @@ export const Query = {
        LEFT JOIN agent_instances ai
          ON ai.agent_name = ad.name
        WHERE ad.is_active = true
-         AND ad.source LIKE 'repo:%'
+         AND (ad.source LIKE 'repo:%' OR ad.source LIKE 'autoload:%')
        ORDER BY ad.source, ad.name ASC`
     )
 
-    // Group by repository
+    // Group by repository (handles both repo: and autoload: prefixes)
     const groupMap = new Map<string, Array<ReturnType<typeof mapAgentDefinition>>>()
     for (const row of result.rows) {
       const source = row.source as string
-      const repoName = source.replace(/^repo:/, '')
+      const repoName = source.replace(/^(repo|autoload):/, '')
       if (!groupMap.has(repoName)) {
         groupMap.set(repoName, [])
       }
@@ -148,6 +148,18 @@ export const Query = {
       repoName,
       agents,
     }))
+  },
+
+  async repoAgentScan(_: unknown, args: { repoName: string }, ctx: Context) {
+    const result = await ctx.pool.query<Record<string, unknown>>(
+      `SELECT * FROM repo_agent_scans
+       WHERE repo_name = $1
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [args.repoName]
+    )
+    if (result.rows.length === 0) return null
+    return mapRepoAgentScan(result.rows[0])
   },
 
   async pipelineStatus(_: unknown, args: { taskId: string }, ctx: Context) {
@@ -253,6 +265,7 @@ function parseAgentSource(source: string): { sourceEnum: string; sourceRepo: str
   if (source === 'default') return { sourceEnum: 'DEFAULT', sourceRepo: null }
   if (source.startsWith('global:')) return { sourceEnum: 'GLOBAL_CONFIG', sourceRepo: source.slice(7) }
   if (source.startsWith('repo:')) return { sourceEnum: 'REPOSITORY', sourceRepo: source.slice(5) }
+  if (source.startsWith('autoload:')) return { sourceEnum: 'AUTOLOADED', sourceRepo: source.slice(9) }
   return { sourceEnum: 'DEFAULT', sourceRepo: null }
 }
 
@@ -316,6 +329,20 @@ export function mapRepository(row: Record<string, unknown>) {
     deployPublicKey: row.deploy_public_key ?? null,
     // taskCount resolved by Repository field resolver
     _name: row.name,
+  }
+}
+
+export function mapRepoAgentScan(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    repoName: row.repo_name,
+    status: (row.status as string).toUpperCase(),
+    agentsFound: row.agents_found ?? 0,
+    agentsCreated: row.agents_created ?? 0,
+    errorMessage: row.error_message ?? null,
+    startedAt: row.started_at ?? null,
+    completedAt: row.completed_at ?? null,
+    createdAt: row.created_at,
   }
 }
 

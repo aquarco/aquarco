@@ -1,6 +1,6 @@
 import { Context } from '../context.js'
 import { RepositoryRow, StageRow, ContextRow } from '../loaders.js'
-import { mapStage } from './queries.js'
+import { mapStage, mapRepoAgentScan } from './queries.js'
 
 // ---- Scalar resolvers ----
 
@@ -89,5 +89,52 @@ export const Repository = {
       [parent.name]
     )
     return parseInt(result.rows[0].count, 10)
+  },
+
+  async hasClaudeAgents(
+    parent: { name: string; cloneDir?: string; clone_dir?: string } | RepositoryRow,
+    _: unknown,
+    ctx: Context
+  ): Promise<boolean> {
+    // Check if autoloaded agents exist in DB for this repo
+    const result = await ctx.pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM agent_definitions
+       WHERE source = $1 AND is_active = true`,
+      [`autoload:${parent.name}`]
+    )
+    if (parseInt(result.rows[0].count, 10) > 0) return true
+
+    // Fallback: check filesystem if clone_dir is available
+    const cloneDir = (parent as Record<string, unknown>).cloneDir ?? (parent as Record<string, unknown>).clone_dir
+    if (cloneDir) {
+      try {
+        const fs = await import('node:fs')
+        const path = await import('node:path')
+        const reposBase = process.env.REPOS_BASE ?? '/home/agent/repos'
+        const relative = path.default.relative(reposBase, cloneDir as string)
+        const containerPath = path.default.join('/repos', relative)
+        const agentsDir = path.default.join(containerPath, '.claude', 'agents')
+        return fs.existsSync(agentsDir)
+      } catch {
+        return false
+      }
+    }
+    return false
+  },
+
+  async lastAgentScan(
+    parent: { name: string } | RepositoryRow,
+    _: unknown,
+    ctx: Context
+  ) {
+    const result = await ctx.pool.query<Record<string, unknown>>(
+      `SELECT * FROM repo_agent_scans
+       WHERE repo_name = $1
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [parent.name]
+    )
+    if (result.rows.length === 0) return null
+    return mapRepoAgentScan(result.rows[0])
   },
 }

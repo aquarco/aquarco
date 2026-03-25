@@ -130,6 +130,14 @@ export const GET_REPOSITORIES = gql`
       errorMessage
       deployPublicKey
       taskCount
+      hasClaudeAgents
+      lastAgentScan {
+        id
+        status
+        agentsFound
+        agentsCreated
+        createdAt
+      }
     }
   }
 `
@@ -401,6 +409,41 @@ export const RESET_AGENT_MODIFICATION = gql`
         field
         message
       }
+    }
+  }
+`
+
+export const RELOAD_REPO_AGENTS = gql`
+  mutation ReloadRepoAgents($repoName: String!) {
+    reloadRepoAgents(repoName: $repoName) {
+      scan {
+        id
+        repoName
+        status
+        agentsFound
+        agentsCreated
+        createdAt
+      }
+      errors {
+        field
+        message
+      }
+    }
+  }
+`
+
+export const GET_REPO_AGENT_SCAN = gql`
+  query GetRepoAgentScan($repoName: String!) {
+    repoAgentScan(repoName: $repoName) {
+      id
+      repoName
+      status
+      agentsFound
+      agentsCreated
+      errorMessage
+      startedAt
+      completedAt
+      createdAt
     }
   }
 `

@@ -23,7 +23,7 @@ export interface AgentDefinitionRow {
   name: string
   version: string
   description: string
-  source: 'DEFAULT' | 'GLOBAL_CONFIG' | 'REPOSITORY'
+  source: 'DEFAULT' | 'GLOBAL_CONFIG' | 'REPOSITORY' | 'AUTOLOADED'
   sourceRepo: string | null
   spec: unknown
   isDisabled: boolean
@@ -67,6 +67,9 @@ function SourceChip({ source, sourceRepo }: { source: string; sourceRepo: string
   }
   if (source === 'GLOBAL_CONFIG') {
     return <Chip label={sourceRepo ?? 'Global'} size="small" color="primary" variant="outlined" />
+  }
+  if (source === 'AUTOLOADED') {
+    return <Chip label={sourceRepo ? `${sourceRepo} (autoloaded)` : 'Autoloaded'} size="small" color="info" variant="outlined" />
   }
   return <Chip label={sourceRepo ?? 'Repo'} size="small" color="secondary" variant="outlined" />
 }

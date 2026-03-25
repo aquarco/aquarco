@@ -283,6 +283,65 @@ async def sync_pipeline_definitions_to_db(
 
 
 # ---------------------------------------------------------------------------
+# Autoloaded agents helpers
+# ---------------------------------------------------------------------------
+
+async def deactivate_autoloaded_agents(
+    db: Database,
+    repo_name: str,
+) -> int:
+    """Deactivate all previously autoloaded agents for a repository.
+
+    Sets is_active=false for all agents with source='autoload:<repo_name>'.
+    Returns the number of agents deactivated.
+    """
+    rows = await db.fetch_all(
+        """UPDATE agent_definitions
+           SET is_active = false
+           WHERE source = %(source)s AND is_active = true
+           RETURNING name""",
+        {"source": f"autoload:{repo_name}"},
+    )
+    count = len(rows)
+    log.info("autoloaded_agents_deactivated", repo_name=repo_name, count=count)
+    return count
+
+
+async def read_autoloaded_agents_from_db(
+    db: Database,
+    repo_name: str,
+) -> list[dict[str, Any]]:
+    """Fetch active autoloaded agents for a specific repository.
+
+    Returns full YAML-ready dicts for agents with source='autoload:<repo_name>'.
+    """
+    rows = await db.fetch_all(
+        """SELECT name, version, description, labels, spec, is_active
+           FROM agent_definitions
+           WHERE source = %(source)s AND is_active = true
+           ORDER BY name, version""",
+        {"source": f"autoload:{repo_name}"},
+    )
+    docs: list[dict[str, Any]] = []
+    for row in rows:
+        doc: dict[str, Any] = {
+            "apiVersion": AGENT_API_VERSION,
+            "kind": AGENT_KIND,
+            "metadata": {
+                "name": row["name"],
+                "version": row["version"],
+                "description": row["description"],
+            },
+            "spec": row["spec"],
+        }
+        labels = row.get("labels")
+        if labels:
+            doc["metadata"]["labels"] = labels
+        docs.append(doc)
+    return docs
+
+
+# ---------------------------------------------------------------------------
 # DB → Config  (read from database and serialize to YAML files)
 # ---------------------------------------------------------------------------
 

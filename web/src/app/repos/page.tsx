@@ -45,8 +45,18 @@ import FormControlLabel from '@mui/material/FormControlLabel'
 import FormGroup from '@mui/material/FormGroup'
 import Checkbox from '@mui/material/Checkbox'
 import SettingsIcon from '@mui/icons-material/Settings'
-import { GET_REPOSITORIES, REGISTER_REPOSITORY, REMOVE_REPOSITORY, RETRY_CLONE, SET_CONFIG_REPO, GITHUB_AUTH_STATUS, GITHUB_LOGIN_START, GITHUB_LOGIN_POLL, GITHUB_LOGOUT, GITHUB_REPOSITORIES } from '@/lib/graphql/queries'
+import Snackbar from '@mui/material/Snackbar'
+import SmartToyIcon from '@mui/icons-material/SmartToy'
+import { GET_REPOSITORIES, REGISTER_REPOSITORY, REMOVE_REPOSITORY, RETRY_CLONE, SET_CONFIG_REPO, GITHUB_AUTH_STATUS, GITHUB_LOGIN_START, GITHUB_LOGIN_POLL, GITHUB_LOGOUT, GITHUB_REPOSITORIES, RELOAD_REPO_AGENTS, GET_REPO_AGENT_SCAN } from '@/lib/graphql/queries'
 import { formatDate } from '@/lib/format'
+
+interface RepoAgentScanInfo {
+  id: string
+  status: string
+  agentsFound: number
+  agentsCreated: number
+  createdAt: string
+}
 
 interface Repository {
   name: string
@@ -59,6 +69,8 @@ interface Repository {
   errorMessage: string | null
   deployPublicKey: string | null
   taskCount: number
+  hasClaudeAgents: boolean
+  lastAgentScan: RepoAgentScanInfo | null
 }
 
 function getCloneStatusColor(status: string): ChipProps['color'] {
@@ -224,6 +236,48 @@ export default function ReposPage() {
     setLoginSuccess(null)
   }
 
+  const [snackbarMsg, setSnackbarMsg] = useState<string | null>(null)
+  const [scanningRepos, setScanningRepos] = useState<Set<string>>(new Set())
+
+  const [reloadRepoAgents] = useMutation(RELOAD_REPO_AGENTS, {
+    onCompleted: (result) => {
+      const errors = result?.reloadRepoAgents?.errors
+      if (errors?.length) {
+        setSnackbarMsg(errors.map((e: { message: string }) => e.message).join(', '))
+        return
+      }
+      const scan = result?.reloadRepoAgents?.scan
+      if (scan) {
+        setSnackbarMsg(`Agent scan started for ${scan.repoName}`)
+        setScanningRepos((prev) => new Set([...prev, scan.repoName]))
+        // Poll for scan completion
+        const pollInterval = setInterval(async () => {
+          const { data: scanData } = await refetch()
+          const repo = scanData?.repositories?.find((r: Repository) => r.name === scan.repoName)
+          const latestScan = repo?.lastAgentScan
+          if (latestScan && (latestScan.status === 'COMPLETED' || latestScan.status === 'FAILED')) {
+            clearInterval(pollInterval)
+            setScanningRepos((prev) => {
+              const next = new Set(prev)
+              next.delete(scan.repoName)
+              return next
+            })
+            if (latestScan.status === 'COMPLETED') {
+              setSnackbarMsg(`Scan complete: ${latestScan.agentsCreated} agent(s) loaded for ${scan.repoName}`)
+            } else {
+              setSnackbarMsg(`Scan failed for ${scan.repoName}`)
+            }
+          }
+        }, 2000)
+        // Auto-cleanup after 2 minutes
+        setTimeout(() => clearInterval(pollInterval), 120_000)
+      }
+    },
+    onError: (err) => {
+      setSnackbarMsg(err.message)
+    },
+  })
+
   const [retryClone] = useMutation(RETRY_CLONE, {
     onCompleted: () => refetch(),
   })
@@ -387,19 +441,47 @@ export default function ReposPage() {
                         <TableCell>{formatDate(repo.lastPulledAt)}</TableCell>
                         <TableCell align="right">{repo.taskCount ?? 0}</TableCell>
                         <TableCell align="right" sx={{ py: 0 }}>
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              if (confirm(`Remove repository "${repo.name}"?`)) {
-                                removeRepository({ variables: { name: repo.name } })
-                              }
-                            }}
-                            data-testid={`btn-remove-repo-${repo.name}`}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
+                          <Stack direction="row" spacing={0} justifyContent="flex-end">
+                            {repo.hasClaudeAgents && (
+                              <Tooltip title={
+                                scanningRepos.has(repo.name)
+                                  ? 'Scanning agents...'
+                                  : 'Reload .claude agents'
+                              }>
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    color="primary"
+                                    disabled={scanningRepos.has(repo.name) || repo.cloneStatus !== 'READY'}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      reloadRepoAgents({ variables: { repoName: repo.name } })
+                                    }}
+                                    data-testid={`btn-reload-agents-${repo.name}`}
+                                  >
+                                    {scanningRepos.has(repo.name) ? (
+                                      <CircularProgress size={18} />
+                                    ) : (
+                                      <SmartToyIcon fontSize="small" />
+                                    )}
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            )}
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (confirm(`Remove repository "${repo.name}"?`)) {
+                                  removeRepository({ variables: { name: repo.name } })
+                                }
+                              }}
+                              data-testid={`btn-remove-repo-${repo.name}`}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Stack>
                         </TableCell>
                       </TableRow>
                       {isError && (
@@ -642,6 +724,13 @@ export default function ReposPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={snackbarMsg !== null}
+        autoHideDuration={6000}
+        onClose={() => setSnackbarMsg(null)}
+        message={snackbarMsg}
+      />
 
       {/* GitHub Login dialog */}
       <Dialog open={loginDialogOpen} onClose={handleLoginDialogClose} maxWidth="xs" fullWidth>
