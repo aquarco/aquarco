@@ -1,5 +1,5 @@
 import { GraphQLResolveInfo, GraphQLScalarType, GraphQLScalarTypeConfig } from 'graphql';
-import { Context } from '../context.js';
+import { Context } from '../context';
 export type Maybe<T> = T | null;
 export type InputMaybe<T> = Maybe<T>;
 export type Exact<T extends { [key: string]: unknown }> = { [K in keyof T]: T[K] };
@@ -96,7 +96,7 @@ export type ContextEntry = {
   valueType: Scalars['String']['output'];
 };
 
-export type CreatePRPayload = {
+export type CreatePrPayload = {
   __typename?: 'CreatePRPayload';
   errors?: Maybe<Array<Error>>;
   prUrl?: Maybe<Scalars['String']['output']>;
@@ -169,7 +169,7 @@ export type Mutation = {
   claudeLogout: Scalars['Boolean']['output'];
   claudeSubmitCode: ClaudeLoginResult;
   closeTask: TaskPayload;
-  createAgentPR: CreatePRPayload;
+  createAgentPR: CreatePrPayload;
   createTask: TaskPayload;
   githubLoginPoll: GithubLoginResult;
   githubLoginStart: GithubDeviceCode;
@@ -337,12 +337,6 @@ export type QueryTasksArgs = {
   status?: InputMaybe<TaskStatus>;
 };
 
-export type RepoAgentGroup = {
-  __typename?: 'RepoAgentGroup';
-  agents: Array<AgentDefinition>;
-  repoName: Scalars['String']['output'];
-};
-
 export type RegisterRepositoryInput = {
   branch?: InputMaybe<Scalars['String']['input']>;
   cloneDir?: InputMaybe<Scalars['String']['input']>;
@@ -350,6 +344,12 @@ export type RegisterRepositoryInput = {
   name: Scalars['String']['input'];
   pollers?: InputMaybe<Array<Scalars['String']['input']>>;
   url: Scalars['String']['input'];
+};
+
+export type RepoAgentGroup = {
+  __typename?: 'RepoAgentGroup';
+  agents: Array<AgentDefinition>;
+  repoName: Scalars['String']['output'];
 };
 
 export type Repository = {
@@ -551,14 +551,14 @@ export type ResolversTypes = ResolversObject<{
   AgentDefinition: ResolverTypeWrapper<AgentDefinition>;
   AgentDefinitionPayload: ResolverTypeWrapper<AgentDefinitionPayload>;
   AgentInstance: ResolverTypeWrapper<AgentInstance>;
-  AgentSource: null;
+  AgentSource: AgentSource;
   Boolean: ResolverTypeWrapper<Scalars['Boolean']['output']>;
   ClaudeAuthStatus: ResolverTypeWrapper<ClaudeAuthStatus>;
   ClaudeLoginResult: ResolverTypeWrapper<ClaudeLoginResult>;
   ClaudeLoginStart: ResolverTypeWrapper<ClaudeLoginStart>;
   CloneStatus: null;
   ContextEntry: ResolverTypeWrapper<ContextEntry>;
-  CreatePRPayload: ResolverTypeWrapper<CreatePRPayload>;
+  CreatePRPayload: ResolverTypeWrapper<CreatePrPayload>;
   CreateTaskInput: CreateTaskInput;
   DashboardStats: ResolverTypeWrapper<DashboardStats>;
   DateTime: ResolverTypeWrapper<Scalars['DateTime']['output']>;
@@ -599,7 +599,7 @@ export type ResolversParentTypes = ResolversObject<{
   ClaudeLoginResult: ClaudeLoginResult;
   ClaudeLoginStart: ClaudeLoginStart;
   ContextEntry: ContextEntry;
-  CreatePRPayload: CreatePRPayload;
+  CreatePRPayload: CreatePrPayload;
   CreateTaskInput: CreateTaskInput;
   DashboardStats: DashboardStats;
   DateTime: Scalars['DateTime']['output'];
@@ -660,8 +660,6 @@ export type AgentInstanceResolvers<ContextType = Context, ParentType extends Res
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
 
-export type AgentSourceResolvers = { DEFAULT: 'DEFAULT', GLOBAL_CONFIG: 'GLOBAL_CONFIG', REPOSITORY: 'REPOSITORY' };
-
 export type ClaudeAuthStatusResolvers<ContextType = Context, ParentType extends ResolversParentTypes['ClaudeAuthStatus'] = ResolversParentTypes['ClaudeAuthStatus']> = ResolversObject<{
   authenticated?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   email?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
@@ -696,7 +694,7 @@ export type ContextEntryResolvers<ContextType = Context, ParentType extends Reso
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
 
-export type CreatePRPayloadResolvers<ContextType = Context, ParentType extends ResolversParentTypes['CreatePRPayload'] = ResolversParentTypes['CreatePRPayload']> = ResolversObject<{
+export type CreatePrPayloadResolvers<ContextType = Context, ParentType extends ResolversParentTypes['CreatePRPayload'] = ResolversParentTypes['CreatePRPayload']> = ResolversObject<{
   errors?: Resolver<Maybe<Array<ResolversTypes['Error']>>, ParentType, ContextType>;
   prUrl?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
@@ -922,13 +920,12 @@ export type Resolvers<ContextType = Context> = ResolversObject<{
   AgentDefinition?: AgentDefinitionResolvers<ContextType>;
   AgentDefinitionPayload?: AgentDefinitionPayloadResolvers<ContextType>;
   AgentInstance?: AgentInstanceResolvers<ContextType>;
-  AgentSource?: AgentSourceResolvers;
   ClaudeAuthStatus?: ClaudeAuthStatusResolvers<ContextType>;
   ClaudeLoginResult?: ClaudeLoginResultResolvers<ContextType>;
   ClaudeLoginStart?: ClaudeLoginStartResolvers<ContextType>;
   CloneStatus?: CloneStatusResolvers;
   ContextEntry?: ContextEntryResolvers<ContextType>;
-  CreatePRPayload?: CreatePRPayloadResolvers<ContextType>;
+  CreatePRPayload?: CreatePrPayloadResolvers<ContextType>;
   DashboardStats?: DashboardStatsResolvers<ContextType>;
   DateTime?: GraphQLScalarType;
   Error?: ErrorResolvers<ContextType>;
@@ -941,6 +938,7 @@ export type Resolvers<ContextType = Context> = ResolversObject<{
   PipelineCount?: PipelineCountResolvers<ContextType>;
   PipelineStatus?: PipelineStatusResolvers<ContextType>;
   Query?: QueryResolvers<ContextType>;
+  RepoAgentGroup?: RepoAgentGroupResolvers<ContextType>;
   Repository?: RepositoryResolvers<ContextType>;
   RepositoryCount?: RepositoryCountResolvers<ContextType>;
   RepositoryPayload?: RepositoryPayloadResolvers<ContextType>;

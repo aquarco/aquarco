@@ -18,6 +18,7 @@ from .cli.auth_helper import auth_watch
 from .cli.repo_manager import repo_app
 from .cli.status import status
 from .config import load_config, load_pipelines, load_secrets
+from .config_store import sync_agent_definitions_to_db, sync_pipeline_definitions_to_db
 from .database import Database
 from .logging import get_logger, setup_logging
 from .models import PipelineConfig, SupervisorConfig
@@ -99,6 +100,9 @@ class Supervisor:
             max_connections=self._config.spec.database.max_connections,
         )
         await self._db.connect()
+
+        # Sync agent & pipeline definitions from config YAML to DB
+        await self._sync_definitions_to_db()
 
         # Initialize components
         self._tq = TaskQueue(
@@ -393,12 +397,39 @@ class Supervisor:
         except Exception:
             log.exception("health_report_error")
 
+    async def _sync_definitions_to_db(self) -> None:
+        """Sync agent and pipeline YAML definitions from config files to the database."""
+        if not self._db:
+            return
+        try:
+            agents_dir = Path(self._config.spec.agents_dir)
+            schema_dir = agents_dir.parent.parent / "schemas"
+            agent_schema = schema_dir / "agent-definition.schema.json"
+
+            agent_count = await sync_agent_definitions_to_db(
+                self._db,
+                agents_dir,
+                schema_path=agent_schema if agent_schema.exists() else None,
+            )
+            log.info("agent_definitions_synced", count=agent_count)
+
+            pipelines_file = self._config.spec.pipelines_file
+            if pipelines_file:
+                pipeline_count = await sync_pipeline_definitions_to_db(
+                    self._db,
+                    Path(pipelines_file),
+                )
+                log.info("pipeline_definitions_synced", count=pipeline_count)
+        except Exception:
+            log.exception("definition_sync_failed")
+
     async def _reload_config(self) -> None:
         """Reload configuration from file."""
         try:
             self._config = load_config(self._config_file)
             self._secrets = load_secrets(self._config)
             self._apply_github_env()
+            await self._sync_definitions_to_db()
             log.info("config_reloaded")
         except Exception:
             log.exception("config_reload_failed")
