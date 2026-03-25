@@ -78,6 +78,9 @@ export const GET_TASK = gql`
       currentStage
       retryCount
       errorMessage
+      parentTaskId
+      prNumber
+      branchName
       stages {
         id
         stageNumber
@@ -93,6 +96,7 @@ export const GET_TASK = gql`
         tokensOutput
         errorMessage
         retryCount
+        liveOutput
       }
       context {
         id
@@ -468,6 +472,38 @@ export const RETRY_TASK = gql`
 export const CANCEL_TASK = gql`
   mutation CancelTask($id: ID!) {
     cancelTask(id: $id) {
+      task {
+        id
+        status
+        updatedAt
+      }
+      errors {
+        field
+        message
+      }
+    }
+  }
+`
+
+export const RERUN_TASK = gql`
+  mutation RerunTask($id: ID!) {
+    rerunTask(id: $id) {
+      task {
+        id
+        status
+        updatedAt
+      }
+      errors {
+        field
+        message
+      }
+    }
+  }
+`
+
+export const CLOSE_TASK = gql`
+  mutation CloseTask($id: ID!) {
+    closeTask(id: $id) {
       task {
         id
         status

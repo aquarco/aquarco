@@ -25,7 +25,7 @@ import Accordion from '@mui/material/Accordion'
 import AccordionSummary from '@mui/material/AccordionSummary'
 import AccordionDetails from '@mui/material/AccordionDetails'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import { GET_TASK, RETRY_TASK, CANCEL_TASK, UNBLOCK_TASK } from '@/lib/graphql/queries'
+import { GET_TASK, RETRY_TASK, RERUN_TASK, CLOSE_TASK, CANCEL_TASK, UNBLOCK_TASK } from '@/lib/graphql/queries'
 import { StatusChip } from '@/components/ui/StatusChip'
 import { monoStyle } from '@/lib/theme'
 import { formatDate } from '@/lib/format'
@@ -45,6 +45,7 @@ interface Stage {
   tokensOutput: number | null
   errorMessage: string | null
   retryCount: number
+  liveOutput: string | null
 }
 
 interface ContextEntry {
@@ -75,6 +76,9 @@ interface Task {
   currentStage: number
   retryCount: number
   errorMessage: string | null
+  parentTaskId: string | null
+  prNumber: number | null
+  branchName: string | null
   stages: Stage[]
   context: ContextEntry[]
 }
@@ -110,6 +114,32 @@ export default function TaskDetailPage() {
     variables: { id },
     onCompleted: (result) => {
       const errors = result?.retryTask?.errors
+      if (errors?.length) {
+        setMutationError(errors.map((e: { message: string }) => e.message).join(', '))
+      } else {
+        setMutationError(null)
+        refetch()
+      }
+    },
+  })
+
+  const [rerunTask, { loading: rerunning }] = useMutation(RERUN_TASK, {
+    variables: { id },
+    onCompleted: (result) => {
+      const errors = result?.rerunTask?.errors
+      if (errors?.length) {
+        setMutationError(errors.map((e: { message: string }) => e.message).join(', '))
+      } else {
+        setMutationError(null)
+        refetch()
+      }
+    },
+  })
+
+  const [closeTask, { loading: closing }] = useMutation(CLOSE_TASK, {
+    variables: { id },
+    onCompleted: (result) => {
+      const errors = result?.closeTask?.errors
       if (errors?.length) {
         setMutationError(errors.map((e: { message: string }) => e.message).join(', '))
       } else {
@@ -169,7 +199,9 @@ export default function TaskDetailPage() {
   }
 
   const status = task.status?.toUpperCase()
-  const canRetry = status === 'FAILED' || status === 'TIMEOUT'
+  const canRetry = status === 'FAILED' || status === 'RATE_LIMITED' || status === 'TIMEOUT'
+  const canRerun = status === 'COMPLETED' || status === 'FAILED' || status === 'CLOSED'
+  const canClose = status === 'COMPLETED'
   const canCancel = status === 'PENDING' || status === 'QUEUED' || status === 'EXECUTING'
   const canUnblock = status === 'BLOCKED'
 
@@ -286,14 +318,12 @@ export default function TaskDetailPage() {
       )}
 
       {/* Stage output */}
-      {stages.some((s) => s.structuredOutput || s.rawOutput) && (
+      {stages.length > 0 && (
         <Box sx={{ mb: 2 }}>
           <Typography variant="subtitle1" fontWeight={700} gutterBottom>
             Stage Output
           </Typography>
-          {stages
-            .filter((s) => s.structuredOutput || s.rawOutput)
-            .map((stage) => {
+          {stages.map((stage) => {
               const output = stage.structuredOutput as Record<string, unknown> | null
               const findings = output?.findings as Array<{
                 severity?: string
@@ -388,6 +418,27 @@ export default function TaskDetailPage() {
                         {JSON.stringify(output, null, 2)}
                       </Box>
                     )}
+                    {stage.status === 'EXECUTING' && stage.liveOutput && (
+                      <Box
+                        component="pre"
+                        sx={{
+                          m: 0,
+                          mb: 2,
+                          p: 1.5,
+                          backgroundColor: '#1e1e1e',
+                          color: '#d4d4d4',
+                          borderRadius: 1,
+                          overflow: 'auto',
+                          maxHeight: 400,
+                          ...monoStyle,
+                          fontSize: '0.75rem',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {stage.liveOutput}
+                      </Box>
+                    )}
                     {!output && stage.rawOutput && (
                       <Box
                         component="pre"
@@ -471,6 +522,28 @@ export default function TaskDetailPage() {
             data-testid="btn-retry"
           >
             {retrying ? 'Retrying…' : 'Retry'}
+          </Button>
+        )}
+        {canRerun && (
+          <Button
+            variant="contained"
+            color="info"
+            onClick={() => rerunTask()}
+            disabled={rerunning}
+            data-testid="btn-rerun"
+          >
+            {rerunning ? 'Creating…' : 'Rerun'}
+          </Button>
+        )}
+        {canClose && (
+          <Button
+            variant="outlined"
+            color="secondary"
+            onClick={() => closeTask()}
+            disabled={closing}
+            data-testid="btn-close"
+          >
+            {closing ? 'Closing…' : 'Close'}
           </Button>
         )}
         {canCancel && (
