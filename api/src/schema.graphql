@@ -13,6 +13,10 @@ type Query {
   # Agent instances
   agentInstances: [AgentInstance!]!
 
+  # Agent definitions (grouped by source)
+  globalAgents: [AgentDefinition!]!
+  repoAgentGroups: [RepoAgentGroup!]!
+
   # Pipeline status
   pipelineStatus(taskId: ID!): PipelineStatus
 
@@ -56,6 +60,12 @@ type Mutation {
 
   # Intervention
   unblockTask(id: ID!, resolution: String!): TaskPayload!
+
+  # Agent overrides
+  setAgentDisabled(name: String!, scope: String!, disabled: Boolean!): AgentDefinitionPayload!
+  modifyAgent(name: String!, scope: String!, spec: JSON!): AgentDefinitionPayload!
+  resetAgentModification(name: String!, scope: String!): AgentDefinitionPayload!
+  createAgentPR(repoName: String!): CreatePRPayload!
 }
 
 type Subscription {
@@ -286,4 +296,43 @@ enum CloneStatus {
   CLONING
   READY
   ERROR
+}
+
+# --- Agent Definitions ---
+
+enum AgentSource {
+  DEFAULT
+  GLOBAL_CONFIG
+  REPOSITORY
+}
+
+type AgentDefinition {
+  name: String!
+  version: String!
+  description: String!
+  source: AgentSource!
+  sourceRepo: String
+  spec: JSON!
+  isDisabled: Boolean!
+  isModified: Boolean!
+  modifiedSpec: JSON
+  activeCount: Int!
+  totalExecutions: Int!
+  totalTokensUsed: Int!
+  lastExecutionAt: DateTime
+}
+
+type RepoAgentGroup {
+  repoName: String!
+  agents: [AgentDefinition!]!
+}
+
+type AgentDefinitionPayload {
+  agent: AgentDefinition
+  errors: [Error!]
+}
+
+type CreatePRPayload {
+  prUrl: String
+  errors: [Error!]
 }

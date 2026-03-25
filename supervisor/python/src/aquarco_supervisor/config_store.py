@@ -104,12 +104,19 @@ def load_agent_definitions_from_files(
 async def store_agent_definitions(
     db: Database,
     definitions: list[dict[str, Any]],
+    source: str = "default",
 ) -> int:
     """Upsert agent definitions into the ``agent_definitions`` table.
 
     Versioning logic:
       - Same (name, version) → UPDATE existing row (content changed).
       - New version → INSERT new row, deactivate previous versions.
+
+    Args:
+        source: Origin of the agent definitions. One of:
+            - ``'default'`` for built-in agents
+            - ``'global:<repo_name>'`` for global config repo agents
+            - ``'repo:<repo_name>'`` for repository-specific agents
 
     Returns the number of rows upserted.
     """
@@ -132,26 +139,28 @@ async def store_agent_definitions(
         # Upsert current version
         await db.execute(
             """INSERT INTO agent_definitions
-                   (name, version, description, labels, spec, is_active)
+                   (name, version, description, labels, spec, is_active, source)
                VALUES
-                   (%(name)s, %(version)s, %(description)s, %(labels)s, %(spec)s, true)
+                   (%(name)s, %(version)s, %(description)s, %(labels)s, %(spec)s, true, %(source)s)
                ON CONFLICT (name, version) DO UPDATE SET
                    description = EXCLUDED.description,
                    labels      = EXCLUDED.labels,
                    spec        = EXCLUDED.spec,
-                   is_active   = true""",
+                   is_active   = true,
+                   source      = EXCLUDED.source""",
             {
                 "name": name,
                 "version": version,
                 "description": meta.get("description", ""),
                 "labels": json.dumps(meta.get("labels", {})),
                 "spec": json.dumps(doc.get("spec", {})),
+                "source": source,
             },
         )
         count += 1
-        log.debug("agent_definition_stored", agent=name, version=version)
+        log.debug("agent_definition_stored", agent=name, version=version, source=source)
 
-    log.info("agent_definitions_stored", count=count)
+    log.info("agent_definitions_stored", count=count, source=source)
     return count
 
 
