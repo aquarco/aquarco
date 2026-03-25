@@ -1,3 +1,4 @@
+-- depends: 003_create_stages
 -- Migration: 004_create_context.sql
 -- Purpose: Accumulated context storage for task pipelines.
 --
@@ -14,8 +15,6 @@
 -- for any given row. This is enforced via a CHECK constraint.
 --
 -- Depends on: 002_create_tasks.sql (tasks table)
-
--- up
 
 SET search_path TO aquarco, public;
 
@@ -71,6 +70,4 @@ CREATE INDEX IF NOT EXISTS idx_context_task_id
 -- Note: the UNIQUE (task_id, key) constraint already creates an index on
 -- (task_id, key); no additional explicit index is needed for that access pattern.
 
--- down
 
--- DROP TABLE IF EXISTS aquarco.context;

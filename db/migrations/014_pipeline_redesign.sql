@@ -1,3 +1,4 @@
+-- depends: 013_create_agent_and_pipeline_definitions
 -- Migration: 014_pipeline_redesign.sql
 -- Purpose: Pipeline redesign — task as pipeline instance with planning phase.
 --
@@ -9,8 +10,6 @@
 --   4. Updated get_task_context() to include new columns
 --
 -- Depends on: 002_create_tasks.sql, 003_create_stages.sql, 008_create_functions.sql
-
--- up
 
 SET search_path TO aquarco, public;
 
@@ -248,13 +247,4 @@ COMMENT ON FUNCTION get_task_context(TEXT) IS
     'accumulated context entries, and all validation items for the given task_id. '
     'Returns NULL if the task does not exist.';
 
--- down
 
--- ALTER TABLE tasks DROP COLUMN IF EXISTS phase;
--- ALTER TABLE tasks DROP COLUMN IF EXISTS planned_stages;
--- ALTER TABLE stages DROP COLUMN IF EXISTS input;
--- ALTER TABLE stages DROP COLUMN IF EXISTS iteration;
--- ALTER TABLE stages DROP COLUMN IF EXISTS stage_key;
--- ALTER TABLE stages DROP COLUMN IF EXISTS validation_items_in;
--- ALTER TABLE stages DROP COLUMN IF EXISTS validation_items_out;
--- DROP TABLE IF EXISTS validation_items;

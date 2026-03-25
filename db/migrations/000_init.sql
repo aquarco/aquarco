@@ -1,3 +1,4 @@
+-- depends:
 -- Migration: 000_init.sql
 -- Purpose: Database and schema initialization for the Aquarco agent system.
 --
@@ -6,8 +7,6 @@
 -- and records any database-level configuration.
 --
 -- Run this as a superuser or the database owner.
-
--- up
 
 -- The aquarco schema namespaces all application objects.
 -- Using a dedicated schema keeps the database clean and allows
@@ -28,9 +27,3 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- without schema-qualifying every object.
 SET search_path TO aquarco, public;
 
--- down
-
--- DROP SCHEMA IF EXISTS aquarco CASCADE;
--- NOTE: Only run the down section after explicit confirmation.
--- Dropping the schema removes every table, index, function, and
--- sequence in it. This is intentionally commented out.

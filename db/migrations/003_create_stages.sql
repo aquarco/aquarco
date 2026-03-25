@@ -1,3 +1,4 @@
+-- depends: 002_create_tasks
 -- Migration: 003_create_stages.sql
 -- Purpose: Pipeline stage execution records for each task.
 --
@@ -10,8 +11,6 @@
 -- not API billing units. They are captured for cost-awareness dashboards.
 --
 -- Depends on: 002_create_tasks.sql (tasks table)
-
--- up
 
 SET search_path TO aquarco, public;
 
@@ -88,6 +87,4 @@ CREATE INDEX IF NOT EXISTS idx_stages_status
     ON stages(status)
     WHERE status IN ('executing', 'failed');
 
--- down
 
--- DROP TABLE IF EXISTS aquarco.stages;

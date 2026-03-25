@@ -1,11 +1,10 @@
+-- depends: 007_create_pipeline_checkpoints
 -- Migration: 008_create_functions.sql
 -- Purpose: Database functions and triggers used by the application layer.
 --
 -- Functions defined here:
 --   1. update_updated_at()     — trigger function that keeps tasks.updated_at current
 --   2. get_task_context(TEXT)  — returns full task context as a single JSONB document
-
--- up
 
 SET search_path TO aquarco, public;
 
@@ -170,8 +169,4 @@ COMMENT ON FUNCTION get_task_context(TEXT) IS
     'Returns NULL if the task does not exist. '
     'Used by the pipeline executor to assemble an agent context window.';
 
--- down
 
--- DROP TRIGGER IF EXISTS trg_tasks_updated_at ON aquarco.tasks;
--- DROP FUNCTION IF EXISTS aquarco.update_updated_at();
--- DROP FUNCTION IF EXISTS aquarco.get_task_context(TEXT);

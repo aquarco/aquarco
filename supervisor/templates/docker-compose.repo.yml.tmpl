@@ -66,6 +66,21 @@ services:
       DATABASE_URL: >-
         postgresql://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-dev}@postgres:5432/${POSTGRES_DB:-dev}
     depends_on:
+      migrations:
+        condition: service_completed_successfully
+
+  # ── Database Migrations (yoyo) ────────────────────────────────────────────────
+  migrations:
+    build:
+      context: ./db
+    restart: "no"
+    volumes:
+      - ./db/migrations:/db/migrations:ro
+      - ./db/yoyo.ini:/db/yoyo.ini:ro
+    environment:
+      DATABASE_URL: >-
+        postgresql://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-dev}@postgres:5432/${POSTGRES_DB:-dev}
+    depends_on:
       postgres:
         condition: service_healthy
 
@@ -77,7 +92,6 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./db/migrations:/docker-entrypoint-initdb.d:ro
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-dev}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev}

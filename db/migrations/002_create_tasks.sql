@@ -1,3 +1,4 @@
+-- depends: 001_create_repositories
 -- Migration: 002_create_tasks.sql
 -- Purpose: Central task queue.
 --
@@ -6,8 +7,6 @@
 -- and progress through a status lifecycle managed by the supervisor.
 --
 -- Depends on: 001_create_repositories.sql (repositories table)
-
--- up
 
 SET search_path TO aquarco, public;
 
@@ -111,6 +110,4 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status_priority
     ON tasks(status, priority)
     WHERE status IN ('pending', 'queued');
 
--- down
 
--- DROP TABLE IF EXISTS aquarco.tasks;

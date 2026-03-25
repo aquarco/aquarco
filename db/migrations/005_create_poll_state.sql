@@ -1,3 +1,4 @@
+-- depends: 004_create_context
 -- Migration: 005_create_poll_state.sql
 -- Purpose: Poller cursor and state tracking.
 --
@@ -8,8 +9,6 @@
 --
 -- state_data holds poller-specific metadata (rate-limit headers, pagination
 -- tokens, backoff counters) that does not fit into the generic cursor column.
-
--- up
 
 SET search_path TO aquarco, public;
 
@@ -38,6 +37,4 @@ COMMENT ON COLUMN poll_state.poller_name        IS 'Must match an entry in repos
 COMMENT ON COLUMN poll_state.cursor             IS 'Opaque poller-specific resume cursor (timestamp, event ID, etc.).';
 COMMENT ON COLUMN poll_state.state_data         IS 'Arbitrary poller state: rate-limit windows, backoff counters, pagination tokens.';
 
--- down
 
--- DROP TABLE IF EXISTS aquarco.poll_state;

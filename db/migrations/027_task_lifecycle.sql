@@ -1,7 +1,6 @@
+-- depends: 026_add_live_output
 -- Migration 027: Task lifecycle (RETRY, RERUN, CLOSE)
 -- Add 'closed' to task status, add parent_task_id, pr_number, branch_name columns
-
--- up
 
 SET search_path TO aquarco, public;
 

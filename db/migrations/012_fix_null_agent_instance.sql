@@ -1,9 +1,8 @@
+-- depends: 011_add_repo_original_url
 -- Migration: 012_fix_null_agent_instance.sql
 -- Purpose: Remove bogus 'null' row from agent_instances and seed correct agent names.
 -- Root cause: agent-registry.sh used wrong jq paths (.metadata.name instead of .name),
 -- causing the literal string 'null' to be inserted as an agent name.
-
--- up
 
 SET search_path TO aquarco, public;
 
@@ -18,7 +17,3 @@ VALUES
     ('docs-agent',           0, 0, 0),
     ('analyze-agent',        0, 0, 0)
 ON CONFLICT (agent_name) DO NOTHING;
-
--- down
-
--- No rollback needed; the 'null' row was invalid data.
