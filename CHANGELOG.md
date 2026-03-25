@@ -1,5 +1,22 @@
 # Changelog
 
+## [2026-03-25] — Redesign agents page (#1)
+
+### Added
+- **Agents page redesign** with tabbed layout: "Global Agents" and "Repository Agents" tabs
+- New GraphQL queries: `globalAgents`, `repoAgentGroups` — return agent definitions grouped by source with override state
+- New GraphQL mutations: `setAgentDisabled`, `modifyAgent`, `resetAgentModification`, `createAgentPR` — manage agent overrides and create PRs with agent changes
+- New GraphQL types: `AgentDefinition`, `AgentSource` enum (`DEFAULT`, `GLOBAL_CONFIG`, `REPOSITORY`), `RepoAgentGroup`, `AgentDefinitionPayload`, `CreatePRPayload`
+- `agent_overrides` database table — stores per-agent disable/enable state and modified spec (migration `019_agent_overrides_and_source.sql`)
+- `source` column on `agent_definitions` table — tracks agent origin (`default`, `global:<repo>`, `repo:<repo>`)
+- Frontend components: `GlobalAgentsTab`, `RepoAgentsTab`, `AgentTable`, `AgentEditDialog`
+- `api/src/github-api.ts` — GitHub REST API helper for creating branches, commits, and PRs with agent changes
+- 46 tests for agent queries and mutations
+
+### Changed
+- Agents page (`web/src/app/agents/page.tsx`) rewritten from runtime-metrics-only view to full agent management with disable/enable, edit, reset, and PR creation
+- GraphQL schema extended with agent definition types and management operations
+
 ## [2026-03-20] — Rebrand: ai-fishtank → aquarco
 
 ### Breaking Changes

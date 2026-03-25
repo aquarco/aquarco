@@ -152,6 +152,15 @@ User          Web UI           API Container          GitHub            VM Host
 returns `x-access-token` as username and the OAuth token as password. All
 `git` and `gh` subprocesses inherit these env vars.
 
+### Agent Management
+
+The Agents page provides two tabs for managing agent definitions:
+
+- **Global Agents** — lists all default agents and agents from global config repositories. Each agent can be individually disabled/enabled, and non-default agents can be edited. Modified agents are stored in the `agent_overrides` table. A "Create PR" button commits changes back to the config repository.
+- **Repository Agents** — lists repositories with custom agents in an accordion layout. Agents can be disabled, edited, and reset. PR creation targets the specific repository.
+
+Agent sources are distinguished by an `AgentSource` enum: `DEFAULT` (built-in), `GLOBAL_CONFIG` (from a global config repo), and `REPOSITORY` (repo-specific).
+
 ### Claude Login (PKCE OAuth via IPC)
 
 User clicks **Claude Login** on the Agents page.
