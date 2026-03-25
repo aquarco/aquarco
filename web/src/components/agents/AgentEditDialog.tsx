@@ -48,7 +48,12 @@ export default function AgentEditDialog({
 
   if (!agent) return null
 
-  const spec = agent.spec as Record<string, unknown> | null
+  function getResource(key: string): string | number {
+    try {
+      const parsed = JSON.parse(specText)
+      return parsed?.resources?.[key] ?? ''
+    } catch { return '' }
+  }
 
   async function handleSave() {
     setError(null)
@@ -122,9 +127,7 @@ export default function AgentEditDialog({
                 label="Timeout (minutes)"
                 type="number"
                 size="small"
-                defaultValue={(spec as Record<string, unknown>)?.resources
-                  ? ((spec as Record<string, unknown>).resources as Record<string, unknown>)?.timeoutMinutes ?? ''
-                  : ''}
+                value={getResource('timeoutMinutes')}
                 onChange={(e) => {
                   try {
                     const parsed = JSON.parse(specText)
@@ -138,9 +141,7 @@ export default function AgentEditDialog({
                 label="Max Turns"
                 type="number"
                 size="small"
-                defaultValue={(spec as Record<string, unknown>)?.resources
-                  ? ((spec as Record<string, unknown>).resources as Record<string, unknown>)?.maxTurns ?? ''
-                  : ''}
+                value={getResource('maxTurns')}
                 onChange={(e) => {
                   try {
                     const parsed = JSON.parse(specText)
@@ -154,9 +155,7 @@ export default function AgentEditDialog({
                 label="Max Cost (USD)"
                 type="number"
                 size="small"
-                defaultValue={(spec as Record<string, unknown>)?.resources
-                  ? ((spec as Record<string, unknown>).resources as Record<string, unknown>)?.maxCost ?? ''
-                  : ''}
+                value={getResource('maxCost')}
                 onChange={(e) => {
                   try {
                     const parsed = JSON.parse(specText)
@@ -170,9 +169,7 @@ export default function AgentEditDialog({
                 label="Max Concurrent"
                 type="number"
                 size="small"
-                defaultValue={(spec as Record<string, unknown>)?.resources
-                  ? ((spec as Record<string, unknown>).resources as Record<string, unknown>)?.maxConcurrent ?? ''
-                  : ''}
+                value={getResource('maxConcurrent')}
                 onChange={(e) => {
                   try {
                     const parsed = JSON.parse(specText)

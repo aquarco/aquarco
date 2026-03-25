@@ -110,29 +110,26 @@ export async function createBranchAndPR(
   }
   const [, owner, repoSlug] = match
 
-  // Get the default branch SHA
-  const refRes = await githubFetch(
-    `https://api.github.com/repos/${owner}/${repoSlug}/git/ref/heads/main`,
+  // Get the default branch from repo metadata
+  const repoMetaRes = await githubFetch(
+    `https://api.github.com/repos/${owner}/${repoSlug}`,
     token
   )
-  let baseSha: string
-  let baseBranch = 'main'
-  if (refRes.ok) {
-    const refData = (await refRes.json()) as { object: { sha: string } }
-    baseSha = refData.object.sha
-  } else {
-    // Try 'master' as fallback
-    const masterRes = await githubFetch(
-      `https://api.github.com/repos/${owner}/${repoSlug}/git/ref/heads/master`,
-      token
-    )
-    if (!masterRes.ok) {
-      throw new Error('Cannot find main or master branch')
-    }
-    const masterData = (await masterRes.json()) as { object: { sha: string } }
-    baseSha = masterData.object.sha
-    baseBranch = 'master'
+  if (!repoMetaRes.ok) {
+    throw new Error(`Cannot access repository ${owner}/${repoSlug}`)
   }
+  const repoMeta = (await repoMetaRes.json()) as { default_branch: string }
+  const baseBranch = repoMeta.default_branch
+
+  const refRes = await githubFetch(
+    `https://api.github.com/repos/${owner}/${repoSlug}/git/ref/heads/${baseBranch}`,
+    token
+  )
+  if (!refRes.ok) {
+    throw new Error(`Cannot find branch "${baseBranch}"`)
+  }
+  const refData = (await refRes.json()) as { object: { sha: string } }
+  const baseSha = refData.object.sha
 
   // Create a new branch
   const branchName = `agent-modifications-${Date.now()}`
@@ -152,73 +149,85 @@ export async function createBranchAndPR(
     throw new Error(`Failed to create branch: ${err}`)
   }
 
-  // Create/update files for each modified agent
-  for (const agent of agents) {
-    const filePath = `config/agents/definitions/${agent.agentName}.yaml`
+  // Create/update files and PR — clean up branch on failure
+  try {
+    for (const agent of agents) {
+      const filePath = `config/agents/definitions/${agent.agentName}.yaml`
 
-    // Build the full agent YAML document
-    const agentDoc = {
-      apiVersion: 'aquarco.agents/v1',
-      kind: 'AgentDefinition',
-      metadata: {
-        name: agent.agentName,
-        version: agent.version,
-        description: agent.description,
-      },
-      spec: agent.modifiedSpec,
-    }
-    const content = yaml.dump(agentDoc, { lineWidth: -1, noRefs: true })
-    const base64Content = Buffer.from(content).toString('base64')
+      // Build the full agent YAML document
+      const agentDoc = {
+        apiVersion: 'aquarco.agents/v1',
+        kind: 'AgentDefinition',
+        metadata: {
+          name: agent.agentName,
+          version: agent.version,
+          description: agent.description,
+        },
+        spec: agent.modifiedSpec,
+      }
+      const content = yaml.dump(agentDoc, { lineWidth: -1, noRefs: true })
+      const base64Content = Buffer.from(content).toString('base64')
 
-    // Check if file exists to get its SHA
-    const existingRes = await githubFetch(
-      `https://api.github.com/repos/${owner}/${repoSlug}/contents/${filePath}?ref=${branchName}`,
-      token
-    )
-    const body: Record<string, unknown> = {
-      message: `chore: update agent definition for ${agent.agentName}`,
-      content: base64Content,
-      branch: branchName,
-    }
-    if (existingRes.ok) {
-      const existing = (await existingRes.json()) as { sha: string }
-      body.sha = existing.sha
+      // Check if file exists to get its SHA
+      const existingRes = await githubFetch(
+        `https://api.github.com/repos/${owner}/${repoSlug}/contents/${filePath}?ref=${branchName}`,
+        token
+      )
+      const body: Record<string, unknown> = {
+        message: `chore: update agent definition for ${agent.agentName}`,
+        content: base64Content,
+        branch: branchName,
+      }
+      if (existingRes.ok) {
+        const existing = (await existingRes.json()) as { sha: string }
+        body.sha = existing.sha
+      }
+
+      const updateRes = await githubFetch(
+        `https://api.github.com/repos/${owner}/${repoSlug}/contents/${filePath}`,
+        token,
+        {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        }
+      )
+      if (!updateRes.ok) {
+        const err = await updateRes.text()
+        throw new Error(`Failed to update file ${filePath}: ${err}`)
+      }
     }
 
-    const updateRes = await githubFetch(
-      `https://api.github.com/repos/${owner}/${repoSlug}/contents/${filePath}`,
+    // Create the PR
+    const agentNames = agents.map((a) => a.agentName).join(', ')
+    const prRes = await githubFetch(
+      `https://api.github.com/repos/${owner}/${repoSlug}/pulls`,
       token,
       {
-        method: 'PUT',
-        body: JSON.stringify(body),
+        method: 'POST',
+        body: JSON.stringify({
+          title: `chore: update agent definitions (${agents.length} agents)`,
+          body: `This PR updates agent definitions modified via the Aquarco UI.\n\nModified agents: ${agentNames}`,
+          head: branchName,
+          base: baseBranch,
+        }),
       }
     )
-    if (!updateRes.ok) {
-      const err = await updateRes.text()
-      throw new Error(`Failed to update file ${filePath}: ${err}`)
+    if (!prRes.ok) {
+      const err = await prRes.text()
+      throw new Error(`Failed to create PR: ${err}`)
     }
-  }
 
-  // Create the PR
-  const agentNames = agents.map((a) => a.agentName).join(', ')
-  const prRes = await githubFetch(
-    `https://api.github.com/repos/${owner}/${repoSlug}/pulls`,
-    token,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        title: `chore: update agent definitions (${agents.length} agents)`,
-        body: `This PR updates agent definitions modified via the Aquarco UI.\n\nModified agents: ${agentNames}`,
-        head: branchName,
-        base: baseBranch,
-      }),
-    }
-  )
-  if (!prRes.ok) {
-    const err = await prRes.text()
-    throw new Error(`Failed to create PR: ${err}`)
+    const prData = (await prRes.json()) as { html_url: string }
+    return prData.html_url
+  } catch (err) {
+    // Best-effort cleanup: delete the orphaned branch
+    try {
+      await githubFetch(
+        `https://api.github.com/repos/${owner}/${repoSlug}/git/refs/heads/${branchName}`,
+        token,
+        { method: 'DELETE' }
+      )
+    } catch { /* ignore cleanup failure */ }
+    throw err
   }
-
-  const prData = (await prRes.json()) as { html_url: string }
-  return prData.html_url
 }

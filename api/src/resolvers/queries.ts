@@ -1,3 +1,4 @@
+import { Pool } from 'pg'
 import { Context } from '../context.js'
 
 // GraphQL enum values are UPPER_CASE; DB stores lower_case
@@ -150,7 +151,7 @@ export const Query = {
          ai.last_execution_at
        FROM agent_definitions ad
        LEFT JOIN agent_overrides ao
-         ON ao.agent_name = ad.name AND ao.scope = CONCAT('repo:', SUBSTRING(ad.source FROM 6))
+         ON ao.agent_name = ad.name AND ao.scope = ad.source
        LEFT JOIN agent_instances ai
          ON ai.agent_name = ad.name
        WHERE ad.is_active = true
@@ -299,6 +300,30 @@ export function mapAgentDefinition(row: Record<string, unknown>) {
     totalTokensUsed: parseInt(String(row.total_tokens_used ?? '0'), 10),
     lastExecutionAt: row.last_execution_at ?? null,
   }
+}
+
+export async function fetchAgentWithOverrides(
+  pool: Pool,
+  name: string,
+  scope: string
+): Promise<Record<string, unknown> | null> {
+  const result = await pool.query<Record<string, unknown>>(
+    `SELECT
+       ad.name, ad.version, ad.description, ad.spec, ad.source,
+       COALESCE(ao.is_disabled, false) AS is_disabled,
+       ao.modified_spec,
+       COALESCE(ai.active_count, 0) AS active_count,
+       COALESCE(ai.total_executions, 0) AS total_executions,
+       COALESCE(ai.total_tokens_used, 0) AS total_tokens_used,
+       ai.last_execution_at
+     FROM agent_definitions ad
+     LEFT JOIN agent_overrides ao ON ao.agent_name = ad.name AND ao.scope = $2
+     LEFT JOIN agent_instances ai ON ai.agent_name = ad.name
+     WHERE ad.name = $1 AND ad.is_active = true
+     LIMIT 1`,
+    [name, scope]
+  )
+  return result.rows[0] ?? null
 }
 
 export function mapRepository(row: Record<string, unknown>) {

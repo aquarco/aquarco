@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { Context } from '../context.js'
-import { mapRepository, mapStage, mapAgentDefinition } from './queries.js'
+import { mapRepository, mapStage, mapAgentDefinition, fetchAgentWithOverrides } from './queries.js'
 
 // GraphQL enum values are UPPER_CASE; DB stores lower_case
 function toDbEnum(value: string): string {
@@ -46,6 +46,28 @@ function repoErrorPayload(field: string | null, message: string) {
 
 function agentErrorPayload(field: string | null, message: string) {
   return { agent: null, errors: [{ field, message }] }
+}
+
+const SCOPE_PATTERN = /^(global|repo:[a-zA-Z0-9._-]+)$/
+function validateScope(scope: string): string | null {
+  if (!SCOPE_PATTERN.test(scope)) return `Invalid scope "${scope}". Must be "global" or "repo:<name>".`
+  return null
+}
+
+const VALID_SPEC_KEYS = new Set([
+  'categories', 'priority', 'promptFile', 'tools', 'resources',
+  'environment', 'output', 'outputSchema', 'healthCheck', 'conditions',
+])
+const REQUIRED_SPEC_KEYS = ['categories', 'promptFile', 'output']
+const MAX_SPEC_SIZE = 100 * 1024
+
+function validateSpec(spec: unknown): string | null {
+  if (typeof spec !== 'object' || spec === null || Array.isArray(spec)) return 'Spec must be a JSON object'
+  if (JSON.stringify(spec).length > MAX_SPEC_SIZE) return 'Spec exceeds 100KB size limit'
+  const keys = Object.keys(spec)
+  for (const k of REQUIRED_SPEC_KEYS) { if (!keys.includes(k)) return `Spec missing required key "${k}"` }
+  for (const k of keys) { if (!VALID_SPEC_KEYS.has(k)) return `Spec contains unknown key "${k}"` }
+  return null
 }
 
 function prErrorPayload(message: string) {
@@ -499,6 +521,9 @@ export const Mutation = {
     ctx: Context
   ) {
     try {
+      const scopeErr = validateScope(args.scope)
+      if (scopeErr) return agentErrorPayload('scope', scopeErr)
+
       // Verify agent exists
       const agentCheck = await ctx.pool.query(
         'SELECT name FROM agent_definitions WHERE name = $1 AND is_active = true',
@@ -517,24 +542,9 @@ export const Mutation = {
         [args.name, args.scope, args.disabled]
       )
 
-      // Return the updated agent definition
-      const result = await ctx.pool.query<Record<string, unknown>>(
-        `SELECT
-           ad.name, ad.version, ad.description, ad.spec, ad.source,
-           COALESCE(ao.is_disabled, false) AS is_disabled,
-           ao.modified_spec,
-           COALESCE(ai.active_count, 0) AS active_count,
-           COALESCE(ai.total_executions, 0) AS total_executions,
-           COALESCE(ai.total_tokens_used, 0) AS total_tokens_used,
-           ai.last_execution_at
-         FROM agent_definitions ad
-         LEFT JOIN agent_overrides ao ON ao.agent_name = ad.name AND ao.scope = $2
-         LEFT JOIN agent_instances ai ON ai.agent_name = ad.name
-         WHERE ad.name = $1 AND ad.is_active = true
-         LIMIT 1`,
-        [args.name, args.scope]
-      )
-      return { agent: mapAgentDefinition(result.rows[0]), errors: [] }
+      const row = await fetchAgentWithOverrides(ctx.pool, args.name, args.scope)
+      if (!row) return agentErrorPayload('name', `Agent "${args.name}" not found`)
+      return { agent: mapAgentDefinition(row), errors: [] }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update agent disabled state'
       return agentErrorPayload(null, message)
@@ -547,6 +557,12 @@ export const Mutation = {
     ctx: Context
   ) {
     try {
+      const scopeErr = validateScope(args.scope)
+      if (scopeErr) return agentErrorPayload('scope', scopeErr)
+
+      const specErr = validateSpec(args.spec)
+      if (specErr) return agentErrorPayload('spec', specErr)
+
       // Verify agent exists and is not default (default agents cannot be modified)
       const agentCheck = await ctx.pool.query<Record<string, unknown>>(
         'SELECT name, source FROM agent_definitions WHERE name = $1 AND is_active = true',
@@ -568,24 +584,9 @@ export const Mutation = {
         [args.name, args.scope, JSON.stringify(args.spec)]
       )
 
-      // Return the updated agent definition
-      const result = await ctx.pool.query<Record<string, unknown>>(
-        `SELECT
-           ad.name, ad.version, ad.description, ad.spec, ad.source,
-           COALESCE(ao.is_disabled, false) AS is_disabled,
-           ao.modified_spec,
-           COALESCE(ai.active_count, 0) AS active_count,
-           COALESCE(ai.total_executions, 0) AS total_executions,
-           COALESCE(ai.total_tokens_used, 0) AS total_tokens_used,
-           ai.last_execution_at
-         FROM agent_definitions ad
-         LEFT JOIN agent_overrides ao ON ao.agent_name = ad.name AND ao.scope = $2
-         LEFT JOIN agent_instances ai ON ai.agent_name = ad.name
-         WHERE ad.name = $1 AND ad.is_active = true
-         LIMIT 1`,
-        [args.name, args.scope]
-      )
-      return { agent: mapAgentDefinition(result.rows[0]), errors: [] }
+      const row = await fetchAgentWithOverrides(ctx.pool, args.name, args.scope)
+      if (!row) return agentErrorPayload('name', `Agent "${args.name}" not found`)
+      return { agent: mapAgentDefinition(row), errors: [] }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to modify agent'
       return agentErrorPayload(null, message)
@@ -598,32 +599,19 @@ export const Mutation = {
     ctx: Context
   ) {
     try {
+      const scopeErr = validateScope(args.scope)
+      if (scopeErr) return agentErrorPayload('scope', scopeErr)
+
       // Delete the override row
       await ctx.pool.query(
         'DELETE FROM agent_overrides WHERE agent_name = $1 AND scope = $2',
         [args.name, args.scope]
       )
 
-      // Return the agent definition without overrides
-      const result = await ctx.pool.query<Record<string, unknown>>(
-        `SELECT
-           ad.name, ad.version, ad.description, ad.spec, ad.source,
-           false AS is_disabled,
-           NULL AS modified_spec,
-           COALESCE(ai.active_count, 0) AS active_count,
-           COALESCE(ai.total_executions, 0) AS total_executions,
-           COALESCE(ai.total_tokens_used, 0) AS total_tokens_used,
-           ai.last_execution_at
-         FROM agent_definitions ad
-         LEFT JOIN agent_instances ai ON ai.agent_name = ad.name
-         WHERE ad.name = $1 AND ad.is_active = true
-         LIMIT 1`,
-        [args.name]
-      )
-      if (result.rows.length === 0) {
-        return agentErrorPayload('name', `Agent "${args.name}" not found`)
-      }
-      return { agent: mapAgentDefinition(result.rows[0]), errors: [] }
+      // Override is deleted — LEFT JOIN naturally returns nulls
+      const row = await fetchAgentWithOverrides(ctx.pool, args.name, args.scope)
+      if (!row) return agentErrorPayload('name', `Agent "${args.name}" not found`)
+      return { agent: mapAgentDefinition(row), errors: [] }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to reset agent modification'
       return agentErrorPayload(null, message)
