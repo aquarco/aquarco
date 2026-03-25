@@ -46,11 +46,10 @@ async def test_execute_agent_returns_structured_with_agent_name_and_raw(
         return_value=claude_output,
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
         output = await executor._execute_agent(
-            "test-agent", "task-1", {"key": "val"}, {}, 0,
+            "test-agent", "task-1", {"key": "val"}, 0,
         )
 
     assert output["_agent_name"] == "test-agent"
-    assert output["_raw_output"] == raw_text
     assert output["result"] == "done"
     assert output["complexity"] == "low"
 
@@ -83,7 +82,7 @@ async def test_execute_agent_with_scoped_view(sample_pipelines: Any) -> None:
         return_value=claude_output,
     ) as mock_execute, patch("aquarco_supervisor.pipeline.executor.Path"):
         output = await executor._execute_agent(
-            "agent-1", "task-1", {}, {}, 0,
+            "agent-1", "task-1", {}, 0,
             scoped_view=mock_scoped_view,
         )
 
@@ -117,7 +116,7 @@ async def test_execute_agent_with_work_dir_override(sample_pipelines: Any) -> No
         return_value=claude_output,
     ) as mock_execute, patch("aquarco_supervisor.pipeline.executor.Path"):
         await executor._execute_agent(
-            "agent-1", "task-1", {}, {}, 0,
+            "agent-1", "task-1", {}, 0,
             work_dir="/custom/dir",
         )
 
@@ -155,7 +154,7 @@ async def test_execute_agent_passes_output_schema(sample_pipelines: Any) -> None
         return_value=claude_output,
     ) as mock_execute, patch("aquarco_supervisor.pipeline.executor.Path"):
         await executor._execute_agent(
-            "agent-1", "task-1", {}, {}, 0,
+            "agent-1", "task-1", {}, 0,
         )
 
     call_kwargs = mock_execute.call_args.kwargs

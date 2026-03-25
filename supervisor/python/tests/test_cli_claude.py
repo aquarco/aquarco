@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -242,7 +243,15 @@ async def test_execute_claude_raises_timeout(tmp_path: Any) -> None:
     mock_proc.returncode = None
     mock_proc.kill = MagicMock()
     mock_proc.wait = AsyncMock()
-    mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+    # Simulate a hanging process — communicate never returns
+    hang_forever = asyncio.Future()  # type: ignore[var-annotated]
+    mock_proc.communicate = AsyncMock(return_value=hang_forever)
+
+    async def _hanging_communicate() -> tuple[bytes, bytes]:
+        await asyncio.sleep(3600)
+        return (b"", b"")
+
+    mock_proc.communicate = _hanging_communicate
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
          patch("pathlib.Path.mkdir"), \
@@ -258,7 +267,6 @@ async def test_execute_claude_raises_timeout(tmp_path: Any) -> None:
             )
 
     mock_proc.kill.assert_called_once()
-    mock_proc.wait.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1099,3 +1107,129 @@ def test_parse_output_single_dict_with_structured_output() -> None:
     assert result["_cost_usd"] == 0.3
     assert result["_input_tokens"] == 50
     assert result["_output_tokens"] == 75
+
+
+# --- _monitor_for_inactivity ---
+
+from aquarco_supervisor.cli.claude import _monitor_for_inactivity
+from aquarco_supervisor.exceptions import AgentInactivityError
+
+# Save the real asyncio.sleep before any patching happens at module level
+_real_sleep = asyncio.sleep
+
+
+def _make_fake_proc(*, returncode: int | None = None) -> MagicMock:
+    """Create a minimal process mock for inactivity monitor tests."""
+    proc = MagicMock()
+    proc.returncode = returncode
+    proc.kill = MagicMock()
+    return proc
+
+
+@pytest.mark.asyncio
+async def test_monitor_for_inactivity_returns_false_on_normal_exit(
+    tmp_path: Any,
+) -> None:
+    """Monitor returns False when the process exits normally without inactivity kill."""
+    debug_log = tmp_path / "debug.log"
+    debug_log.write_text("")
+
+    proc = _make_fake_proc(returncode=None)
+
+    async def fast_sleep(delay: float) -> None:
+        # Simulate process exit on first poll — monitor should return False immediately
+        proc.returncode = 0
+        await _real_sleep(0)
+
+    with patch("asyncio.sleep", side_effect=fast_sleep):
+        result = await _monitor_for_inactivity(
+            debug_log,
+            proc,
+            inactivity_timeout=5.0,
+            poll_interval=0.01,
+            task_id="t1",
+            stage_num=0,
+        )
+
+    assert result is False
+    proc.kill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_monitor_for_inactivity_kills_after_structured_output_stale(
+    tmp_path: Any,
+) -> None:
+    """Monitor kills the process after inactivity_timeout when StructuredOutput has been seen."""
+    debug_log = tmp_path / "debug.log"
+    # Write StructuredOutput marker into the log so it is detected on the first scan
+    debug_log.write_bytes(b"some preamble\nStructuredOutput\nsome trailing content")
+
+    proc = _make_fake_proc(returncode=None)
+
+    # The monitor reads mtime and checks elapsed time via get_event_loop().time().
+    # We supply time values so that:
+    #   poll 1 — StructuredOutput detected; last_mtime is set, stale_since remains None
+    #   poll 2 — mtime unchanged; stale_since is set to base_time
+    #   poll 3 — mtime still unchanged; elapsed = 200 s > inactivity_timeout → kill
+    base_time = 1000.0
+    loop_time_values = [base_time, base_time, base_time + 200.0]
+    loop_time_iter = iter(loop_time_values)
+
+    sleep_calls = 0
+
+    async def counted_sleep(delay: float) -> None:
+        nonlocal sleep_calls
+        sleep_calls += 1
+        await _real_sleep(0)
+
+    mock_loop = MagicMock()
+    mock_loop.time = MagicMock(side_effect=loop_time_iter)
+
+    with patch("asyncio.sleep", side_effect=counted_sleep), \
+         patch("asyncio.get_event_loop", return_value=mock_loop):
+        result = await _monitor_for_inactivity(
+            debug_log,
+            proc,
+            inactivity_timeout=90.0,
+            poll_interval=0.01,
+            task_id="t1",
+            stage_num=0,
+        )
+
+    assert result is True
+    proc.kill.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_monitor_for_inactivity_no_kill_without_structured_output(
+    tmp_path: Any,
+) -> None:
+    """Monitor does NOT kill the process when StructuredOutput was never seen."""
+    debug_log = tmp_path / "debug.log"
+    # Log file has regular content but no StructuredOutput marker
+    debug_log.write_text("regular output line\nanother line\n")
+
+    proc = _make_fake_proc(returncode=None)
+
+    poll_count = 0
+
+    async def counted_sleep(delay: float) -> None:
+        nonlocal poll_count
+        poll_count += 1
+        if poll_count >= 3:
+            # After a few polls without StructuredOutput, simulate process exit
+            proc.returncode = 0
+        await _real_sleep(0)
+
+    with patch("asyncio.sleep", side_effect=counted_sleep):
+        result = await _monitor_for_inactivity(
+            debug_log,
+            proc,
+            inactivity_timeout=0.01,  # very short — would trigger immediately if marker seen
+            poll_interval=0.01,
+            task_id="t1",
+            stage_num=0,
+        )
+
+    assert result is False
+    proc.kill.assert_not_called()

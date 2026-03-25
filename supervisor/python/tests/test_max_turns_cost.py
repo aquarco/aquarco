@@ -5,7 +5,7 @@ Covers:
 - AgentRegistry.get_agent_max_turns() and get_agent_max_cost()
 - PipelineExecutor auto-resume loop (cost guard, iteration guard, session_id missing)
 - Last successful output preservation across resume iterations
-- Raw outputs tracking across resume iterations
+- Raw outputs excluded from agent output (no bloat)
 - Cost warning when _cost_usd is absent from output
 - Claude CLI resume prompt includes structured output format reminder
 - Claude CLI resume args construction (no --system-prompt-file, etc.)
@@ -145,7 +145,7 @@ class TestExecutorAutoResume:
             return_value=claude_output,
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
             output = await executor._execute_agent(
-                "test-agent", "task-1", {}, {}, 0, work_dir="/repos/test"
+                "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
         # Called exactly once (no resume)
@@ -183,7 +183,7 @@ class TestExecutorAutoResume:
             side_effect=[first_output, second_output],
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
             output = await executor._execute_agent(
-                "test-agent", "task-1", {}, {}, 0, work_dir="/repos/test"
+                "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
         assert mock_exec.call_count == 2
@@ -228,7 +228,7 @@ class TestExecutorAutoResume:
             side_effect=[first_output, second_output],
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
             output = await executor._execute_agent(
-                "test-agent", "task-1", {}, {}, 0, work_dir="/repos/test"
+                "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
         # Stopped after 2 iterations because cumulative cost ($2.5) > max_cost ($2.0)
@@ -262,7 +262,7 @@ class TestExecutorAutoResume:
             return_value=max_turns_output,
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
             output = await executor._execute_agent(
-                "test-agent", "task-1", {}, {}, 0, work_dir="/repos/test"
+                "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
         # Should stop at 10 iterations (max_resume_iterations)
@@ -293,7 +293,7 @@ class TestExecutorAutoResume:
             return_value=output_no_session,
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
             output = await executor._execute_agent(
-                "test-agent", "task-1", {}, {}, 0, work_dir="/repos/test"
+                "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
         # Only one call — no resume possible without session_id
@@ -334,7 +334,7 @@ class TestExecutorAutoResume:
             side_effect=[first_output, second_output],
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
             output = await executor._execute_agent(
-                "test-agent", "task-1", {}, {}, 0, work_dir="/repos/test"
+                "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
         # Should fall back to the first iteration's structured output
@@ -342,8 +342,8 @@ class TestExecutorAutoResume:
         assert output["_cumulative_cost_usd"] == 1.5
 
     @pytest.mark.asyncio
-    async def test_raw_outputs_all_tracked(self, sample_pipelines: Any) -> None:
-        """All raw outputs from multi-iteration runs are tracked."""
+    async def test_no_raw_outputs_in_result(self, sample_pipelines: Any) -> None:
+        """Raw outputs are not included in agent output (removed to reduce bloat)."""
         mock_db = AsyncMock(spec=Database)
         mock_tq = AsyncMock(spec=TaskQueue)
         registry = _make_mock_registry(max_cost=10.0)
@@ -369,11 +369,11 @@ class TestExecutorAutoResume:
             side_effect=[first_output, second_output],
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
             output = await executor._execute_agent(
-                "test-agent", "task-1", {}, {}, 0, work_dir="/repos/test"
+                "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
-        assert output["_raw_outputs_all"] == ["first raw output", "second raw output"]
-        assert output["_raw_output"] == "second raw output"
+        assert "_raw_outputs_all" not in output
+        assert "_raw_output" not in output
 
     @pytest.mark.asyncio
     async def test_max_turns_passed_to_execute_claude(self, sample_pipelines: Any) -> None:
@@ -395,7 +395,7 @@ class TestExecutorAutoResume:
             return_value=claude_output,
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
             await executor._execute_agent(
-                "test-agent", "task-1", {}, {}, 0, work_dir="/repos/test"
+                "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
         call_kwargs = mock_exec.call_args.kwargs
@@ -431,7 +431,7 @@ class TestExecutorAutoResume:
             return_value=claude_output,
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
             await executor._execute_agent(
-                "test-agent", "task-1", {}, {}, 0,
+                "test-agent", "task-1", {}, 0,
                 work_dir="/repos/test",
                 scoped_view=scoped_view,
             )

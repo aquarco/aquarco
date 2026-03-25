@@ -244,8 +244,8 @@ async def test_setup_branch_uses_head_branch_if_provided(sample_pipelines: Any) 
     executor = PipelineExecutor(AsyncMock(), AsyncMock(), AsyncMock(), sample_pipelines)
 
     with patch(
-        "aquarco_supervisor.pipeline.executor._git_checkout", new_callable=AsyncMock
-    ) as mock_checkout:
+        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+    ) as mock_run_git:
         branch = await executor._setup_branch(
             "task-001",
             {"head_branch": "feature/existing"},
@@ -253,7 +253,9 @@ async def test_setup_branch_uses_head_branch_if_provided(sample_pipelines: Any) 
         )
 
     assert branch == "feature/existing"
-    mock_checkout.assert_awaited_once_with("/repos/myrepo", "feature/existing")
+    mock_run_git.assert_awaited_once_with(
+        "/repos/myrepo", "checkout", "-B", "feature/existing", "feature/existing",
+    )
 
 
 @pytest.mark.asyncio
@@ -525,7 +527,7 @@ async def test_execute_stage_success(sample_pipelines: Any) -> None:
     ), patch(
         "aquarco_supervisor.pipeline.executor.Path",
     ):
-        output = await executor._execute_stage("implementation", "task-1", {}, {}, 0)
+        output = await executor._execute_stage("implementation", "task-1", {}, 0)
 
     assert output["_agent_name"] == "impl-agent"
     assert output["result"] == "done"
@@ -553,7 +555,7 @@ async def test_execute_stage_failure_records_and_raises(sample_pipelines: Any) -
         new_callable=AsyncMock,
         side_effect=RuntimeError("agent crashed"),
     ), pytest.raises(StageError, match="Stage 0.*failed"):
-        await executor._execute_stage("implementation", "task-1", {}, {}, 0)
+        await executor._execute_stage("implementation", "task-1", {}, 0)
 
     mock_tq.record_stage_failed.assert_awaited_once()
     mock_registry.decrement_agent_instances.assert_awaited_once()
@@ -820,3 +822,230 @@ async def test_execute_single_stage_task_not_found(sample_pipelines: Any) -> Non
 
     with pytest.raises(PipelineError, match="not found"):
         await executor.execute_pipeline("", "missing-task", {})
+
+
+# --- Stage Runs History: _execute_planned_stage run number logic ---
+
+
+def _make_registry_mock() -> MagicMock:
+    """Return a registry mock wired for _execute_planned_stage tests."""
+    mock_registry = MagicMock()
+    mock_registry.get_agent_prompt_file = MagicMock(return_value="/prompts/impl.md")
+    mock_registry.get_agent_timeout = MagicMock(return_value=30)
+    mock_registry.get_allowed_tools = MagicMock(return_value=[])
+    mock_registry.get_denied_tools = MagicMock(return_value=[])
+    mock_registry.get_agent_environment = MagicMock(return_value={})
+    mock_registry.get_agent_output_schema = MagicMock(return_value=None)
+    mock_registry.increment_agent_instances = AsyncMock()
+    mock_registry.decrement_agent_instances = AsyncMock()
+    return mock_registry
+
+
+@pytest.mark.asyncio
+async def test_execute_planned_stage_fresh_run(sample_pipelines: Any) -> None:
+    """When get_latest_stage_run returns None, the stage executes with run=1."""
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_tq = AsyncMock(spec=TaskQueue)
+    mock_tq.get_latest_stage_run = AsyncMock(return_value=None)
+    mock_registry = _make_registry_mock()
+
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor.execute_claude",
+        new_callable=AsyncMock,
+        return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
+    ), patch("aquarco_supervisor.pipeline.executor.Path"):
+        await executor._execute_planned_stage(
+            "task-1", 0, "implementation", "impl-agent", {}, iteration=1,
+        )
+
+    # No retry row should be created
+    mock_tq.create_rerun_stage.assert_not_awaited()
+    # record_stage_executing called with run=1
+    mock_tq.record_stage_executing.assert_awaited_once()
+    call_kwargs = mock_tq.record_stage_executing.call_args.kwargs
+    assert call_kwargs["run"] == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_planned_stage_retry_after_failure(sample_pipelines: Any) -> None:
+    """When latest run has status=failed, creates a retry row with run=latest+1."""
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_tq = AsyncMock(spec=TaskQueue)
+    mock_tq.get_latest_stage_run = AsyncMock(
+        return_value={"status": "failed", "run": 1, "error_message": "boom"}
+    )
+    mock_registry = _make_registry_mock()
+
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor.execute_claude",
+        new_callable=AsyncMock,
+        return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
+    ), patch("aquarco_supervisor.pipeline.executor.Path"):
+        await executor._execute_planned_stage(
+            "task-1", 0, "implementation", "impl-agent", {}, iteration=1,
+        )
+
+    # Must create a retry row with run=2
+    mock_tq.create_rerun_stage.assert_awaited_once()
+    retry_kwargs = mock_tq.create_rerun_stage.call_args
+    assert retry_kwargs.args[6] == 2 or retry_kwargs.kwargs.get("run") == 2 or retry_kwargs.args[-1] == 2
+
+    # record_stage_executing called with run=2
+    call_kwargs = mock_tq.record_stage_executing.call_args.kwargs
+    assert call_kwargs["run"] == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_planned_stage_retry_after_rate_limited(sample_pipelines: Any) -> None:
+    """When latest run has status=rate_limited, creates a retry row with run=latest+1."""
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_tq = AsyncMock(spec=TaskQueue)
+    mock_tq.get_latest_stage_run = AsyncMock(
+        return_value={"status": "rate_limited", "run": 2, "error_message": "429"}
+    )
+    mock_registry = _make_registry_mock()
+
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor.execute_claude",
+        new_callable=AsyncMock,
+        return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
+    ), patch("aquarco_supervisor.pipeline.executor.Path"):
+        await executor._execute_planned_stage(
+            "task-1", 0, "implementation", "impl-agent", {}, iteration=1,
+        )
+
+    # Must create a retry row with run=3
+    mock_tq.create_rerun_stage.assert_awaited_once()
+
+    # record_stage_executing called with run=3
+    call_kwargs = mock_tq.record_stage_executing.call_args.kwargs
+    assert call_kwargs["run"] == 3
+
+
+@pytest.mark.asyncio
+async def test_execute_planned_stage_reuse_pending_run(sample_pipelines: Any) -> None:
+    """When latest run has status=pending, reuses that run number without creating a new row."""
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_tq = AsyncMock(spec=TaskQueue)
+    mock_tq.get_latest_stage_run = AsyncMock(
+        return_value={"status": "pending", "run": 3, "error_message": None}
+    )
+    mock_registry = _make_registry_mock()
+
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor.execute_claude",
+        new_callable=AsyncMock,
+        return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
+    ), patch("aquarco_supervisor.pipeline.executor.Path"):
+        await executor._execute_planned_stage(
+            "task-1", 0, "implementation", "impl-agent", {}, iteration=1,
+        )
+
+    # No new retry row should be created
+    mock_tq.create_rerun_stage.assert_not_awaited()
+    # record_stage_executing called with the existing run=3
+    call_kwargs = mock_tq.record_stage_executing.call_args.kwargs
+    assert call_kwargs["run"] == 3
+
+
+# --- close_task_resources ---
+
+
+@pytest.mark.asyncio
+async def test_close_task_resources_removes_worktree(
+    sample_pipelines: Any, tmp_path: Any
+) -> None:
+    """close_task_resources removes the worktree directory."""
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(
+        return_value={"clone_dir": str(tmp_path / "clone"), "branch": "main"}
+    )
+    mock_tq = AsyncMock(spec=TaskQueue)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+    ) as mock_git, patch(
+        "aquarco_supervisor.pipeline.executor.Path"
+    ) as MockPath:
+        # Simulate worktree exists
+        mock_work_dir = MagicMock()
+        mock_work_dir.exists.return_value = True
+        mock_work_dir.__str__ = MagicMock(return_value="/var/lib/aquarco/worktrees/task-1")
+        MockPath.return_value.__truediv__ = MagicMock(return_value=mock_work_dir)
+        # glob returns no parallel worktrees
+        MockPath.return_value.glob.return_value = []
+
+        await executor.close_task_resources("task-1")
+
+    mock_git.assert_awaited_once()
+    assert "worktree" in mock_git.await_args.args
+    assert "remove" in mock_git.await_args.args
+
+
+@pytest.mark.asyncio
+async def test_close_task_resources_no_worktree(
+    sample_pipelines: Any, tmp_path: Any
+) -> None:
+    """close_task_resources is a no-op when worktree doesn't exist."""
+    mock_db = AsyncMock(spec=Database)
+    mock_tq = AsyncMock(spec=TaskQueue)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+    ) as mock_git, patch(
+        "aquarco_supervisor.pipeline.executor.Path"
+    ) as MockPath:
+        mock_work_dir = MagicMock()
+        mock_work_dir.exists.return_value = False
+        MockPath.return_value.__truediv__ = MagicMock(return_value=mock_work_dir)
+        MockPath.return_value.glob.return_value = []
+
+        await executor.close_task_resources("task-1")
+
+    mock_git.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_close_task_resources_fallback_rmtree(
+    sample_pipelines: Any, tmp_path: Any
+) -> None:
+    """close_task_resources falls back to rmtree when git worktree remove fails."""
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(
+        return_value={"clone_dir": str(tmp_path / "clone"), "branch": "main"}
+    )
+    mock_tq = AsyncMock(spec=TaskQueue)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor._run_git",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("git worktree remove failed"),
+    ), patch(
+        "aquarco_supervisor.pipeline.executor.shutil.rmtree"
+    ) as mock_rmtree, patch(
+        "aquarco_supervisor.pipeline.executor.Path"
+    ) as MockPath:
+        mock_work_dir = MagicMock()
+        mock_work_dir.exists.return_value = True
+        mock_work_dir.__str__ = MagicMock(return_value="/var/lib/aquarco/worktrees/task-1")
+        MockPath.return_value.__truediv__ = MagicMock(return_value=mock_work_dir)
+        MockPath.return_value.glob.return_value = []
+
+        await executor.close_task_resources("task-1")
+
+    mock_rmtree.assert_called_once_with(mock_work_dir, ignore_errors=True)
