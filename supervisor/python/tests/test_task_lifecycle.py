@@ -73,13 +73,15 @@ async def test_rerun_task_creates_new_task(
 
     new_id = await task_queue.rerun_task("task-1")
 
-    assert new_id == "issue-42-rerun-1"
+    # ID uses a UUID-based suffix: issue-42-rerun-<8hex>
+    assert new_id.startswith("issue-42-rerun-")
+    assert len(new_id.split("rerun-")[1]) == 8  # short UUID hex
     mock_db.execute.assert_called_once()
     call_sql = mock_db.execute.call_args[0][0]
     call_params = mock_db.execute.call_args[0][1]
     assert "INSERT INTO tasks" in call_sql
     assert "parent_task_id" in call_sql
-    assert call_params["new_id"] == "issue-42-rerun-1"
+    assert call_params["new_id"] == new_id
     assert call_params["parent_id"] == "task-1"
     assert call_params["title"] == "Original Task"
     assert json.loads(call_params["context"]) == {"key": "value"}
@@ -102,7 +104,8 @@ async def test_rerun_task_increments_counter(
     }
 
     new_id = await task_queue.rerun_task("task-1")
-    assert new_id == "ref-1-rerun-4"
+    assert new_id.startswith("ref-1-rerun-")
+    assert len(new_id.split("rerun-")[1]) == 8
 
 
 @pytest.mark.asyncio
@@ -134,7 +137,8 @@ async def test_rerun_task_fallback_to_task_id(
     }
 
     new_id = await task_queue.rerun_task("task-1")
-    assert new_id == "task-1-rerun-1"
+    assert new_id.startswith("task-1-rerun-")
+    assert len(new_id.split("rerun-")[1]) == 8
 
 
 # --- close_task ---

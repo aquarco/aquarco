@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from aquarco_supervisor.database import Database
-from aquarco_supervisor.workers.pull_worker import PullWorker
+from aquarco_supervisor.workers.pull_worker import PullWorker, _fetch_with_timeout
 
 
 @pytest.mark.asyncio
@@ -67,18 +67,24 @@ async def test_pull_ready_repos_pulls_and_updates_db(tmp_path: Any) -> None:
     db.execute = AsyncMock()
     db.fetch_val = AsyncMock(return_value=0)
 
-    sha_sequence = ["oldsha123", "", "", "newsha456"]
+    # _fetch_with_timeout replaces the git-fetch _run_git call, so only 3 _run_git calls:
+    # rev-parse HEAD, reset --hard, rev-parse HEAD
+    sha_sequence = ["oldsha123", "", "newsha456"]
 
     with patch(
-        "aquarco_supervisor.workers.pull_worker._run_git",
+        "aquarco_supervisor.workers.pull_worker._fetch_with_timeout",
         new_callable=AsyncMock,
-        side_effect=sha_sequence,
-    ) as mock_git:
-        worker = PullWorker(db)
-        await worker.pull_ready_repos()
+    ):
+        with patch(
+            "aquarco_supervisor.workers.pull_worker._run_git",
+            new_callable=AsyncMock,
+            side_effect=sha_sequence,
+        ) as mock_git:
+            worker = PullWorker(db)
+            await worker.pull_ready_repos()
 
-    # Should have called: rev-parse HEAD, fetch, reset, rev-parse HEAD
-    assert mock_git.await_count == 4
+    # Should have called: rev-parse HEAD, reset, rev-parse HEAD
+    assert mock_git.await_count == 3
 
     db.execute.assert_awaited_once()
     params = db.execute.await_args.args[1]
@@ -108,15 +114,20 @@ async def test_pull_ready_repos_no_db_update_on_same_sha(tmp_path: Any) -> None:
     db.fetch_val = AsyncMock(return_value=0)
 
     same_sha = "abc123"
-    sha_sequence = [same_sha, "", "", same_sha]
+    # 3 _run_git calls: rev-parse, reset, rev-parse (fetch is now _fetch_with_timeout)
+    sha_sequence = [same_sha, "", same_sha]
 
     with patch(
-        "aquarco_supervisor.workers.pull_worker._run_git",
+        "aquarco_supervisor.workers.pull_worker._fetch_with_timeout",
         new_callable=AsyncMock,
-        side_effect=sha_sequence,
     ):
-        worker = PullWorker(db)
-        await worker.pull_ready_repos()
+        with patch(
+            "aquarco_supervisor.workers.pull_worker._run_git",
+            new_callable=AsyncMock,
+            side_effect=sha_sequence,
+        ):
+            worker = PullWorker(db)
+            await worker.pull_ready_repos()
 
     # DB update still happens even when SHA is unchanged
     db.execute.assert_awaited_once()
@@ -144,21 +155,25 @@ async def test_pull_ready_repos_handles_git_error_gracefully(tmp_path: Any) -> N
     db.execute = AsyncMock()
     db.fetch_val = AsyncMock(return_value=0)
 
-    call_count = 0
-
     async def mock_git(clone_dir: str, *args: Any) -> str:
-        nonlocal call_count
-        call_count += 1
         if "broken-repo" in clone_dir:
-            raise RuntimeError("git fetch failed")
+            raise RuntimeError("rev-parse failed")
         return "sha-healthy"
 
+    async def mock_fetch(clone_dir: str, branch: str) -> None:
+        if "broken-repo" in clone_dir:
+            raise RuntimeError("git fetch failed")
+
     with patch(
-        "aquarco_supervisor.workers.pull_worker._run_git",
-        side_effect=mock_git,
+        "aquarco_supervisor.workers.pull_worker._fetch_with_timeout",
+        side_effect=mock_fetch,
     ):
-        worker = PullWorker(db)
-        await worker.pull_ready_repos()
+        with patch(
+            "aquarco_supervisor.workers.pull_worker._run_git",
+            side_effect=mock_git,
+        ):
+            worker = PullWorker(db)
+            await worker.pull_ready_repos()
 
     # Only the healthy repo should update the DB
     db.execute.assert_awaited_once()
@@ -182,16 +197,21 @@ async def test_pull_ready_repos_multiple_repos(tmp_path: Any) -> None:
     db.execute = AsyncMock()
     db.fetch_val = AsyncMock(return_value=0)
 
-    # 4 git calls per repo: rev-parse, fetch, reset, rev-parse
-    git_responses = ["sha1", "", "", "sha1"] * 3
+    # 3 _run_git calls per repo: rev-parse HEAD, reset, rev-parse HEAD
+    # (fetch is now handled by _fetch_with_timeout)
+    git_responses = ["sha1", "", "sha1"] * 3
 
     with patch(
-        "aquarco_supervisor.workers.pull_worker._run_git",
+        "aquarco_supervisor.workers.pull_worker._fetch_with_timeout",
         new_callable=AsyncMock,
-        side_effect=git_responses,
     ):
-        worker = PullWorker(db)
-        await worker.pull_ready_repos()
+        with patch(
+            "aquarco_supervisor.workers.pull_worker._run_git",
+            new_callable=AsyncMock,
+            side_effect=git_responses,
+        ):
+            worker = PullWorker(db)
+            await worker.pull_ready_repos()
 
     assert db.execute.await_count == 3
 
@@ -251,12 +271,17 @@ async def test_pull_active_pipeline_check_uses_correct_query(tmp_path: Any) -> N
     db.fetch_val = AsyncMock(return_value=0)
 
     with patch(
-        "aquarco_supervisor.workers.pull_worker._run_git",
+        "aquarco_supervisor.workers.pull_worker._fetch_with_timeout",
         new_callable=AsyncMock,
-        side_effect=["sha-old", "", "", "sha-new"],
     ):
-        worker = PullWorker(db)
-        await worker.pull_ready_repos()
+        with patch(
+            "aquarco_supervisor.workers.pull_worker._run_git",
+            new_callable=AsyncMock,
+            # 3 calls: rev-parse HEAD, reset, rev-parse HEAD
+            side_effect=["sha-old", "", "sha-new"],
+        ):
+            worker = PullWorker(db)
+            await worker.pull_ready_repos()
 
     # Verify fetch_val was called and the params contain the repo name
     db.fetch_val.assert_awaited_once()
@@ -290,12 +315,17 @@ async def test_pull_idle_repo_not_blocked_by_other_active_repo(tmp_path: Any) ->
     db.fetch_val = AsyncMock(side_effect=[2, 0])
 
     with patch(
-        "aquarco_supervisor.workers.pull_worker._run_git",
+        "aquarco_supervisor.workers.pull_worker._fetch_with_timeout",
         new_callable=AsyncMock,
-        side_effect=["sha-old", "", "", "sha-new"],
     ):
-        worker = PullWorker(db)
-        await worker.pull_ready_repos()
+        with patch(
+            "aquarco_supervisor.workers.pull_worker._run_git",
+            new_callable=AsyncMock,
+            # 3 calls for idle-repo only: rev-parse HEAD, reset, rev-parse HEAD
+            side_effect=["sha-old", "", "sha-new"],
+        ):
+            worker = PullWorker(db)
+            await worker.pull_ready_repos()
 
     # Only idle-repo should have been updated
     db.execute.assert_awaited_once()

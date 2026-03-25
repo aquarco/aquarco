@@ -259,11 +259,18 @@ async def test_poll_prs_processes_new_prs(sample_config: Any) -> None:
 
 # --- GitHubSourcePoller._poll_commits ---
 
+# Valid 40-hex SHAs required by the new _validate_sha guard
+_SHA_A = "aaa1112223331122334455667788990011223344"
+_SHA_B = "bbb4445556661122334455667788990011223344"
+_SHA_NEW = "abcdef1234567890abcdef1234567890abcdef12"
+_SHA_OLD = "111111aaaaaabbbbbbcccccc222222ddddddeeee"
+
+
 @pytest.mark.asyncio
 async def test_poll_commits_skips_pipeline_branch_subjects(
     sample_config: Any, tmp_path: Any
 ) -> None:
-    """Commits with 'aquarco/' in the subject are skipped to prevent task loops."""
+    """Commits with 'aquarco/' in subject are filtered; remaining commits form one push task."""
     git_dir = tmp_path / "repo" / ".git"
     git_dir.mkdir(parents=True)
 
@@ -271,60 +278,80 @@ async def test_poll_commits_skips_pipeline_branch_subjects(
     mock_tq.task_exists = AsyncMock(return_value=False)
     mock_tq.create_task = AsyncMock(return_value=True)
     mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value=None)
 
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     # Two commits: one normal, one with aquarco/ in the subject (pipeline merge)
     commit_lines = (
-        "aaa111222333\tAdd feature\tDev\t2024-06-01T00:00:00+00:00\n"
-        "bbb444555666\tMerge pull request #8 from borissuska/aquarco/github-commit-aquarco-bc1db35/review\tDev\t2024-06-01T00:00:00+00:00"
+        f"{_SHA_A}\tAdd feature\tDev\t2024-06-01T00:00:00+00:00\n"
+        f"{_SHA_B}\tMerge pull request from borissuska/aquarco/github-commit-aquarco-bc1db35/review\tDev\t2024-06-01T00:00:00+00:00"
     )
+
+    async def mock_run_git(clone_dir: str, *args: str, **_: Any) -> str:
+        if args[0] == "rev-parse" and "--abbrev-ref" in args:
+            return "origin/main"
+        if args[0] == "rev-parse":
+            return _SHA_NEW
+        if args[0] == "log":
+            return commit_lines
+        return ""
 
     with patch(
         "aquarco_supervisor.pollers.github_source._run_git",
-        new_callable=AsyncMock,
-        side_effect=["", "origin/main", commit_lines],
+        side_effect=mock_run_git,
     ):
-        result = await poller._poll_commits(
+        count, new_sha = await poller._poll_commits(
             "test-repo",
             str(tmp_path / "repo"),
             "2024-01-01T00:00:00Z",
         )
 
-    # Only the first commit should be processed
-    assert result == 1
+    # One push task created (the aquarco/ commit is filtered but the normal one remains)
+    assert count == 1
+    assert new_sha == _SHA_NEW
     call_kwargs = mock_tq.create_task.await_args.kwargs
-    assert call_kwargs["task_id"] == "github-commit-test-repo-aaa111222333"
+    assert call_kwargs["task_id"] == f"github-push-test-repo-{_SHA_NEW[:12]}"
 
 
 @pytest.mark.asyncio
 async def test_poll_commits_skips_all_aquarco_subjects(
     sample_config: Any, tmp_path: Any
 ) -> None:
-    """When all commits have aquarco/ in subject, none are processed."""
+    """When all commits have aquarco/ in subject, no task is created but new_sha is returned."""
     git_dir = tmp_path / "repo" / ".git"
     git_dir.mkdir(parents=True)
 
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.task_exists = AsyncMock(return_value=False)
     mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value=None)
 
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
-    commit_line = "ccc777888999\taquarco/github-commit-repo-abc/review\tBot\t2024-06-01T00:00:00+00:00"
+    commit_line = f"{_SHA_A}\taquarco/github-commit-repo-abc/review\tBot\t2024-06-01T00:00:00+00:00"
+
+    async def mock_run_git(clone_dir: str, *args: str, **_: Any) -> str:
+        if args[0] == "rev-parse" and "--abbrev-ref" in args:
+            return "origin/main"
+        if args[0] == "rev-parse":
+            return _SHA_NEW
+        if args[0] == "log":
+            return commit_line
+        return ""
 
     with patch(
         "aquarco_supervisor.pollers.github_source._run_git",
-        new_callable=AsyncMock,
-        side_effect=["", "origin/main", commit_line],
+        side_effect=mock_run_git,
     ):
-        result = await poller._poll_commits(
+        count, new_sha = await poller._poll_commits(
             "test-repo",
             str(tmp_path / "repo"),
             "2024-01-01T00:00:00Z",
         )
 
-    assert result == 0
+    assert count == 0
+    assert new_sha == _SHA_NEW
     mock_tq.create_task.assert_not_called()
 
 
@@ -338,16 +365,17 @@ async def test_poll_commits_uses_no_merges_flag(
 
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value=None)
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     captured_args: list = []
 
     async def mock_run_git(clone_dir: str, *args: str, **kwargs: Any) -> str:
         captured_args.append(args)
-        if args[0] == "fetch":
-            return ""
-        if args[0] == "rev-parse":
+        if args[0] == "rev-parse" and "--abbrev-ref" in args:
             return "origin/main"
+        if args[0] == "rev-parse":
+            return _SHA_NEW
         if args[0] == "log":
             return ""
         return ""
@@ -370,7 +398,7 @@ async def test_poll_commits_uses_no_merges_flag(
 
 @pytest.mark.asyncio
 async def test_poll_commits_skips_missing_clone_dir(sample_config: Any, tmp_path: Any) -> None:
-    """If the .git directory does not exist, returns 0."""
+    """If the .git directory does not exist, returns (0, None)."""
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_db = AsyncMock(spec=Database)
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
@@ -381,14 +409,14 @@ async def test_poll_commits_skips_missing_clone_dir(sample_config: Any, tmp_path
         "2024-01-01T00:00:00Z",
     )
 
-    assert result == 0
+    assert result == (0, None)
 
 
 @pytest.mark.asyncio
-async def test_poll_commits_creates_task_for_new_commit(
+async def test_poll_commits_creates_push_task_for_new_commits(
     sample_config: Any, tmp_path: Any
 ) -> None:
-    """Creates a task for each new commit line in git log output."""
+    """Creates a single push task when new commits arrive."""
     git_dir = tmp_path / "repo" / ".git"
     git_dir.mkdir(parents=True)
 
@@ -396,34 +424,44 @@ async def test_poll_commits_creates_task_for_new_commit(
     mock_tq.task_exists = AsyncMock(return_value=False)
     mock_tq.create_task = AsyncMock(return_value=True)
     mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value=None)
 
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
-    commit_line = "abc123def456\tAdd new feature\tJohn Doe\t2024-06-01T00:00:00+00:00"
+    commit_line = f"{_SHA_A}\tAdd new feature\tJohn Doe\t2024-06-01T00:00:00+00:00"
+
+    async def mock_run_git(clone_dir: str, *args: str, **_: Any) -> str:
+        if args[0] == "rev-parse" and "--abbrev-ref" in args:
+            return "origin/main"
+        if args[0] == "rev-parse":
+            return _SHA_NEW
+        if args[0] == "log":
+            return commit_line
+        return ""
 
     with patch(
         "aquarco_supervisor.pollers.github_source._run_git",
-        new_callable=AsyncMock,
-        side_effect=["", "origin/main", commit_line],
+        side_effect=mock_run_git,
     ):
-        result = await poller._poll_commits(
+        count, new_sha = await poller._poll_commits(
             "test-repo",
             str(tmp_path / "repo"),
             "2024-01-01T00:00:00Z",
         )
 
-    assert result == 1
+    assert count == 1
+    assert new_sha == _SHA_NEW
     call_kwargs = mock_tq.create_task.await_args.kwargs
-    assert call_kwargs["task_id"] == "github-commit-test-repo-abc123def456"
+    assert call_kwargs["task_id"] == f"github-push-test-repo-{_SHA_NEW[:12]}"
     assert call_kwargs["pipeline"] == "pr-review-pipeline"
     assert call_kwargs["source"] == "github-commits"
 
 
 @pytest.mark.asyncio
-async def test_poll_commits_skips_existing_commit(
+async def test_poll_commits_skips_existing_push_task(
     sample_config: Any, tmp_path: Any
 ) -> None:
-    """Does not create a task for commits that already exist in the DB."""
+    """Does not create a push task when one already exists for the same head sha."""
     git_dir = tmp_path / "repo" / ".git"
     git_dir.mkdir(parents=True)
 
@@ -431,23 +469,32 @@ async def test_poll_commits_skips_existing_commit(
     mock_tq.task_exists = AsyncMock(return_value=True)
     mock_tq.create_task = AsyncMock(return_value=False)
     mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value=None)
 
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
-    commit_line = "abc123def456\tOld commit\tJane Doe\t2024-06-01T00:00:00+00:00"
+    commit_line = f"{_SHA_A}\tOld commit\tJane Doe\t2024-06-01T00:00:00+00:00"
+
+    async def mock_run_git(clone_dir: str, *args: str, **_: Any) -> str:
+        if args[0] == "rev-parse" and "--abbrev-ref" in args:
+            return "origin/main"
+        if args[0] == "rev-parse":
+            return _SHA_NEW
+        if args[0] == "log":
+            return commit_line
+        return ""
 
     with patch(
         "aquarco_supervisor.pollers.github_source._run_git",
-        new_callable=AsyncMock,
-        side_effect=["", "origin/main", commit_line],
+        side_effect=mock_run_git,
     ):
-        result = await poller._poll_commits(
+        count, _ = await poller._poll_commits(
             "test-repo",
             str(tmp_path / "repo"),
             "2024-01-01T00:00:00Z",
         )
 
-    assert result == 0
+    assert count == 0
     mock_tq.create_task.assert_not_awaited()
 
 
@@ -464,9 +511,9 @@ async def test_poll_uses_fallback_cursor_when_none(sample_config: Any) -> None:
 
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
-    # Patch sub-methods to avoid real I/O
+    # _poll_commits now returns (tasks_created, new_head_sha)
     poller._poll_prs = AsyncMock(return_value=0)
-    poller._poll_commits = AsyncMock(return_value=0)
+    poller._poll_commits = AsyncMock(return_value=(0, None))
 
     await poller.poll()
 
@@ -486,7 +533,8 @@ async def test_poll_accumulates_total_created(sample_config: Any) -> None:
 
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
     poller._poll_prs = AsyncMock(return_value=2)
-    poller._poll_commits = AsyncMock(return_value=3)
+    # _poll_commits returns (tasks_created, new_head_sha)
+    poller._poll_commits = AsyncMock(return_value=(3, None))
 
     total = await poller.poll()
 
@@ -504,7 +552,8 @@ async def test_poll_handles_pr_poll_exception(sample_config: Any) -> None:
 
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
     poller._poll_prs = AsyncMock(side_effect=RuntimeError("gh cli failed"))
-    poller._poll_commits = AsyncMock(return_value=1)
+    # _poll_commits returns (tasks_created, new_head_sha)
+    poller._poll_commits = AsyncMock(return_value=(1, None))
 
     total = await poller.poll()
 
@@ -535,7 +584,7 @@ async def test_poll_handles_commit_poll_exception(sample_config: Any) -> None:
 async def test_poll_commits_falls_back_to_main(
     sample_config: Any, tmp_path: Any
 ) -> None:
-    """When rev-parse fails, default branch falls back to 'main'."""
+    """When rev-parse --abbrev-ref fails, default branch falls back to 'main'."""
     git_dir = tmp_path / "repo" / ".git"
     git_dir.mkdir(parents=True)
 
@@ -543,16 +592,17 @@ async def test_poll_commits_falls_back_to_main(
     mock_tq.task_exists = AsyncMock(return_value=False)
     mock_tq.create_task = AsyncMock(return_value=True)
     mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value=None)
 
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
-    commit_line = "aaa111222333\tFix bug\tDev\t2024-06-01T00:00:00+00:00"
+    commit_line = f"{_SHA_A}\tFix bug\tDev\t2024-06-01T00:00:00+00:00"
 
     async def mock_run_git(clone_dir: str, *args: str, **kwargs: Any) -> str:
-        if args[0] == "fetch":
-            return ""
-        if args[0] == "rev-parse":
+        if args[0] == "rev-parse" and "--abbrev-ref" in args:
             raise RuntimeError("not found")
+        if args[0] == "rev-parse":
+            return _SHA_NEW
         if args[0] == "log":
             assert "origin/main" in args[1]
             return commit_line
@@ -562,61 +612,78 @@ async def test_poll_commits_falls_back_to_main(
         "aquarco_supervisor.pollers.github_source._run_git",
         side_effect=mock_run_git,
     ):
-        result = await poller._poll_commits(
+        count, _ = await poller._poll_commits(
             "test-repo",
             str(tmp_path / "repo"),
             "2024-01-01T00:00:00Z",
         )
 
-    assert result == 1
+    assert count == 1
 
 
 @pytest.mark.asyncio
 async def test_poll_commits_empty_output(
     sample_config: Any, tmp_path: Any
 ) -> None:
-    """Empty git log output returns 0."""
+    """Empty git log output returns (0, new_head_sha)."""
     git_dir = tmp_path / "repo" / ".git"
     git_dir.mkdir(parents=True)
 
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value=None)
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
+
+    async def mock_run_git(clone_dir: str, *args: str, **_: Any) -> str:
+        if args[0] == "rev-parse" and "--abbrev-ref" in args:
+            return "origin/main"
+        if args[0] == "rev-parse":
+            return _SHA_NEW
+        return ""
 
     with patch(
         "aquarco_supervisor.pollers.github_source._run_git",
-        new_callable=AsyncMock,
-        side_effect=["", "origin/main", ""],
+        side_effect=mock_run_git,
     ):
-        result = await poller._poll_commits(
+        count, new_sha = await poller._poll_commits(
             "test-repo", str(tmp_path / "repo"), "2024-01-01T00:00:00Z",
         )
 
-    assert result == 0
+    assert count == 0
+    assert new_sha == _SHA_NEW
 
 
 @pytest.mark.asyncio
 async def test_poll_commits_malformed_line_skipped(
     sample_config: Any, tmp_path: Any
 ) -> None:
-    """Lines with fewer than 4 tab-separated fields are skipped."""
+    """Lines with fewer than 4 tab-separated fields are skipped; (0, new_sha) returned."""
     git_dir = tmp_path / "repo" / ".git"
     git_dir.mkdir(parents=True)
 
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value=None)
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
+
+    async def mock_run_git(clone_dir: str, *args: str, **_: Any) -> str:
+        if args[0] == "rev-parse" and "--abbrev-ref" in args:
+            return "origin/main"
+        if args[0] == "rev-parse":
+            return _SHA_NEW
+        if args[0] == "log":
+            return "short\tline"
+        return ""
 
     with patch(
         "aquarco_supervisor.pollers.github_source._run_git",
-        new_callable=AsyncMock,
-        side_effect=["", "origin/main", "short\tline"],
+        side_effect=mock_run_git,
     ):
-        result = await poller._poll_commits(
+        count, _ = await poller._poll_commits(
             "test-repo", str(tmp_path / "repo"), "2024-01-01T00:00:00Z",
         )
 
-    assert result == 0
+    assert count == 0
     mock_tq.create_task.assert_not_called()
 
 
@@ -624,7 +691,7 @@ async def test_poll_commits_malformed_line_skipped(
 async def test_poll_commits_skips_aquarco_subject(
     sample_config: Any, tmp_path: Any
 ) -> None:
-    """Commits with 'aquarco/' in the subject are skipped (pipeline-created)."""
+    """aquarco/ pipeline commit is filtered; remaining normal commit forms a push task."""
     git_dir = tmp_path / "repo" / ".git"
     git_dir.mkdir(parents=True)
 
@@ -632,62 +699,80 @@ async def test_poll_commits_skips_aquarco_subject(
     mock_tq.task_exists = AsyncMock(return_value=False)
     mock_tq.create_task = AsyncMock(return_value=True)
     mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value=None)
 
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     # One pipeline commit (should be skipped) and one normal commit
     commit_lines = (
-        "aaa111222333\tMerge aquarco/task-1/feature\tBot\t2024-06-01T00:00:00+00:00\n"
-        "bbb222333444\tFix actual bug\tDev\t2024-06-01T00:00:00+00:00"
+        f"{_SHA_A}\tMerge aquarco/task-1/feature\tBot\t2024-06-01T00:00:00+00:00\n"
+        f"{_SHA_B}\tFix actual bug\tDev\t2024-06-01T00:00:00+00:00"
     )
+
+    async def mock_run_git(clone_dir: str, *args: str, **_: Any) -> str:
+        if args[0] == "rev-parse" and "--abbrev-ref" in args:
+            return "origin/main"
+        if args[0] == "rev-parse":
+            return _SHA_NEW
+        if args[0] == "log":
+            return commit_lines
+        return ""
 
     with patch(
         "aquarco_supervisor.pollers.github_source._run_git",
-        new_callable=AsyncMock,
-        side_effect=["", "origin/main", commit_lines],
+        side_effect=mock_run_git,
     ):
-        result = await poller._poll_commits(
+        count, _ = await poller._poll_commits(
             "test-repo",
             str(tmp_path / "repo"),
             "2024-01-01T00:00:00Z",
         )
 
-    # Only the non-aquarco commit should create a task
-    assert result == 1
+    # One push task for the non-aquarco commit
+    assert count == 1
     call_kwargs = mock_tq.create_task.await_args.kwargs
-    assert call_kwargs["task_id"] == "github-commit-test-repo-bbb222333444"
+    assert call_kwargs["task_id"] == f"github-push-test-repo-{_SHA_NEW[:12]}"
 
 
 @pytest.mark.asyncio
-async def test_poll_commits_skips_all_aquarco_subjects(
+async def test_poll_commits_skips_all_aquarco_subjects_v2(
     sample_config: Any, tmp_path: Any
 ) -> None:
-    """When all commits have aquarco/ in subject, none are created."""
+    """When all commits have aquarco/ in subject, no task is created."""
     git_dir = tmp_path / "repo" / ".git"
     git_dir.mkdir(parents=True)
 
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.task_exists = AsyncMock(return_value=False)
     mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value=None)
 
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
 
     commit_lines = (
-        "aaa111222333\tfeat: Review aquarco/task-1\tBot\t2024-06-01T00:00:00+00:00"
+        f"{_SHA_A}\tfeat: Review aquarco/task-1\tBot\t2024-06-01T00:00:00+00:00"
     )
+
+    async def mock_run_git(clone_dir: str, *args: str, **_: Any) -> str:
+        if args[0] == "rev-parse" and "--abbrev-ref" in args:
+            return "origin/main"
+        if args[0] == "rev-parse":
+            return _SHA_NEW
+        if args[0] == "log":
+            return commit_lines
+        return ""
 
     with patch(
         "aquarco_supervisor.pollers.github_source._run_git",
-        new_callable=AsyncMock,
-        side_effect=["", "origin/main", commit_lines],
+        side_effect=mock_run_git,
     ):
-        result = await poller._poll_commits(
+        count, _ = await poller._poll_commits(
             "test-repo",
             str(tmp_path / "repo"),
             "2024-01-01T00:00:00Z",
         )
 
-    assert result == 0
+    assert count == 0
     mock_tq.create_task.assert_not_called()
 
 
@@ -702,7 +787,7 @@ async def test_poll_no_repos_from_db(sample_config: Any) -> None:
 
     poller = GitHubSourcePoller(sample_config, mock_tq, mock_db)
     poller._poll_prs = AsyncMock(return_value=0)
-    poller._poll_commits = AsyncMock(return_value=0)
+    poller._poll_commits = AsyncMock(return_value=(0, None))
 
     total = await poller.poll()
 

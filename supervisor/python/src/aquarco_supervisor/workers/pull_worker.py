@@ -14,6 +14,14 @@ log = get_logger("pull-worker")
 
 _FETCH_TIMEOUT = 30  # seconds
 
+# Matches embedded credentials in URLs like https://token@host/…
+_CREDENTIAL_RE = re.compile(r"https?://[^@\s]+@")
+
+
+def _redact_credentials(text: str) -> str:
+    """Replace embedded URL credentials with a placeholder."""
+    return _CREDENTIAL_RE.sub("https://<redacted>@", text)
+
 
 async def _fetch_with_timeout(clone_dir: str, branch: str) -> None:
     """Run git fetch with a hard timeout, killing the process if it hangs."""
@@ -29,7 +37,9 @@ async def _fetch_with_timeout(clone_dir: str, branch: str) -> None:
         await proc.wait()
         raise RuntimeError(f"git fetch timed out after {_FETCH_TIMEOUT}s")
     if proc.returncode != 0:
-        err = stderr.decode("utf-8", errors="replace").strip()
+        # Redact any token that git may echo back in the error URL before
+        # propagating the message into logs or exception strings.
+        err = _redact_credentials(stderr.decode("utf-8", errors="replace").strip())
         raise RuntimeError(f"git fetch failed ({proc.returncode}): {err}")
 
 
@@ -58,6 +68,18 @@ class PullWorker:
             name = row["name"]
             clone_dir = row["clone_dir"]
             branch = row["branch"]
+
+            # Reject non-absolute or path-traversal clone dirs.  The value
+            # originates from our own DB but a defense-in-depth check prevents
+            # an unexpected value from being used with git -C.
+            resolved = Path(clone_dir).resolve()
+            if not resolved.is_absolute() or str(resolved) != str(Path(clone_dir).absolute()):
+                log.error(
+                    "pull_skipped_suspicious_clone_dir",
+                    name=name,
+                    clone_dir=clone_dir,
+                )
+                continue
 
             if not Path(clone_dir, ".git").exists():
                 continue

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,25 @@ from ..utils import url_to_slug as _url_to_slug
 from .base import BasePoller
 
 log = get_logger("github-source")
+
+# Git SHAs are exactly 40 lowercase hex characters.
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+# Branch names must not contain shell metacharacters or start with a dash.
+_SAFE_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]*$")
+
+
+def _validate_sha(value: str, context: str) -> str:
+    """Return value unchanged if it is a valid 40-hex SHA, else raise."""
+    if not _SHA_RE.match(value.strip()):
+        raise ValueError(f"Invalid git SHA in {context!r}: {value!r}")
+    return value.strip()
+
+
+def _validate_branch(value: str, context: str) -> str:
+    """Return value unchanged if it is a safe branch name, else raise."""
+    if not _SAFE_BRANCH_RE.match(value):
+        raise ValueError(f"Unsafe branch name in {context!r}: {value!r}")
+    return value
 
 
 class GitHubSourcePoller(BasePoller):
@@ -105,24 +125,39 @@ class GitHubSourcePoller(BasePoller):
         )
         state_data = state_row["state_data"] if state_row else {}
         if isinstance(state_data, str):
-            import json as _json
-            state_data = _json.loads(state_data)
-        old_head_sha = state_data.get(f"head_sha:{repo_name}")
+            state_data = json.loads(state_data)
+        raw_old_sha = state_data.get(f"head_sha:{repo_name}")
+        # Validate the stored SHA before using it in a git argument.  A
+        # corrupted or tampered state_data value must not reach the git CLI.
+        old_head_sha: str | None = None
+        if raw_old_sha is not None:
+            try:
+                old_head_sha = _validate_sha(str(raw_old_sha), "poll_state head_sha")
+            except ValueError:
+                log.warning(
+                    "commit_poll_invalid_stored_sha",
+                    repo=repo_name,
+                    raw=str(raw_old_sha)[:16],
+                )
+                old_head_sha = None
 
         # Use the local repo state (pull_worker keeps it up to date via git fetch).
         # No git-fetch here — avoids auth issues and duplicate fetches.
 
-        # Get default branch
+        # Get default branch and validate it before using in git arguments.
         try:
             head_ref = await _run_git(clone_dir, "rev-parse", "--abbrev-ref", "origin/HEAD")
-            default_branch = head_ref.replace("origin/", "")
+            raw_branch = head_ref.replace("origin/", "", 1).strip()
+            default_branch = _validate_branch(raw_branch, "origin/HEAD")
         except Exception:
             default_branch = "main"
 
-        # Get current head sha from local refs (updated by pull_worker)
-        new_head_sha = await _run_git(
+        # Get current head sha from local refs (updated by pull_worker).
+        # Validate the git output — never trust subprocess results blindly.
+        raw_new_sha = await _run_git(
             clone_dir, "rev-parse", f"origin/{default_branch}",
         )
+        new_head_sha = _validate_sha(raw_new_sha, "rev-parse origin/default_branch")
 
         # No new commits if head hasn't changed
         if old_head_sha and old_head_sha == new_head_sha:
@@ -135,8 +170,10 @@ class GitHubSourcePoller(BasePoller):
             new_sha=new_head_sha[:12],
         )
 
-        # Get commits between old head and new head (sha-based, not time-based)
+        # Build the rev-range from validated SHAs and branch names only.
         if old_head_sha:
+            # old_head_sha is already validated as 40-hex; using -- separator
+            # prevents git from misinterpreting the SHA as a flag.
             rev_range = f"{old_head_sha}..origin/{default_branch}"
         else:
             rev_range = f"origin/{default_branch}"
@@ -147,7 +184,7 @@ class GitHubSourcePoller(BasePoller):
             "--pretty=format:%H\t%s\t%an\t%aI",
         ]
         if not old_head_sha:
-            args.extend([f"--since={cursor}"])
+            args.append(f"--since={cursor}")
 
         output = await _run_git(*args)
 
@@ -165,8 +202,10 @@ class GitHubSourcePoller(BasePoller):
                 log.debug("skip_pipeline_merge", sha=sha[:12], subject=subject)
                 continue
             commits.append({
-                "sha": sha, "subject": subject,
-                "author": author, "date": date,
+                "sha": sha,
+                "subject": subject,
+                "author": author,
+                "date": date,
             })
 
         if not commits:
@@ -181,7 +220,8 @@ class GitHubSourcePoller(BasePoller):
         if len(commits) == 1:
             title = f"Review push: {commits[0]['subject'][:80]}"
         else:
-            title = f"Review push: {len(commits)} commits ({old_head_sha[:8] if old_head_sha else '?'}..{new_head_sha[:8]})"
+            old_part = old_head_sha[:8] if old_head_sha else "?"
+            title = f"Review push: {len(commits)} commits ({old_part}..{new_head_sha[:8]})"
 
         context: dict[str, Any] = {
             "push_old_sha": old_head_sha,
@@ -197,8 +237,7 @@ class GitHubSourcePoller(BasePoller):
             task_id=task_id,
         )
 
-        created = 0
-        if await self._tq.create_task(
+        task_created = await self._tq.create_task(
             task_id=task_id,
             title=title,
             source="github-commits",
@@ -206,10 +245,8 @@ class GitHubSourcePoller(BasePoller):
             repository=repo_name,
             pipeline="pr-review-pipeline",
             context=context,
-        ):
-            created = 1
-
-        return created, new_head_sha
+        )
+        return (1 if task_created else 0), new_head_sha
 
     async def _process_pr(
         self,
@@ -288,7 +325,11 @@ async def _gh_list_prs(repo_slug: str, timeout: int = 60) -> list[dict[str, Any]
         await proc.wait()
         raise RuntimeError(f"gh pr list timed out after {timeout}s for {repo_slug}")
     if proc.returncode != 0:
-        raise RuntimeError(f"gh pr list failed: {stderr.decode('utf-8', errors='replace')}")
+        # Redact any embedded credentials (e.g., https://token@host/…) before
+        # propagating stderr text into logs or error messages.
+        err_text = stderr.decode("utf-8", errors="replace")
+        err_text = re.sub(r"https?://[^@\s]+@", "https://<redacted>@", err_text)
+        raise RuntimeError(f"gh pr list failed: {err_text}")
     prs: list[dict[str, Any]] = json.loads(stdout.decode())
     return prs
 
