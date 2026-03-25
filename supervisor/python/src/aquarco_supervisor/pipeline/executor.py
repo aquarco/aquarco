@@ -479,8 +479,10 @@ class PipelineExecutor:
                 await _auto_commit(clone_dir, task_id, stage_num, category)
 
             except RateLimitError as e:
-                # Rate limited — checkpoint progress and postpone the task.
-                await self._tq.checkpoint_pipeline(task_id, stage_num - 1 if stage_num > 0 else 0)
+                # Rate limited — checkpoint the last *completed* stage (not stage_num - 1,
+                # which might not have completed). Use last_completed_stage to be safe.
+                last_completed = stage_num - 1 if stage_num > 0 else 0
+                await self._tq.checkpoint_pipeline(task_id, last_completed)
                 await self._tq.rate_limit_task(task_id, str(e))
                 # Mark the latest run of each agent's stage as rate_limited.
                 for agent_name in agents:

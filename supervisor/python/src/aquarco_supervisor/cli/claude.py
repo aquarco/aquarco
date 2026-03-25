@@ -485,9 +485,17 @@ def _extract_json(text: str) -> dict[str, Any] | None:
 
 
 def _is_rate_limited(debug_log: Path) -> bool:
-    """Check whether the Claude CLI debug log contains 429 rate-limit errors."""
+    """Check whether the Claude CLI debug log contains 429 rate-limit errors.
+
+    Only reads the last 32 KB to avoid high memory usage on large debug logs.
+    """
     try:
-        text = debug_log.read_text(errors="replace")
+        size = debug_log.stat().st_size
+        read_size = min(size, 32768)
+        with open(debug_log, "rb") as f:
+            if size > read_size:
+                f.seek(size - read_size)
+            text = f.read().decode("utf-8", errors="replace")
     except OSError:
         return False
     return "rate_limit_error" in text or "status code 429" in text.lower()

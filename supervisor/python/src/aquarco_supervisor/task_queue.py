@@ -259,7 +259,8 @@ class TaskQueue:
         validation_items_out: list[dict[str, Any]] | None = None,
     ) -> None:
         """Upsert a completed stage record and advance the task's current_stage."""
-        # Separate raw output from structured data to avoid bloating context
+        # raw_output is no longer set by _execute_agent (replaced by live_output
+        # streaming). Pop to keep the interface consistent; value will be NULL in DB.
         raw_output = output.pop("_raw_output", None)
         structured_json = json.dumps(output)
         if stage_key:
@@ -780,14 +781,7 @@ class TaskQueue:
 
     async def rerun_task(self, task_id: str) -> str:
         """Create a new task referencing the original (RERUN semantics). Returns new task ID."""
-        # Count existing reruns to generate unique ID
-        count_row = await self._db.fetch_val(
-            """
-            SELECT COUNT(*) FROM tasks WHERE parent_task_id = %(id)s
-            """,
-            {"id": task_id},
-        )
-        n = (count_row or 0) + 1
+        import uuid
 
         original = await self._db.fetch_one(
             """
@@ -800,7 +794,9 @@ class TaskQueue:
             raise ValueError(f"Task {task_id} not found")
 
         source_ref = original["source_ref"] or task_id
-        new_id = f"{source_ref}-rerun-{n}"
+        # Use a short UUID suffix to avoid primary key collisions under concurrency.
+        short_uid = uuid.uuid4().hex[:8]
+        new_id = f"{source_ref}-rerun-{short_uid}"
 
         await self._db.execute(
             """
