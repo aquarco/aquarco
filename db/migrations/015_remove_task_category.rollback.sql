@@ -1,0 +1,4 @@
+SET search_path TO aquarco, public;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS category TEXT;
+ALTER TABLE tasks ALTER COLUMN pipeline DROP NOT NULL;
+ALTER TABLE tasks ALTER COLUMN pipeline DROP DEFAULT;

@@ -22,7 +22,8 @@ Open http://localhost:8080, log in to GitHub and Claude, then add a repository.
 │  ┌─ VirtualBox VM (Ubuntu 24.04) ──────────────────────────────┐  │
 │  │                                                             │  │
 │  │  ┌─ Docker Compose ──────────────────────────────────────┐  │  │
-│  │  │  postgres:16  (5432)    ← migrations from db/         │  │  │
+│  │  │  postgres:16  (5432)    ← data storage                 │  │  │
+│  │  │  migrations   (oneshot) ← yoyo apply on each start     │  │  │
 │  │  │  api:node:20  (4000)    ← GraphQL, auth handlers      │  │  │
 │  │  │  web:node:20  (8080)    ← Next.js dashboard           │  │  │
 │  │  └───────────────────────────────────────────────────────┘  │  │
@@ -40,11 +41,12 @@ Open http://localhost:8080, log in to GitHub and Claude, then add a repository.
 
 ### Docker Compose Stack (`docker/compose.yml`)
 
-| Service  | Image              | Port            | User     | Purpose                     |
-|----------|--------------------|-----------------|----------|-----------------------------|
-| postgres | postgres:16-alpine | 5432 (internal) | postgres | Database                    |
-| api      | node:20-alpine     | 4000            | node     | GraphQL API, auth endpoints |
-| web      | node:20-alpine     | 8080 (→3000)    | node     | Next.js dashboard           |
+| Service    | Image              | Port            | User     | Purpose                          |
+|------------|--------------------|-----------------|----------|----------------------------------|
+| postgres   | postgres:16-alpine | 5432 (internal) | postgres | Database                         |
+| migrations | python:3.12-alpine | —               | root     | yoyo-migrations (runs on each up)|
+| api        | node:20-alpine     | 4000            | node     | GraphQL API, auth endpoints      |
+| web        | node:20-alpine     | 8080 (→3000)    | node     | Next.js dashboard                |
 
 Source code is bind-mounted for hot reload; `node_modules` use named volumes.
 
@@ -328,7 +330,13 @@ Source changes on the host are immediately visible inside the VM.
 
 - **API/Web**: Hot-reloaded automatically (Docker bind mounts + polling watchers)
 - **Supervisor**: Editable pip install (`pip install -e`); restart service to pick up changes
-- **DB schema**: Migrations in `db/migrations/` run on first `docker compose up`
+- **DB schema**: Migrations in `db/migrations/` are applied via [yoyo-migrations](https://ollama.com/library/yoyo) on every `docker compose up`. Use `db/migrate.sh` for manual operations:
+  ```bash
+  # Inside the VM
+  docker compose -f /home/agent/aquarco/docker/compose.yml run --rm migrations list      # show status
+  docker compose -f /home/agent/aquarco/docker/compose.yml run --rm migrations rollback   # undo last
+  docker compose -f /home/agent/aquarco/docker/compose.yml run --rm migrations reapply    # rollback + apply
+  ```
 
 ### Useful Commands
 

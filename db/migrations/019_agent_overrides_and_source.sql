@@ -1,3 +1,4 @@
+-- depends: 018_rename_schema
 -- Add source column to agent_definitions to track where each agent comes from:
 --   'default'          = built-in agents from default config
 --   'global:<repo>'    = agents from a global config repository

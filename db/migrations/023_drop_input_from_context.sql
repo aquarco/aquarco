@@ -1,3 +1,4 @@
+-- depends: 022_fix_agent_overrides_schema
 -- Migration: 023_drop_input_from_context.sql
 -- Purpose: Remove `input` field from get_task_context() to prevent context bloat.
 --
@@ -10,8 +11,6 @@
 -- excluded from the context function so it no longer feeds into subsequent stages.
 --
 -- Depends on: 015_remove_task_category.sql
-
--- up
 
 SET search_path TO aquarco, public;
 
@@ -129,5 +128,4 @@ BEGIN
 END;
 $$;
 
--- down
--- To revert, re-run migration 015 which includes `'input', s.input` in the function.
+

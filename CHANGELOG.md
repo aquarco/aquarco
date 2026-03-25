@@ -1,5 +1,21 @@
 # Changelog
 
+## [2026-03-25] — Convert to yoyo migrations (#22)
+
+### Added
+- **yoyo-migrations** integration — database migrations now use the [yoyo-migrations](https://ollama.com/library/yoyo) framework instead of one-shot `docker-entrypoint-initdb.d` scripts
+- `migrations` Docker Compose service — lightweight Python 3.12 Alpine container that runs `yoyo apply` on every `docker compose up`, ensuring the database schema is always current
+- `db/Dockerfile` — builds the migrations container with `yoyo-migrations[postgres]`
+- `db/yoyo.ini` — yoyo configuration (sources directory, database URL from `DATABASE_URL` env var)
+- `db/migrate.sh` — helper script supporting `apply`, `rollback`, `reapply`, and `list` operations
+- 26 `.rollback.sql` companion files — one for each migration, enabling safe rollback of any migration step
+- `-- depends:` dependency headers in all migration SQL files establishing a linear migration chain
+
+### Changed
+- All 26 existing migration SQL files converted to yoyo format (added dependency headers, removed legacy `-- up`/`-- down` markers)
+- `docker/compose.yml` — removed `initdb.d` volume mount from postgres; added `migrations` service; `api` now depends on `migrations` completing successfully
+- `supervisor/templates/docker-compose.repo.yml.tmpl` — updated to match new migrations pattern
+
 ## [2026-03-25] — Redesign agents page (#1)
 
 ### Added

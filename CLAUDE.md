@@ -58,7 +58,7 @@ changes.
 |-----------|-------------------|------------|-----------|-----------------|
 | **Web (Next.js)** | `web` (Docker) | ✅ Works | `next dev` + watchpack | `WATCHPACK_POLLING=true` |
 | **API (GraphQL)** | `api` (Docker) | ✅ Works | `tsx watch` + chokidar | `CHOKIDAR_USEPOLLING=true` |
-| **PostgreSQL** | `postgres` (Docker) | N/A | Migrations run at startup only | — |
+| **PostgreSQL** | `postgres` (Docker) | N/A | yoyo-migrations applied on each `docker compose up` | — |
 | **Supervisor** | systemd service | ❌ Manual | Config reload via `SIGHUP`; **code changes require restart** | — |
 | **Monitoring** | Prometheus/Grafana/Loki | ❌ Manual | Container restart required | — |
 

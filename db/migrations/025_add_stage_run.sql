@@ -1,3 +1,4 @@
+-- depends: 024_add_rate_limited_status
 -- Migration: 025_add_stage_run.sql
 -- Purpose: Add run column to stages for tracking retry attempts.
 --
@@ -8,8 +9,6 @@
 --   4. Update get_task_context() to return only the latest run per (stage_key, iteration)
 --
 -- Depends on: 014_pipeline_redesign.sql
-
--- up
 
 SET search_path TO aquarco, public;
 
@@ -165,11 +164,4 @@ COMMENT ON FUNCTION get_task_context(TEXT) IS
     'Returns NULL if the task does not exist. '
     'Only the latest run per (stage_key, iteration) is included — older runs are preserved in the table.';
 
--- down
 
--- ALTER TABLE stages DROP COLUMN IF EXISTS run;
--- DROP INDEX IF EXISTS idx_stages_task_stage_key_iteration_run;
--- Recreate old index:
--- CREATE UNIQUE INDEX idx_stages_task_stage_key_iteration
---     ON stages(task_id, stage_key, iteration)
---     WHERE stage_key IS NOT NULL;

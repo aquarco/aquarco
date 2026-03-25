@@ -1,3 +1,4 @@
+-- depends: 006_create_agent_instances
 -- Migration: 007_create_pipeline_checkpoints.sql
 -- Purpose: Pipeline resume checkpoints for crash recovery.
 --
@@ -14,8 +15,6 @@
 -- resume cleanly (environment variables, workspace paths, branch names).
 --
 -- Depends on: 002_create_tasks.sql (tasks table)
-
--- up
 
 SET search_path TO aquarco, public;
 
@@ -39,6 +38,4 @@ COMMENT ON TABLE  pipeline_checkpoints                      IS 'Per-task resume 
 COMMENT ON COLUMN pipeline_checkpoints.last_completed_stage IS '0-based index of the last successfully completed stage.';
 COMMENT ON COLUMN pipeline_checkpoints.checkpoint_data      IS 'Executor state needed on resume: branch, workspace, env vars, etc.';
 
--- down
 
--- DROP TABLE IF EXISTS aquarco.pipeline_checkpoints;

@@ -21,7 +21,6 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ../db/migrations:/docker-entrypoint-initdb.d
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-aquarco}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aquarco}
@@ -31,6 +30,22 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # ── Database Migrations (yoyo) ────────────────────────────────────────────────
+  migrations:
+    build:
+      context: ../db
+    restart: "no"
+    networks:
+      - aquarco
+    volumes:
+      - ../db/migrations:/db/migrations
+      - ../db/yoyo.ini:/db/yoyo.ini
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aquarco}:${POSTGRES_PASSWORD:-aquarco}@postgres:5432/${POSTGRES_DB:-aquarco}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # ── GraphQL API ───────────────────────────────────────────────────────────────
   api:
@@ -58,8 +73,8 @@ services:
       REPOS_BASE: ${REPOS_BASE:-/home/agent/repos}
       CHOKIDAR_USEPOLLING: "true"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
 
   # ── Web UI (Next.js) ──────────────────────────────────────────────────────────
   web:

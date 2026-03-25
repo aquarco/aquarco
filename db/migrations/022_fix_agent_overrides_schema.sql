@@ -1,3 +1,4 @@
+-- depends: 019_agent_overrides_and_source
 -- Migration: 022_fix_agent_overrides_schema.sql
 -- Purpose: Fix missing search_path from migration 019 and add orphan cleanup.
 --
@@ -10,8 +11,6 @@
 -- as FK target) and cleans up any orphaned override rows.
 --
 -- Depends on: 019_agent_overrides_and_source.sql
-
--- up
 
 SET search_path TO aquarco, public;
 
@@ -45,5 +44,4 @@ COMMENT ON TABLE agent_overrides IS
     'and the partial unique index on (name) WHERE is_active cannot serve as a FK target. '
     'Orphans are cleaned up by periodic application-level queries.';
 
--- down
--- No destructive down — this migration is purely corrective.
+

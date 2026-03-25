@@ -1,3 +1,4 @@
+-- depends: 014_pipeline_redesign
 -- Migration: 015_remove_task_category.sql
 -- Purpose: Remove task-level category. Pipeline defines the stages/categories;
 --          task only needs a pipeline reference.
@@ -6,8 +7,6 @@
 -- represent pipeline stage categories, not task categories.
 --
 -- Depends on: 002_create_tasks.sql, 014_pipeline_redesign.sql
-
--- up
 
 SET search_path TO aquarco, public;
 
@@ -144,8 +143,4 @@ BEGIN
 END;
 $$;
 
--- down
 
--- ALTER TABLE tasks ADD COLUMN category TEXT;
--- ALTER TABLE tasks ALTER COLUMN pipeline DROP NOT NULL;
--- ALTER TABLE tasks ALTER COLUMN pipeline DROP DEFAULT;

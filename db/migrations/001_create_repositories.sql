@@ -1,11 +1,10 @@
+-- depends: 000_init
 -- Migration: 001_create_repositories.sql
 -- Purpose: Registered target repositories that the supervisor monitors.
 --
 -- Each row represents one Git repository the system is configured to watch.
 -- Pollers reference repositories by name (the primary key).
 -- Tasks reference repositories via a foreign key to enforce referential integrity.
-
--- up
 
 SET search_path TO aquarco, public;
 
@@ -50,6 +49,4 @@ COMMENT ON COLUMN repositories.pollers          IS 'Array of poller names that w
 COMMENT ON COLUMN repositories.clone_status     IS 'Lifecycle state of the local clone: pending → cloning → ready | error.';
 COMMENT ON COLUMN repositories.head_sha         IS 'Full SHA of HEAD after the most recent pull.';
 
--- down
 
--- DROP TABLE IF EXISTS aquarco.repositories;
