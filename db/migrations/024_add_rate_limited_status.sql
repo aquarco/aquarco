@@ -1,4 +1,4 @@
--- Migration: 017_add_rate_limited_status.sql
+-- Migration: 024_add_rate_limited_status.sql
 -- Purpose: Add 'rate_limited' status to tasks and stages.
 --
 -- When the Claude API returns 429, the task/stage is marked 'rate_limited'

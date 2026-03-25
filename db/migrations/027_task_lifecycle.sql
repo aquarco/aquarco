@@ -1,5 +1,9 @@
--- Migration 021: Task lifecycle (RETRY, RERUN, CLOSE)
+-- Migration 027: Task lifecycle (RETRY, RERUN, CLOSE)
 -- Add 'closed' to task status, add parent_task_id, pr_number, branch_name columns
+
+-- up
+
+SET search_path TO aquarco, public;
 
 -- Extend status CHECK constraint to include 'closed'
 -- Migration 017 created the constraint as 'valid_status', so drop that name.
@@ -8,7 +12,7 @@ ALTER TABLE tasks ADD CONSTRAINT valid_status
   CHECK (status IN ('pending','queued','executing','completed','failed','timeout','blocked','rate_limited','closed'));
 
 -- Add lifecycle columns
-ALTER TABLE tasks ADD COLUMN IF NOT EXISTS parent_task_id TEXT REFERENCES tasks(id);
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pr_number INTEGER;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS branch_name TEXT;
 

@@ -1,4 +1,4 @@
--- Migration: 020_add_live_output.sql
+-- Migration: 026_add_live_output.sql
 -- Purpose: Add live_output column to stages for real-time debug log tail during execution.
 
 -- up

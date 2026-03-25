@@ -1,4 +1,4 @@
--- Migration: 016_drop_input_from_context.sql
+-- Migration: 023_drop_input_from_context.sql
 -- Purpose: Remove `input` field from get_task_context() to prevent context bloat.
 --
 -- The `input` column stores the full accumulated context sent to each agent,

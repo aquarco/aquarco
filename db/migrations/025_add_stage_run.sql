@@ -1,4 +1,4 @@
--- Migration: 019_add_stage_run.sql
+-- Migration: 025_add_stage_run.sql
 -- Purpose: Add run column to stages for tracking retry attempts.
 --
 -- Changes:
@@ -83,7 +83,6 @@ BEGIN
                 'stage_key',            s.stage_key,
                 'iteration',            s.iteration,
                 'run',                  s.run,
-                'input',                s.input,
                 'started_at',           s.started_at,
                 'completed_at',         s.completed_at,
                 'structured_output',    s.structured_output,
