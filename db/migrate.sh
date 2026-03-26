@@ -10,15 +10,15 @@ shift 2>/dev/null || true
 case "$COMMAND" in
   apply)
     echo "==> Applying pending migrations..."
-    yoyo apply --batch --no-prompt -c /db/yoyo.ini "$@"
+    yoyo apply --batch  -c /db/yoyo.ini "$@"
     ;;
   rollback)
     echo "==> Rolling back last migration..."
-    yoyo rollback --batch --no-prompt -c /db/yoyo.ini "$@"
+    yoyo rollback --batch  -c /db/yoyo.ini "$@"
     ;;
   reapply)
     echo "==> Re-applying last migration (rollback + apply)..."
-    yoyo reapply --batch --no-prompt -c /db/yoyo.ini "$@"
+    yoyo reapply --batch  -c /db/yoyo.ini "$@"
     ;;
   list)
     echo "==> Listing migrations..."

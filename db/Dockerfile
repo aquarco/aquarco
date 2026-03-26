@@ -1,6 +1,8 @@
 FROM python:3.12-alpine
 
-RUN pip install --no-cache-dir "yoyo-migrations[postgres]"
+RUN apk add --no-cache postgresql-dev gcc musl-dev && \
+    pip install --no-cache-dir "yoyo-migrations[postgres]" && \
+    apk del gcc musl-dev
 
 WORKDIR /db
 
