@@ -1,0 +1,42 @@
+apiVersion: aquarco.agents/v1
+kind: AgentDefinition
+metadata:
+  name: review-agent
+  version: "1.0.0"
+  description: "Reviews code changes and pull requests for quality, correctness, and security"
+  labels:
+    team: platform
+    domain: review
+
+spec:
+  categories:
+    - review
+
+  priority: 10
+
+  promptFile: review-agent.md
+
+  tools:
+    allowed:
+      - Read
+      - Bash
+      - Grep
+      - Glob
+    denied:
+      - Write
+      - Edit
+
+  resources:
+    maxTokens: 100000
+    timeoutMinutes: 30
+    maxConcurrent: 2
+    maxTurns: 30
+    maxCost: 2.0
+
+  environment:
+    AGENT_MODE: "review"
+    STRICT_MODE: "true"
+
+  healthCheck:
+    enabled: true
+    intervalSeconds: 300

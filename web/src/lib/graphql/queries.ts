@@ -329,6 +329,7 @@ export const GET_GLOBAL_AGENTS = gql`
       description
       source
       sourceRepo
+      group
       spec
       isDisabled
       isModified
@@ -351,6 +352,7 @@ export const GET_REPO_AGENT_GROUPS = gql`
         description
         source
         sourceRepo
+        group
         spec
         isDisabled
         isModified

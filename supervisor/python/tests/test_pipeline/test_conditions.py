@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from aquarco_supervisor.pipeline.executor import check_conditions
@@ -259,3 +261,204 @@ async def test_evaluate_conditions_ai_evaluator_returns_false() -> None:
     result = await evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=mock_ai_evaluator)
     assert result.jump_to == "fix"
     assert result.matched is True
+
+
+# ---------------------------------------------------------------------------
+# AI condition evaluator — prompts_dir loading
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_evaluate_ai_condition_uses_prompts_dir(tmp_path: Path) -> None:
+    """evaluate_ai_condition loads system prompt from prompts_dir when the file exists."""
+    import asyncio as _asyncio
+    import json as _json
+    import unittest.mock as mock
+
+    from aquarco_supervisor.pipeline.conditions import evaluate_ai_condition
+
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    custom_prompt = "Custom condition evaluator prompt for testing."
+    (prompts_dir / "condition-evaluator-agent.md").write_text(custom_prompt)
+
+    captured_sys_prompt: list[str] = []
+
+    # Valid NDJSON result line that evaluate_ai_condition can parse
+    ndjson_line = _json.dumps({
+        "type": "result",
+        "subtype": "success",
+        "structured_output": {"answer": True, "reasoning": "mocked"},
+    })
+
+    class _AsyncLineIter:
+        """Minimal async iterator over a list of byte lines."""
+
+        def __init__(self, lines: list[bytes]) -> None:
+            self._iter = iter(lines)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self) -> bytes:
+            try:
+                return next(self._iter)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    async def _fake_subprocess(*args, **kwargs):
+        # Capture the system-prompt file content before the function deletes it
+        args_list = list(args)
+        for i, arg in enumerate(args_list):
+            if arg == "--system-prompt-file" and i + 1 < len(args_list):
+                try:
+                    captured_sys_prompt.append(Path(args_list[i + 1]).read_text())
+                except OSError:
+                    pass
+                break
+
+        proc = mock.MagicMock()
+        proc.returncode = 0
+        proc.stdout = _AsyncLineIter([f"{ndjson_line}\n".encode()])
+        proc.stderr = mock.AsyncMock()
+        proc.stderr.read = mock.AsyncMock(return_value=b"")
+        proc.kill = mock.MagicMock()
+        proc.wait = mock.AsyncMock(return_value=None)
+        return proc
+
+    with mock.patch.object(_asyncio, "create_subprocess_exec", side_effect=_fake_subprocess):
+        result = await evaluate_ai_condition(
+            "Is this test working?",
+            {"status": "ok"},
+            prompts_dir=prompts_dir,
+        )
+
+    assert len(captured_sys_prompt) == 1, "System prompt file was not passed to subprocess"
+    assert custom_prompt in captured_sys_prompt[0], (
+        "Custom prompt from prompts_dir was not used as system prompt; "
+        f"captured: {captured_sys_prompt[0][:200]!r}"
+    )
+    assert result is True
+
+
+def test_inline_system_prompt_is_fallback(tmp_path: Path) -> None:
+    """When prompts_dir has no condition-evaluator-agent.md, inline prompt is used."""
+    from aquarco_supervisor.pipeline.conditions import _INLINE_SYSTEM_PROMPT
+    # The inline prompt should be non-empty
+    assert len(_INLINE_SYSTEM_PROMPT) > 50
+    assert "condition evaluator" in _INLINE_SYSTEM_PROMPT.lower()
+    assert "answer" in _INLINE_SYSTEM_PROMPT
+
+
+def test_inline_system_prompt_contains_schema_placeholder(tmp_path: Path) -> None:
+    """The inline prompt has a {schema_json} placeholder for formatting."""
+    from aquarco_supervisor.pipeline.conditions import _INLINE_SYSTEM_PROMPT
+    assert "{schema_json}" in _INLINE_SYSTEM_PROMPT
+
+
+def test_condition_evaluator_md_schema_matches_inline_schema() -> None:
+    """The schema hardcoded in condition-evaluator-agent.md must match _AI_CONDITION_SCHEMA.
+
+    This test catches drift between the externalized prompt file and the inline
+    fallback: if _AI_CONDITION_SCHEMA changes (e.g. new required fields), the
+    .md file must be updated in lock-step.
+    """
+    import json as _json
+    import re as _re
+
+    from aquarco_supervisor.pipeline.conditions import _AI_CONDITION_SCHEMA
+
+    # Locate the prompt file relative to the repo root (four levels up from this file)
+    this_file = Path(__file__)
+    repo_root = this_file.parents[4]  # tests/test_pipeline/ -> tests/ -> python/ -> supervisor/ -> repo root
+    prompt_file = repo_root / "config" / "agents" / "prompts" / "condition-evaluator-agent.md"
+
+    assert prompt_file.exists(), f"Prompt file not found: {prompt_file}"
+    content = prompt_file.read_text()
+
+    # Extract the first JSON code block from the markdown file
+    match = _re.search(r"```json\s*([\s\S]*?)```", content)
+    assert match is not None, "No JSON code block found in condition-evaluator-agent.md"
+
+    embedded_schema = _json.loads(match.group(1).strip())
+    assert embedded_schema == _AI_CONDITION_SCHEMA, (
+        "Schema in condition-evaluator-agent.md has diverged from _AI_CONDITION_SCHEMA.\n"
+        f"Embedded: {_json.dumps(embedded_schema, indent=2)}\n"
+        f"Expected: {_json.dumps(_AI_CONDITION_SCHEMA, indent=2)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_file_based_prompt_is_used_verbatim_no_schema_substitution(
+    tmp_path: Path,
+) -> None:
+    """When prompts_dir provides condition-evaluator-agent.md, the file content
+    is used as-is — the ``{schema_json}`` placeholder is NOT substituted.
+
+    This is intentional: the .md file already contains the schema statically,
+    so no runtime formatting is needed.  The inline fallback uses ``.format()``
+    while the file path does not.
+    """
+    import asyncio as _asyncio
+    import json as _json
+    import unittest.mock as mock
+
+    from aquarco_supervisor.pipeline.conditions import evaluate_ai_condition
+
+    # Write a prompt file that contains a literal {schema_json} placeholder
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    placeholder_prompt = "Evaluate. Schema: {schema_json}"
+    (prompts_dir / "condition-evaluator-agent.md").write_text(placeholder_prompt)
+
+    ndjson_line = _json.dumps({
+        "type": "result",
+        "subtype": "success",
+        "structured_output": {"answer": False, "reasoning": "mocked"},
+    })
+    captured_sys_prompt: list[str] = []
+
+    class _AsyncLineIter:
+        def __init__(self, lines: list[bytes]) -> None:
+            self._iter = iter(lines)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self) -> bytes:
+            try:
+                return next(self._iter)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    async def _fake_subprocess(*args, **kwargs):
+        args_list = list(args)
+        for i, arg in enumerate(args_list):
+            if arg == "--system-prompt-file" and i + 1 < len(args_list):
+                try:
+                    captured_sys_prompt.append(Path(args_list[i + 1]).read_text())
+                except OSError:
+                    pass
+                break
+        proc = mock.MagicMock()
+        proc.returncode = 0
+        proc.stdout = _AsyncLineIter([f"{ndjson_line}\n".encode()])
+        proc.stderr = mock.AsyncMock()
+        proc.stderr.read = mock.AsyncMock(return_value=b"")
+        proc.kill = mock.MagicMock()
+        proc.wait = mock.AsyncMock(return_value=None)
+        return proc
+
+    with mock.patch.object(_asyncio, "create_subprocess_exec", side_effect=_fake_subprocess):
+        await evaluate_ai_condition(
+            "Does this work?",
+            {"status": "ok"},
+            prompts_dir=prompts_dir,
+        )
+
+    assert len(captured_sys_prompt) == 1
+    # The file was used verbatim — {schema_json} was NOT replaced
+    assert captured_sys_prompt[0] == placeholder_prompt, (
+        "File-based prompt must be used verbatim; "
+        f"got: {captured_sys_prompt[0]!r}"
+    )

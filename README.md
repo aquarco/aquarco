@@ -158,10 +158,15 @@ returns `x-access-token` as username and the OAuth token as password. All
 
 The Agents page provides two tabs for managing agent definitions:
 
-- **Global Agents** — lists all default agents and agents from global config repositories. Each agent can be individually disabled/enabled, and non-default agents can be edited. Modified agents are stored in the `agent_overrides` table. A "Create PR" button commits changes back to the config repository.
+- **Global Agents** — lists all agents in two sections:
+  - *Pipeline Agents* — agents that execute pipeline stages (analyze, design, implement, test, review, docs). Full resource/capability details shown.
+  - *System Infrastructure* — agents that orchestrate pipeline execution (planner, condition evaluator, repo descriptor). Displayed with visual de-emphasis.
+  Each agent can be individually disabled/enabled, and non-default agents can be edited. Modified agents are stored in the `agent_overrides` table. A "Create PR" button commits changes back to the config repository.
 - **Repository Agents** — lists repositories with custom agents in an accordion layout. Agents can be disabled, edited, and reset. PR creation targets the specific repository.
 
 Agent sources are distinguished by an `AgentSource` enum: `DEFAULT` (built-in), `GLOBAL_CONFIG` (from a global config repo), `REPOSITORY` (repo-specific), and `AUTOLOADED` (discovered from `.claude/agents/`).
+
+Agent groups are distinguished by an `AgentGroup` enum: `SYSTEM` (orchestration agents) and `PIPELINE` (stage execution agents). Autoloaded agents are always `PIPELINE`.
 
 ### Agent Autoloading
 
@@ -287,13 +292,29 @@ SIGHUP triggers a full config reload: `systemctl reload aquarco-supervisor-pytho
 ### Agent Definitions (`config/agents/definitions/`)
 
 Kubernetes-style YAML files defining each agent's tools, environment variables,
-and system prompt path. Key fields under `spec`:
+and system prompt path. Agents are split into two subdirectories:
+
+| Directory | Schema | Contains |
+|-----------|--------|----------|
+| `definitions/system/` | `system-agent-v1.json` | `planner-agent`, `condition-evaluator-agent`, `repo-descriptor-agent` |
+| `definitions/pipeline/` | `pipeline-agent-v1.json` | `analyze-agent`, `design-agent`, `implementation-agent`, `review-agent`, `test-agent`, `docs-agent` |
+
+**System agents** orchestrate pipeline execution and are invoked directly by the executor. They use `spec.role` (e.g., `planner`, `condition-evaluator`) instead of `spec.categories`, and have lower resource defaults (max 20 turns, 0.5 USD default cost cap). System agents are never eligible for category-based stage selection.
+
+**Pipeline agents** execute pipeline stages and are selected by category. They use `spec.categories` and `spec.priority` for stage-to-agent mapping.
+
+Key fields under `spec`:
 
 - `tools.allowed` / `tools.denied` — tool access control for Claude CLI
 - `environment` — env vars passed to Claude CLI subprocess
-- `systemPrompt` — path to agent's markdown prompt template
+- `promptFile` — filename (relative to `prompts/`) of the agent's markdown prompt template
+- `role` *(system agents only)* — well-known values: `planner`, `condition-evaluator`, `repo-descriptor`
+- `categories` *(pipeline agents only)* — pipeline stage categories this agent handles
 
-> **Note:** Output schemas are now defined in `pipelines.yaml` under `categories:` rather than in agent definitions. Agent-level `outputSchema` is still supported as a fallback for autoloaded agents.
+> **Notes:**
+> - Output schemas are defined in `pipelines.yaml` under `categories:` rather than in agent definitions. Agent-level `outputSchema` is still supported as a fallback for autoloaded agents.
+> - Autoloaded agents (from repository `.claude/agents/`) always validate against the pipeline schema and are tagged as pipeline agents.
+> - A flat `definitions/*.yaml` layout is still supported for backward compatibility; all flat-scanned agents are treated as pipeline agents.
 
 ### Pipelines (`config/pipelines.yaml`)
 

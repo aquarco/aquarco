@@ -1,0 +1,36 @@
+apiVersion: aquarco.agents/v1
+kind: AgentDefinition
+metadata:
+  name: repo-descriptor-agent
+  version: "1.0.0"
+  description: "Analyzes repository .claude/agents/*.md files and produces structured pipeline agent definitions"
+  labels:
+    team: platform
+    domain: orchestration
+
+spec:
+  role: repo-descriptor
+
+  promptFile: repo-descriptor-agent.md
+
+  tools:
+    allowed:
+      - Read
+      - Glob
+    denied:
+      - Write
+      - Edit
+      - Bash
+
+  resources:
+    maxTokens: 50000
+    timeoutMinutes: 10
+    maxConcurrent: 2
+    maxTurns: 5
+    maxCost: 0.5
+
+  environment:
+    AGENT_MODE: "repo-description"
+
+  healthCheck:
+    enabled: false

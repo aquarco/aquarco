@@ -197,10 +197,11 @@ def test_analyze_agent_prompt_implementation():
 
 
 def test_analyze_agent_prompt_security():
-    """Agent with security-related content gets security category."""
+    """Agent with security-related content gets review category (closest valid category)."""
     content = "Checks for security vulnerabilities and OWASP issues."
     result = analyze_agent_prompt(content, "sec-scanner.md")
-    assert result["category"] == "security"
+    # 'security' is not a valid pipeline category — maps to 'review'
+    assert result["category"] == "review"
 
 
 def test_analyze_agent_prompt_design_category():
@@ -635,14 +636,14 @@ def test_rate_limit_is_5_minutes():
 async def test_deactivate_autoloaded_agents():
     """AC: A rescan deactivates all previously autoloaded agents for that repo."""
     db = AsyncMock()
-    db.fetch_one = AsyncMock(return_value={"count": 3})
+    db.fetch_all = AsyncMock(return_value=[{"name": "a"}, {"name": "b"}, {"name": "c"}])
 
     count = await deactivate_autoloaded_agents(db, "my-repo")
 
     assert count == 3
-    sql = db.fetch_one.call_args[0][0]
+    sql = db.fetch_all.call_args[0][0]
     assert "is_active = false" in sql
-    params = db.fetch_one.call_args[0][1]
+    params = db.fetch_all.call_args[0][1]
     assert params["source"] == "autoload:my-repo"
 
 
@@ -720,6 +721,30 @@ async def test_store_autoloaded_agents_deactivates_old_versions():
     assert "is_active = false" in first_call[0][0]
     assert first_call[0][1]["name"] == "agent-a"
     assert first_call[0][1]["version"] == "2.0.0"
+
+
+@pytest.mark.asyncio
+async def test_store_autoloaded_agents_sets_pipeline_group():
+    """Autoloaded agents are always stored with agent_group='pipeline'."""
+    db = AsyncMock()
+    definitions = [
+        {
+            "metadata": {"name": "repo-agent-a", "version": "1.0.0", "description": "Agent A"},
+            "spec": {"categories": ["test"]},
+        },
+    ]
+
+    await store_autoloaded_agents(db, definitions, "my-repo")
+
+    upsert_calls = [
+        c for c in db.execute.call_args_list
+        if "INSERT INTO agent_definitions" in str(c)
+    ]
+    assert len(upsert_calls) == 1
+    sql = upsert_calls[0][0][0]
+    assert "agent_group" in sql
+    # Hardcoded 'pipeline' in the SQL (not a parameter)
+    assert "'pipeline'" in sql
 
 
 # ---------------------------------------------------------------------------
@@ -837,9 +862,8 @@ async def test_autoload_repo_agents_db_error_sets_failed(tmp_path: Path):
     (agents_dir / "agent.md").write_text("# Agent")
 
     db = AsyncMock()
-    # Make deactivate_autoloaded_agents fail
-    db.fetch_one = AsyncMock(side_effect=RuntimeError("DB connection lost"))
-    db.fetch_all = AsyncMock(return_value=[])
+    # Make deactivate_autoloaded_agents fail (it uses fetch_all with RETURNING)
+    db.fetch_all = AsyncMock(side_effect=RuntimeError("DB connection lost"))
     db.execute = AsyncMock()
 
     result = await autoload_repo_agents(tmp_path, "repo", db, scan_id=1)
@@ -1015,5 +1039,6 @@ async def test_full_pipeline_categories_inferred(tmp_path: Path):
         analysis = analyze_agent_prompt(content, f.name)
         analyses[analysis["name"]] = analysis
 
-    assert analyses["sec-checker"]["category"] == "security"
+    # 'security' is not a valid pipeline category — maps to 'review'
+    assert analyses["sec-checker"]["category"] == "review"
     assert analyses["docs-gen"]["category"] == "docs"

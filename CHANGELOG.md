@@ -1,5 +1,28 @@
 # Changelog
 
+## [2026-03-26] — Separate system agents from pipeline agents (#30)
+
+### Added
+- **`config/agents/definitions/system/`** — new subdirectory for system agents that orchestrate pipeline execution (`planner-agent.yaml`, `condition-evaluator-agent.yaml`, `repo-descriptor-agent.yaml`)
+- **`config/agents/definitions/pipeline/`** — new subdirectory for pipeline stage agents (`analyze-agent.yaml`, `design-agent.yaml`, `implementation-agent.yaml`, `review-agent.yaml`, `test-agent.yaml`, `docs-agent.yaml`)
+- **`config/schemas/system-agent-v1.json`** — JSON schema for system agents; uses `spec.role` instead of `spec.categories`, capped at 20 turns and 0.5 USD default cost
+- **`config/schemas/pipeline-agent-v1.json`** — JSON schema for pipeline agents; structurally identical to `agent-definition-v1.json` with updated `$id` and title
+- **`condition-evaluator-agent`** (system) — formal agent definition + prompt file (`config/agents/prompts/condition-evaluator-agent.md`) for AI pipeline condition evaluation; previously an inline Claude CLI call with a hardcoded system prompt
+- **`repo-descriptor-agent`** (system) — formal agent definition + prompt file for future repo `.claude/agents/` analysis; autoloader continues to use heuristics for now
+- **`sync_all_agent_definitions_to_db()`** in `config_store.py` — loads from `system/` and `pipeline/` subdirectories, validates each against the correct schema, and sets `agent_group` column; falls back to flat scan for backward compatibility
+- **`agent_group` column** on `agent_definitions` table (migration `030_add_agent_group.sql`) — values `'system'` or `'pipeline'`; known system agents back-filled by name on migration
+- **`get_agent_group(agent_name)`** and **`get_system_agent_by_role(role)`** on `AgentRegistry` — look up agent classification at runtime
+- **`AgentGroup` enum** (`SYSTEM` / `PIPELINE`) in GraphQL schema; `group: AgentGroup!` field added to `AgentDefinition` type
+- **`SYSTEM_AGENT_NAMES`** constant in `constants.py` — canonical list of system agent names used for backward-compat group inference
+- **Pipeline Agents / System Infrastructure sections** in `GlobalAgentsTab` — agents are split into two visually distinct groups in the web UI
+- 11 new tests across `test_agent_registry.py`, `test_conditions.py`, and `test_main.py`
+
+### Changed
+- **`planner-agent.yaml`** — migrated to `system/` directory and fixed: removed invalid `categories: [planning]` and `priority: 0` fields; added `role: planner`; now validates cleanly against `system-agent-v1.json`
+- **`agent_registry.py`** — `get_agents_for_category()` now skips system agents; `_discover_agents()` scans subdirectories with group tagging; autoloaded agents always tagged as `pipeline`
+- **`conditions.py`** — `evaluate_ai_condition()` loads system prompt from `condition-evaluator-agent.md` when `prompts_dir` is provided; falls back to inline `_INLINE_SYSTEM_PROMPT` constant when file is absent
+- **`main.py`** — `_sync_definitions_to_db` updated to call `sync_all_agent_definitions_to_db()` and reference `system-agent-v1.json` / `pipeline-agent-v1.json` schema paths
+
 ## [2026-03-26] — Stream-json CLI output for real-time agent events (#17)
 
 ### Added

@@ -25,6 +25,7 @@ export interface AgentDefinitionRow {
   description: string
   source: 'DEFAULT' | 'GLOBAL_CONFIG' | 'REPOSITORY' | 'AUTOLOADED'
   sourceRepo: string | null
+  group: 'SYSTEM' | 'PIPELINE'
   spec: unknown
   isDisabled: boolean
   isModified: boolean

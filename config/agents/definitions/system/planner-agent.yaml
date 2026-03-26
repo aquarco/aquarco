@@ -1,0 +1,39 @@
+apiVersion: aquarco.agents/v1
+kind: AgentDefinition
+metadata:
+  name: planner-agent
+  version: "1.0.0"
+  description: "Analyzes codebase and request to assign agents to pipeline categories"
+  labels:
+    team: platform
+    domain: planning
+
+spec:
+  role: planner
+
+  promptFile: planner-agent.md
+
+  tools:
+    allowed:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+    denied:
+      - Write
+      - Edit
+
+  resources:
+    maxTokens: 100000
+    timeoutMinutes: 20
+    maxConcurrent: 2
+    maxTurns: 20
+    maxCost: 1.0
+
+  environment:
+    AGENT_MODE: "planning"
+    STRICT_MODE: "true"
+
+  healthCheck:
+    enabled: true
+    intervalSeconds: 300

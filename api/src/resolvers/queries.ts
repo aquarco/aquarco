@@ -95,6 +95,7 @@ export const Query = {
     const result = await ctx.pool.query<Record<string, unknown>>(
       `SELECT
          ad.name, ad.version, ad.description, ad.spec, ad.source,
+         COALESCE(ad.agent_group, 'pipeline') AS agent_group,
          COALESCE(ao.is_disabled, false) AS is_disabled,
          ao.modified_spec,
          COALESCE(ai.active_count, 0) AS active_count,
@@ -117,6 +118,7 @@ export const Query = {
     const result = await ctx.pool.query<Record<string, unknown>>(
       `SELECT
          ad.name, ad.version, ad.description, ad.spec, ad.source,
+         COALESCE(ad.agent_group, 'pipeline') AS agent_group,
          COALESCE(ao.is_disabled, false) AS is_disabled,
          ao.modified_spec,
          COALESCE(ai.active_count, 0) AS active_count,
@@ -324,12 +326,15 @@ function parseAgentSource(source: string): { sourceEnum: string; sourceRepo: str
 export function mapAgentDefinition(row: Record<string, unknown>) {
   const source = (row.source as string) ?? 'default'
   const { sourceEnum, sourceRepo } = parseAgentSource(source)
+  const rawGroup = (row.agent_group as string | undefined) ?? 'pipeline'
+  const group = rawGroup.toUpperCase() === 'SYSTEM' ? 'SYSTEM' : 'PIPELINE'
   return {
     name: row.name,
     version: row.version,
     description: row.description,
     source: sourceEnum,
     sourceRepo,
+    group,
     spec: row.modified_spec ?? row.spec,
     isDisabled: row.is_disabled === true,
     isModified: row.modified_spec != null,
@@ -349,6 +354,7 @@ export async function fetchAgentWithOverrides(
   const result = await pool.query<Record<string, unknown>>(
     `SELECT
        ad.name, ad.version, ad.description, ad.spec, ad.source,
+       COALESCE(ad.agent_group, 'pipeline') AS agent_group,
        COALESCE(ao.is_disabled, false) AS is_disabled,
        ao.modified_spec,
        COALESCE(ai.active_count, 0) AS active_count,

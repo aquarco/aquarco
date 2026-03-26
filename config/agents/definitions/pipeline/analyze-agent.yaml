@@ -1,0 +1,43 @@
+apiVersion: aquarco.agents/v1
+kind: AgentDefinition
+metadata:
+  name: analyze-agent
+  version: "1.0.0"
+  description: "Triages issues, analyzes codebase, determines required work and complexity"
+  labels:
+    team: platform
+    domain: analysis
+
+spec:
+  categories:
+    - analyze
+
+  # Priority 1 — highest priority, runs first in all pipelines
+  priority: 1
+
+  promptFile: analyze-agent.md
+
+  tools:
+    allowed:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+    denied:
+      - Write
+      - Edit
+
+  resources:
+    maxTokens: 50000
+    timeoutMinutes: 15
+    maxConcurrent: 3
+    maxTurns: 20
+    maxCost: 1.0
+
+  environment:
+    AGENT_MODE: "analyze"
+    STRICT_MODE: "true"
+
+  healthCheck:
+    enabled: true
+    intervalSeconds: 300

@@ -327,12 +327,18 @@ enum AgentSource {
   AUTOLOADED
 }
 
+enum AgentGroup {
+  SYSTEM
+  PIPELINE
+}
+
 type AgentDefinition {
   name: String!
   version: String!
   description: String!
   source: AgentSource!
   sourceRepo: String
+  group: AgentGroup!
   spec: JSON!
   isDisabled: Boolean!
   isModified: Boolean!

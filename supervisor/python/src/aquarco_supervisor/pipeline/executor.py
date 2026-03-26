@@ -500,12 +500,15 @@ class PipelineExecutor:
 
                 # --- Exit gate: evaluate structured conditions ---
                 if conditions:
+                    _prompts_dir = self._registry.get_default_prompts_dir()
+
                     async def _ai_eval(prompt: str, ctx: dict[str, Any]) -> bool:
                         return await evaluate_ai_condition(
                             prompt, ctx,
                             work_dir=clone_dir,
                             task_id=task_id,
                             stage_num=stage_num,
+                            prompts_dir=_prompts_dir,
                         )
 
                     cond_result = await evaluate_conditions(

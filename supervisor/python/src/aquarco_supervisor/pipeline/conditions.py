@@ -17,6 +17,7 @@ import re
 import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ..logging import get_logger
@@ -426,6 +427,22 @@ _AI_CONDITION_SCHEMA = {
     },
 }
 
+# Inline fallback prompt — used when no prompts_dir is provided or the
+# condition-evaluator-agent.md file is absent
+_INLINE_SYSTEM_PROMPT = (
+    "You are a pipeline condition evaluator. You will be given a question "
+    "about pipeline stage outputs and must answer with a JSON object "
+    "containing an 'answer' boolean field.\n\n"
+    "Evaluate the condition based ONLY on the provided context data. "
+    "If the context does not contain enough information to evaluate the "
+    "condition, answer false.\n\n"
+    "## Output Format\n\n"
+    "You MUST respond with a JSON object conforming to this schema:\n\n"
+    "```json\n"
+    "{schema_json}\n"
+    "```"
+)
+
 
 async def evaluate_ai_condition(
     prompt: str,
@@ -436,6 +453,7 @@ async def evaluate_ai_condition(
     stage_num: int = 0,
     timeout_seconds: int = 120,
     extra_env: dict[str, str] | None = None,
+    prompts_dir: "Path | None" = None,
 ) -> bool:
     """Evaluate an AI condition by asking Claude CLI a yes/no question.
 
@@ -443,23 +461,35 @@ async def evaluate_ai_condition(
     pipeline context, then invokes Claude CLI with --max-turns 1 (no tools)
     and a boolean output schema.
 
+    Args:
+        prompts_dir: Optional path to the agents/prompts/ directory.  When
+            provided and ``condition-evaluator-agent.md`` exists there, its
+            content is used as the system prompt instead of the inline fallback.
+
     Returns True if the condition is met, False otherwise.
     """
     context_json = json.dumps(context, indent=2, default=str)
 
-    system_prompt = (
-        "You are a pipeline condition evaluator. You will be given a question "
-        "about pipeline stage outputs and must answer with a JSON object "
-        "containing an 'answer' boolean field.\n\n"
-        "Evaluate the condition based ONLY on the provided context data. "
-        "If the context does not contain enough information to evaluate the "
-        "condition, answer false.\n\n"
-        "## Output Format\n\n"
-        "You MUST respond with a JSON object conforming to this schema:\n\n"
-        "```json\n"
-        f"{json.dumps(_AI_CONDITION_SCHEMA, indent=2)}\n"
-        "```"
-    )
+    # Try to load system prompt from the condition-evaluator agent definition
+    system_prompt: str | None = None
+    if prompts_dir is not None:
+        prompt_path = Path(prompts_dir) / "condition-evaluator-agent.md"
+        if prompt_path.exists():
+            try:
+                # The file-based prompt is used verbatim — no {schema_json}
+                # substitution is applied (unlike the inline fallback below).
+                # The schema is embedded statically in the .md file.
+                # test_condition_evaluator_md_schema_matches_inline_schema
+                # guards against drift between the two.
+                system_prompt = prompt_path.read_text()
+                log.debug("ai_condition_prompt_loaded", path=str(prompt_path))
+            except OSError:
+                pass
+
+    if system_prompt is None:
+        system_prompt = _INLINE_SYSTEM_PROMPT.format(
+            schema_json=json.dumps(_AI_CONDITION_SCHEMA, indent=2)
+        )
 
     stdin_content = (
         f"## Condition to evaluate\n\n{prompt}\n\n"

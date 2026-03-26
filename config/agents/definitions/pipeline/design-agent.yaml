@@ -1,0 +1,41 @@
+apiVersion: aquarco.agents/v1
+kind: AgentDefinition
+metadata:
+  name: design-agent
+  version: "1.0.0"
+  description: "Creates technical designs, architectural decisions, and implementation plans"
+  labels:
+    team: platform
+    domain: design
+
+spec:
+  categories:
+    - design
+
+  priority: 10
+
+  promptFile: design-agent.md
+
+  tools:
+    allowed:
+      - Read
+      - Write
+      - Grep
+      - Glob
+      - Bash
+    denied:
+      - Edit
+
+  resources:
+    maxTokens: 150000
+    timeoutMinutes: 45
+    maxConcurrent: 1
+    maxTurns: 30
+    maxCost: 2.0
+
+  environment:
+    AGENT_MODE: "design"
+
+  healthCheck:
+    enabled: true
+    intervalSeconds: 300

@@ -5,7 +5,9 @@ import { useQuery, useMutation } from '@apollo/client'
 import Box from '@mui/material/Box'
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
+import Divider from '@mui/material/Divider'
 import Stack from '@mui/material/Stack'
+import Typography from '@mui/material/Typography'
 import CircularProgress from '@mui/material/CircularProgress'
 import Snackbar from '@mui/material/Snackbar'
 import GitHubIcon from '@mui/icons-material/GitHub'
@@ -28,6 +30,14 @@ export default function GlobalAgentsTab() {
   const [snackbar, setSnackbar] = useState<{ message: string; severity: 'success' | 'error' } | null>(null)
 
   const agents: AgentDefinitionRow[] = data?.globalAgents ?? []
+
+  // Split agents by group.
+  // Pipeline agents use a negative check (group !== 'SYSTEM') so that agents
+  // with an unknown or missing group value fall into the pipeline section
+  // rather than disappearing from the UI entirely. If a third group is ever
+  // introduced, update this filter to handle it explicitly.
+  const pipelineAgents = agents.filter((a) => a.group !== 'SYSTEM')
+  const systemAgents = agents.filter((a) => a.group === 'SYSTEM')
 
   // Find if there are any global config repos with modifications
   const hasModifiedAgents = agents.some((a) => a.isModified)
@@ -107,14 +117,40 @@ export default function GlobalAgentsTab() {
         </Alert>
       )}
 
+      <Typography variant="h6" sx={{ mb: 1 }}>
+        Pipeline Agents
+      </Typography>
       <AgentTable
-        agents={agents}
+        agents={pipelineAgents}
         loading={loading}
         showSource={true}
         onToggleDisabled={handleToggleDisabled}
         onEdit={(agent) => setEditAgent(agent)}
         onReset={handleReset}
       />
+
+      {systemAgents.length > 0 && (
+        <>
+          <Divider sx={{ my: 3 }} />
+
+          <Typography variant="h6" sx={{ mb: 1 }} color="text.secondary">
+            System Infrastructure
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            These agents orchestrate pipeline execution. They are not selectable as pipeline stages.
+          </Typography>
+          <Box sx={{ opacity: 0.85 }}>
+            <AgentTable
+              agents={systemAgents}
+              loading={loading}
+              showSource={false}
+              onToggleDisabled={handleToggleDisabled}
+              onEdit={(agent) => setEditAgent(agent)}
+              onReset={handleReset}
+            />
+          </Box>
+        </>
+      )}
 
       {hasModifiedAgents && configRepoNames.length > 0 && (
         <Stack direction="row" spacing={1} sx={{ mt: 2 }} justifyContent="flex-end">
