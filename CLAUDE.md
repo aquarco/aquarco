@@ -78,7 +78,9 @@ changes.
 ```
 config/
   agents/
-    definitions/   ← Kubernetes-style YAML agent definitions (apiVersion, kind, metadata, spec)
+    definitions/
+      system/    ← System agents (planner, condition-evaluator, repo-descriptor) — schema: system-agent-v1.json
+      pipeline/  ← Pipeline stage agents (analyze, design, implement, test, review, docs) — schema: pipeline-agent-v1.json
     prompts/       ← Markdown prompt templates per agent
   pipelines.yaml   ← Pipeline definitions (stages, agents, tools)
   schemas/         ← JSON schemas for agent definitions
@@ -86,7 +88,12 @@ supervisor/config/
   supervisor.yaml  ← Main supervisor config (database, limits, secrets, pollers)
 ```
 
-### Agent Definitions (`config/agents/definitions/*.yaml`)
+### Agent Definitions (`config/agents/definitions/`)
+Agents are split into two subdirectories by role:
+
+- **`system/`** — Orchestration agents invoked directly by the executor. Use `spec.role` (e.g., `planner`, `condition-evaluator`, `repo-descriptor`) instead of `spec.categories`. Never selected for category-based stage dispatch. Validated against `config/schemas/system-agent-v1.json`.
+- **`pipeline/`** — Stage execution agents selected by category. Use `spec.categories` and `spec.priority`. Validated against `config/schemas/pipeline-agent-v1.json`.
+
 Each agent is defined as a Kubernetes-style resource with `spec.tools.allowed`/`spec.tools.denied`
 and `spec.environment` (env vars passed to Claude CLI). Output schemas are now defined at
 the pipeline category level (see Pipelines below), not in agent definitions.
