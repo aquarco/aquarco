@@ -125,24 +125,28 @@ export default function GlobalAgentsTab() {
         onReset={handleReset}
       />
 
-      <Divider sx={{ my: 3 }} />
+      {systemAgents.length > 0 && (
+        <>
+          <Divider sx={{ my: 3 }} />
 
-      <Typography variant="h6" sx={{ mb: 1 }} color="text.secondary">
-        System Infrastructure
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        These agents orchestrate pipeline execution. They are not selectable as pipeline stages.
-      </Typography>
-      <Box sx={{ opacity: 0.85 }}>
-        <AgentTable
-          agents={systemAgents}
-          loading={loading}
-          showSource={false}
-          onToggleDisabled={handleToggleDisabled}
-          onEdit={(agent) => setEditAgent(agent)}
-          onReset={handleReset}
-        />
-      </Box>
+          <Typography variant="h6" sx={{ mb: 1 }} color="text.secondary">
+            System Infrastructure
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            These agents orchestrate pipeline execution. They are not selectable as pipeline stages.
+          </Typography>
+          <Box sx={{ opacity: 0.85 }}>
+            <AgentTable
+              agents={systemAgents}
+              loading={loading}
+              showSource={false}
+              onToggleDisabled={handleToggleDisabled}
+              onEdit={(agent) => setEditAgent(agent)}
+              onReset={handleReset}
+            />
+          </Box>
+        </>
+      )}
 
       {hasModifiedAgents && configRepoNames.length > 0 && (
         <Stack direction="row" spacing={1} sx={{ mt: 2 }} justifyContent="flex-end">

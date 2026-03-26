@@ -17,6 +17,7 @@ import re
 import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ..logging import get_logger
@@ -467,14 +468,12 @@ async def evaluate_ai_condition(
 
     Returns True if the condition is met, False otherwise.
     """
-    from pathlib import Path as _Path  # noqa: PLC0415
-
     context_json = json.dumps(context, indent=2, default=str)
 
     # Try to load system prompt from the condition-evaluator agent definition
     system_prompt: str | None = None
     if prompts_dir is not None:
-        prompt_path = _Path(prompts_dir) / "condition-evaluator-agent.md"
+        prompt_path = Path(prompts_dir) / "condition-evaluator-agent.md"
         if prompt_path.exists():
             try:
                 system_prompt = prompt_path.read_text()

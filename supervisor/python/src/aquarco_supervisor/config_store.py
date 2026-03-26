@@ -21,6 +21,7 @@ import jsonschema
 import structlog
 import yaml
 
+from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES as _SYSTEM_AGENT_NAMES
 from aquarco_supervisor.database import Database
 
 log = structlog.get_logger()
@@ -173,11 +174,6 @@ async def store_agent_definitions(
 
     log.info("agent_definitions_stored", count=count, source=source, group=agent_group)
     return count
-
-
-# Re-exported for backward compatibility — callers should prefer importing from
-# aquarco_supervisor.constants directly.
-from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES as _SYSTEM_AGENT_NAMES  # noqa: E402
 
 
 async def sync_agent_definitions_to_db(
@@ -461,6 +457,14 @@ async def export_agent_definitions_to_files(
     YAML files.
 
     Returns the number of files written.
+
+    Note: This function is **not group-preserving**.  ``agent_group`` is stored
+    only in the database and is intentionally excluded from the exported YAML
+    documents (to keep the schema clean).  All files are written into
+    ``agents_dir`` as a flat list — the ``system/`` vs ``pipeline/``
+    subdirectory split is lost.  If the exported files are re-imported via a
+    flat scan, system agents will be re-tagged as 'pipeline' unless the caller
+    explicitly separates them before re-import.
     """
     agents_dir.mkdir(parents=True, exist_ok=True)
 

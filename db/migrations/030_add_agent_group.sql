@@ -5,7 +5,8 @@
 -- backward compatibility with existing rows.
 
 ALTER TABLE agent_definitions
-  ADD COLUMN IF NOT EXISTS agent_group TEXT NOT NULL DEFAULT 'pipeline';
+  ADD COLUMN IF NOT EXISTS agent_group TEXT NOT NULL DEFAULT 'pipeline'
+    CONSTRAINT chk_agent_group CHECK (agent_group IN ('system', 'pipeline'));
 
 -- Tag known system agents that are stored with source='default'
 UPDATE agent_definitions
