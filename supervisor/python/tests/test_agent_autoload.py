@@ -636,14 +636,14 @@ def test_rate_limit_is_5_minutes():
 async def test_deactivate_autoloaded_agents():
     """AC: A rescan deactivates all previously autoloaded agents for that repo."""
     db = AsyncMock()
-    db.fetch_one = AsyncMock(return_value={"count": 3})
+    db.fetch_all = AsyncMock(return_value=[{"name": "a"}, {"name": "b"}, {"name": "c"}])
 
     count = await deactivate_autoloaded_agents(db, "my-repo")
 
     assert count == 3
-    sql = db.fetch_one.call_args[0][0]
+    sql = db.fetch_all.call_args[0][0]
     assert "is_active = false" in sql
-    params = db.fetch_one.call_args[0][1]
+    params = db.fetch_all.call_args[0][1]
     assert params["source"] == "autoload:my-repo"
 
 
@@ -862,9 +862,8 @@ async def test_autoload_repo_agents_db_error_sets_failed(tmp_path: Path):
     (agents_dir / "agent.md").write_text("# Agent")
 
     db = AsyncMock()
-    # Make deactivate_autoloaded_agents fail
-    db.fetch_one = AsyncMock(side_effect=RuntimeError("DB connection lost"))
-    db.fetch_all = AsyncMock(return_value=[])
+    # Make deactivate_autoloaded_agents fail (it uses fetch_all with RETURNING)
+    db.fetch_all = AsyncMock(side_effect=RuntimeError("DB connection lost"))
     db.execute = AsyncMock()
 
     result = await autoload_repo_agents(tmp_path, "repo", db, scan_id=1)
