@@ -458,3 +458,172 @@ async def test_autoloaded_agents_tagged_as_pipeline(
 
     assert reg.get_agent_group("repo-custom-agent") == "pipeline"
     assert "repo-custom-agent" in reg.get_agents_for_category("review")
+
+
+# ---------------------------------------------------------------------------
+# get_all_agent_definitions_json — group field in output
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_all_agent_definitions_json_db_path_includes_group(
+    mock_db: AsyncMock, tmp_path: Path
+) -> None:
+    """DB path returns group field uppercased from agent_group column."""
+    mock_db.fetch_all.return_value = [
+        {
+            "name": "planner-agent",
+            "version": "1.0.0",
+            "description": "Planner",
+            "spec": json.dumps({"role": "planner", "priority": 1}),
+            "agent_group": "system",
+        },
+        {
+            "name": "analyze-agent",
+            "version": "1.0.0",
+            "description": "Analyzer",
+            "spec": json.dumps({"categories": ["analyze"], "priority": 10}),
+            "agent_group": "pipeline",
+        },
+    ]
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+
+    result = await reg.get_all_agent_definitions_json()
+
+    by_name = {r["name"]: r for r in result}
+    assert by_name["planner-agent"]["group"] == "SYSTEM"
+    assert by_name["analyze-agent"]["group"] == "PIPELINE"
+
+
+@pytest.mark.asyncio
+async def test_get_all_agent_definitions_json_db_path_returns_all_fields(
+    mock_db: AsyncMock, tmp_path: Path
+) -> None:
+    """DB path returns all expected fields for each agent."""
+    mock_db.fetch_all.return_value = [
+        {
+            "name": "analyze-agent",
+            "version": "2.0.0",
+            "description": "Analyzes code",
+            "spec": json.dumps({
+                "categories": ["analyze"],
+                "priority": 15,
+                "resources": {"maxConcurrent": 2},
+                "outputSchema": {"type": "object"},
+                "conditions": {},
+            }),
+            "agent_group": "pipeline",
+        },
+    ]
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+
+    result = await reg.get_all_agent_definitions_json()
+
+    assert len(result) == 1
+    entry = result[0]
+    assert entry["name"] == "analyze-agent"
+    assert entry["version"] == "2.0.0"
+    assert entry["description"] == "Analyzes code"
+    assert entry["group"] == "PIPELINE"
+    assert entry["categories"] == ["analyze"]
+    assert entry["priority"] == 15
+    assert entry["resources"] == {"maxConcurrent": 2}
+    assert entry["outputSchema"] == {"type": "object"}
+
+
+@pytest.mark.asyncio
+async def test_get_all_agent_definitions_json_fallback_to_memory_when_db_empty(
+    mock_db: AsyncMock, tmp_path: Path
+) -> None:
+    """Falls back to in-memory registry when DB returns empty rows."""
+    mock_db.fetch_all.return_value = []  # DB returns nothing
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {
+        "analyze-agent": {
+            "_group": "pipeline",
+            "categories": ["analyze"],
+            "priority": 10,
+            "version": "1.0.0",
+            "description": "Analyzer",
+        },
+    }
+
+    result = await reg.get_all_agent_definitions_json()
+
+    assert len(result) == 1
+    assert result[0]["name"] == "analyze-agent"
+    assert result[0]["group"] == "PIPELINE"
+
+
+@pytest.mark.asyncio
+async def test_get_all_agent_definitions_json_fallback_to_memory_when_db_fails(
+    mock_db: AsyncMock, tmp_path: Path
+) -> None:
+    """Falls back to in-memory registry when DB query raises an exception."""
+    mock_db.fetch_all.side_effect = Exception("DB connection error")
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {
+        "planner-agent": {
+            "_group": "system",
+            "role": "planner",
+            "priority": 1,
+            "version": "1.0.0",
+            "description": "Planner",
+        },
+    }
+
+    result = await reg.get_all_agent_definitions_json()
+
+    assert len(result) == 1
+    assert result[0]["name"] == "planner-agent"
+    assert result[0]["group"] == "SYSTEM"
+
+
+@pytest.mark.asyncio
+async def test_get_all_agent_definitions_json_memory_fallback_system_group(
+    mock_db: AsyncMock, tmp_path: Path
+) -> None:
+    """In-memory fallback correctly uppercase system group from _group field."""
+    mock_db.fetch_all.return_value = []
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {
+        "condition-evaluator-agent": {
+            "_group": "system",
+            "role": "condition-evaluator",
+            "priority": 1,
+        },
+        "design-agent": {
+            "_group": "pipeline",
+            "categories": ["design"],
+            "priority": 20,
+        },
+    }
+
+    result = await reg.get_all_agent_definitions_json()
+
+    by_name = {r["name"]: r for r in result}
+    assert by_name["condition-evaluator-agent"]["group"] == "SYSTEM"
+    assert by_name["design-agent"]["group"] == "PIPELINE"
+
+
+@pytest.mark.asyncio
+async def test_get_all_agent_definitions_json_db_path_handles_missing_agent_group(
+    mock_db: AsyncMock, tmp_path: Path
+) -> None:
+    """When agent_group column is missing from DB row dict entirely, defaults to 'pipeline'."""
+    row: dict = {
+        "name": "legacy-agent",
+        "version": "1.0.0",
+        "description": "Old agent",
+        "spec": json.dumps({"categories": ["analyze"]}),
+        # agent_group key is absent entirely — simulates old DB rows before migration
+    }
+    # The key must truly be absent (not None) for the .get() default to apply
+    assert "agent_group" not in row
+    mock_db.fetch_all.return_value = [row]
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+
+    result = await reg.get_all_agent_definitions_json()
+
+    assert len(result) == 1
+    assert result[0]["group"] == "PIPELINE"

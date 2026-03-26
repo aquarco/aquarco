@@ -546,3 +546,114 @@ async def test_start_initializes_components(sample_config: Any, tmp_path: Any) -
     mock_db_inst.connect.assert_awaited_once()
     mock_reg_inst.load.assert_awaited_once()
     mock_loop.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# _sync_definitions_to_db — schema path resolution
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sync_definitions_to_db_calls_sync_all_with_schema_paths(
+    sample_config: Any, tmp_path: Any
+) -> None:
+    """_sync_definitions_to_db passes system/pipeline schema paths when they exist."""
+    from unittest.mock import patch, AsyncMock
+
+    supervisor = Supervisor(sample_config, {})
+    supervisor._db = AsyncMock()
+
+    # Build a fake agents_dir and schema dir where both schema files exist.
+    # main.py computes: schema_dir = agents_dir.parent.parent / "schemas"
+    # So if agents_dir = tmp_path/agents/definitions, schema_dir = tmp_path/schemas
+    agents_dir = tmp_path / "agents" / "definitions"
+    schema_dir = tmp_path / "schemas"
+    agents_dir.mkdir(parents=True)
+    schema_dir.mkdir(parents=True)
+    (schema_dir / "system-agent-v1.json").write_text("{}")
+    (schema_dir / "pipeline-agent-v1.json").write_text("{}")
+
+    # Point config to the tmp agents_dir
+    supervisor._config.spec.agents_dir = str(agents_dir)
+
+    with patch(
+        "aquarco_supervisor.main.sync_all_agent_definitions_to_db",
+        new_callable=AsyncMock,
+        return_value=0,
+    ) as mock_sync:
+        await supervisor._sync_definitions_to_db()
+
+    mock_sync.assert_awaited_once()
+    call_kwargs = mock_sync.call_args.kwargs
+    assert call_kwargs["system_schema_path"] == schema_dir / "system-agent-v1.json"
+    assert call_kwargs["pipeline_schema_path"] == schema_dir / "pipeline-agent-v1.json"
+
+
+@pytest.mark.asyncio
+async def test_sync_definitions_to_db_passes_none_when_schemas_missing(
+    sample_config: Any, tmp_path: Any
+) -> None:
+    """_sync_definitions_to_db passes None schema paths when schema files are absent."""
+    from unittest.mock import patch, AsyncMock
+
+    supervisor = Supervisor(sample_config, {})
+    supervisor._db = AsyncMock()
+
+    # agents_dir exists but no schema files
+    agents_dir = tmp_path / "agents" / "definitions"
+    agents_dir.mkdir(parents=True)
+    supervisor._config.spec.agents_dir = str(agents_dir)
+
+    with patch(
+        "aquarco_supervisor.main.sync_all_agent_definitions_to_db",
+        new_callable=AsyncMock,
+        return_value=0,
+    ) as mock_sync:
+        await supervisor._sync_definitions_to_db()
+
+    mock_sync.assert_awaited_once()
+    call_kwargs = mock_sync.call_args.kwargs
+    assert call_kwargs["system_schema_path"] is None
+    assert call_kwargs["pipeline_schema_path"] is None
+
+
+@pytest.mark.asyncio
+async def test_sync_definitions_to_db_skips_when_no_db(
+    sample_config: Any,
+) -> None:
+    """_sync_definitions_to_db returns early when no DB is available."""
+    from unittest.mock import patch, AsyncMock
+
+    supervisor = Supervisor(sample_config, {})
+    supervisor._db = None
+
+    with patch(
+        "aquarco_supervisor.main.sync_all_agent_definitions_to_db",
+        new_callable=AsyncMock,
+    ) as mock_sync:
+        await supervisor._sync_definitions_to_db()
+
+    mock_sync.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_definitions_to_db_handles_exception_gracefully(
+    sample_config: Any, tmp_path: Any
+) -> None:
+    """_sync_definitions_to_db catches exceptions without propagating them."""
+    from unittest.mock import patch, AsyncMock
+
+    supervisor = Supervisor(sample_config, {})
+    supervisor._db = AsyncMock()
+
+    agents_dir = tmp_path / "agents" / "definitions"
+    agents_dir.mkdir(parents=True)
+    supervisor._config.spec.agents_dir = str(agents_dir)
+
+    with patch(
+        "aquarco_supervisor.main.sync_all_agent_definitions_to_db",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("unexpected error"),
+    ):
+        # Must not raise — exceptions are caught internally
+        await supervisor._sync_definitions_to_db()
