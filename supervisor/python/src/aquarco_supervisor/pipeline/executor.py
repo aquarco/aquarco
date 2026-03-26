@@ -426,6 +426,7 @@ class PipelineExecutor:
                 else:
                     # Sequential execution (single or multiple agents)
                     stage_output = {}
+                    per_agent_output: dict[str, dict[str, Any]] = {}
                     for agent_name in agents:
                         task_context = await self._tq.get_task_context(task_id) or {}
                         accumulated = build_accumulated_context(
@@ -438,15 +439,22 @@ class PipelineExecutor:
                             work_dir=clone_dir,
                             pipeline_name=pipeline_name,
                         )
+                        per_agent_output[agent_name] = out
                         stage_output.update(out)
 
                 previous_output = stage_output
                 stage_outputs[stage_name] = stage_output
 
                 # Process validation items from agent output
-                for agent_name in agents:
-                    sk = f"{stage_num}:{category}:{agent_name}"
-                    await self._process_validation_items(task_id, sk, stage_output)
+                if parallel and len(agents) > 1:
+                    for agent_name in agents:
+                        sk = f"{stage_num}:{category}:{agent_name}"
+                        agent_out = stage_output.get(agent_name, {})
+                        await self._process_validation_items(task_id, sk, agent_out)
+                else:
+                    for agent_name in agents:
+                        sk = f"{stage_num}:{category}:{agent_name}"
+                        await self._process_validation_items(task_id, sk, per_agent_output[agent_name])
 
                 # Iteration loop: re-run if open validation items target this category
                 current_iteration = 1
