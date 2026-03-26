@@ -237,18 +237,18 @@ export const Query = {
                 return {
                   type: 'simple',
                   expression: String(c.simple),
-                  onYes: c.yes ? String(c.yes) : null,
-                  onNo: c.no ? String(c.no) : null,
-                  maxRepeats: c.maxRepeats ? Number(c.maxRepeats) : null,
+                  onYes: c.yes != null ? String(c.yes) : null,
+                  onNo: c.no != null ? String(c.no) : null,
+                  maxRepeats: c.maxRepeats != null ? Number(c.maxRepeats) : null,
                 }
               }
               if (c.ai !== undefined) {
                 return {
                   type: 'ai',
                   expression: String(c.ai),
-                  onYes: c.yes ? String(c.yes) : null,
-                  onNo: c.no ? String(c.no) : null,
-                  maxRepeats: c.maxRepeats ? Number(c.maxRepeats) : null,
+                  onYes: c.yes != null ? String(c.yes) : null,
+                  onNo: c.no != null ? String(c.no) : null,
+                  maxRepeats: c.maxRepeats != null ? Number(c.maxRepeats) : null,
                 }
               }
               return {
