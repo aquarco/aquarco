@@ -476,6 +476,11 @@ async def evaluate_ai_condition(
         prompt_path = Path(prompts_dir) / "condition-evaluator-agent.md"
         if prompt_path.exists():
             try:
+                # The file-based prompt is used verbatim — no {schema_json}
+                # substitution is applied (unlike the inline fallback below).
+                # The schema is embedded statically in the .md file.
+                # test_condition_evaluator_md_schema_matches_inline_schema
+                # guards against drift between the two.
                 system_prompt = prompt_path.read_text()
                 log.debug("ai_condition_prompt_loaded", path=str(prompt_path))
             except OSError:

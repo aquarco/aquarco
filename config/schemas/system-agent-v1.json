@@ -53,7 +53,8 @@
       "properties": {
         "role": {
           "type": "string",
-          "description": "Functional role of the system agent (e.g. planner, condition-evaluator, repo-descriptor)"
+          "enum": ["planner", "condition-evaluator", "repo-descriptor"],
+          "description": "Functional role of the system agent. Must be one of the recognised values — extend this enum when adding new system agents."
         },
         "promptFile": {
           "type": "string",

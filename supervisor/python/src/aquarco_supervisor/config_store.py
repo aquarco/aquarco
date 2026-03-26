@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import jsonschema
 import structlog
@@ -106,7 +106,7 @@ async def store_agent_definitions(
     db: Database,
     definitions: list[dict[str, Any]],
     source: str = "default",
-    agent_group: str = "pipeline",
+    agent_group: Literal["system", "pipeline"] = "pipeline",
 ) -> int:
     """Upsert agent definitions into the ``agent_definitions`` table.
 
@@ -124,6 +124,10 @@ async def store_agent_definitions(
 
     Returns the number of rows upserted.
     """
+    if agent_group not in ("system", "pipeline"):
+        raise ValueError(
+            f"Invalid agent_group {agent_group!r}. Must be 'system' or 'pipeline'."
+        )
     count = 0
     for doc in definitions:
         meta = doc.get("metadata", {})
@@ -458,13 +462,22 @@ async def export_agent_definitions_to_files(
 
     Returns the number of files written.
 
-    Note: This function is **not group-preserving**.  ``agent_group`` is stored
-    only in the database and is intentionally excluded from the exported YAML
-    documents (to keep the schema clean).  All files are written into
-    ``agents_dir`` as a flat list — the ``system/`` vs ``pipeline/``
-    subdirectory split is lost.  If the exported files are re-imported via a
-    flat scan, system agents will be re-tagged as 'pipeline' unless the caller
-    explicitly separates them before re-import.
+    .. warning:: **Not group-preserving.**
+        ``agent_group`` is stored only in the database and is intentionally
+        excluded from the exported YAML documents (to keep the schema clean).
+        All files are written into ``agents_dir`` as a flat list — the
+        ``system/`` vs ``pipeline/`` subdirectory split is lost.
+
+        If the exported files are re-imported via a flat scan,
+        ``sync_all_agent_definitions_to_db`` will rely on
+        ``SYSTEM_AGENT_NAMES`` to re-tag known system agents.  Unknown system
+        agents added after this export will be silently re-tagged as
+        'pipeline'.
+
+        **Migration guide**: If you need a group-preserving backup/restore,
+        query the DB directly including the ``agent_group`` column, or copy the
+        source YAML files from ``config/agents/definitions/system/`` and
+        ``config/agents/definitions/pipeline/`` instead of using this function.
     """
     agents_dir.mkdir(parents=True, exist_ok=True)
 

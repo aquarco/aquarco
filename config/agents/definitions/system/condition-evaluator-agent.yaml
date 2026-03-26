@@ -13,6 +13,11 @@ spec:
 
   promptFile: condition-evaluator-agent.md
 
+  # tools.allowed: [] means "no tools whitelisted" — the CLI wrapper MUST
+  # omit --allowedTools when the list is empty (treating it as "unset / all
+  # allowed") OR must pass an explicit empty allow-list to disable tool use.
+  # The intent here is no tool access (maxTurns: 1, text-only evaluation).
+  # See cli/claude.py for how an empty allowed list is handled.
   tools:
     allowed: []
     denied: []

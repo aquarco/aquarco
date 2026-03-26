@@ -1142,6 +1142,21 @@ class TestSyncAllAgentDefinitionsToDb:
         count = await sync_all_agent_definitions_to_db(mock_db, agents_dir)
         assert count == 2
 
+        # Verify SYSTEM_AGENT_NAMES lookup correctly tags planner-agent as system
+        # and analyze-agent as pipeline in the flat-scan backward-compat path.
+        all_params = [call[0][1] for call in mock_db.execute.call_args_list]
+        upsert_params = [p for p in all_params if p.get("name") and "agent_group" in p]
+        system_params = [p for p in upsert_params if p["name"] == "planner-agent"]
+        pipeline_params = [p for p in upsert_params if p["name"] == "analyze-agent"]
+        assert system_params, "planner-agent upsert not found in DB calls"
+        assert pipeline_params, "analyze-agent upsert not found in DB calls"
+        assert system_params[0]["agent_group"] == "system", (
+            "planner-agent should be tagged as system in flat-scan path"
+        )
+        assert pipeline_params[0]["agent_group"] == "pipeline", (
+            "analyze-agent should be tagged as pipeline in flat-scan path"
+        )
+
     @pytest.mark.asyncio
     async def test_empty_dirs(
         self, mock_db: AsyncMock, tmp_path: Path,

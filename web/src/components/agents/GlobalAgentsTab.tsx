@@ -31,7 +31,11 @@ export default function GlobalAgentsTab() {
 
   const agents: AgentDefinitionRow[] = data?.globalAgents ?? []
 
-  // Split agents by group
+  // Split agents by group.
+  // Pipeline agents use a negative check (group !== 'SYSTEM') so that agents
+  // with an unknown or missing group value fall into the pipeline section
+  // rather than disappearing from the UI entirely. If a third group is ever
+  // introduced, update this filter to handle it explicitly.
   const pipelineAgents = agents.filter((a) => a.group !== 'SYSTEM')
   const systemAgents = agents.filter((a) => a.group === 'SYSTEM')
 

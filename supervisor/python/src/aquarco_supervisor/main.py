@@ -19,7 +19,7 @@ from .cli.repo_manager import repo_app
 from .cli.status import status
 from .agent_autoloader import autoload_repo_agents, create_scan_record, has_claude_agents
 from .config import load_config, load_pipelines, load_secrets
-from .config_store import sync_agent_definitions_to_db, sync_pipeline_definitions_to_db
+from .config_store import sync_all_agent_definitions_to_db, sync_pipeline_definitions_to_db
 from .database import Database
 from .logging import get_logger, setup_logging
 from .models import PipelineConfig, SupervisorConfig
@@ -416,12 +416,14 @@ class Supervisor:
         try:
             agents_dir = Path(self._config.spec.agents_dir)
             schema_dir = agents_dir.parent.parent / "schemas"
-            agent_schema = schema_dir / "agent-definition.schema.json"
+            system_schema = schema_dir / "system-agent-v1.json"
+            pipeline_schema = schema_dir / "pipeline-agent-v1.json"
 
-            agent_count = await sync_agent_definitions_to_db(
+            agent_count = await sync_all_agent_definitions_to_db(
                 self._db,
                 agents_dir,
-                schema_path=agent_schema if agent_schema.exists() else None,
+                system_schema_path=system_schema if system_schema.exists() else None,
+                pipeline_schema_path=pipeline_schema if pipeline_schema.exists() else None,
             )
             log.info("agent_definitions_synced", count=agent_count)
 
