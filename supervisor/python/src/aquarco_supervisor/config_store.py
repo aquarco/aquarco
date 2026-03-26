@@ -175,12 +175,9 @@ async def store_agent_definitions(
     return count
 
 
-# Known system agent names — used to infer group when scanning flat directories
-_SYSTEM_AGENT_NAMES: frozenset[str] = frozenset({
-    "planner-agent",
-    "condition-evaluator-agent",
-    "repo-descriptor-agent",
-})
+# Re-exported for backward compatibility — callers should prefer importing from
+# aquarco_supervisor.constants directly.
+from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES as _SYSTEM_AGENT_NAMES  # noqa: E402
 
 
 async def sync_agent_definitions_to_db(
@@ -228,9 +225,12 @@ async def sync_all_agent_definitions_to_db(
         count += await store_agent_definitions(db, pipe_defs, agent_group="pipeline")
         return count
 
-    # Backward-compat: flat directory scan — infer group from name
-    schema = _load_json_schema(pipeline_schema_path) if pipeline_schema_path else None
-    all_defs = load_agent_definitions_from_files(agents_dir, schema)
+    # Backward-compat: flat directory scan — infer group from name.
+    # Skip schema validation here: a flat directory may contain both system and
+    # pipeline agents, and applying the pipeline schema to system agents (which
+    # have spec.role instead of spec.categories) would cause them to fail
+    # validation and be silently excluded.
+    all_defs = load_agent_definitions_from_files(agents_dir, schema=None)
 
     sys_defs = [
         d for d in all_defs

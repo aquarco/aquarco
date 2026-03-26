@@ -74,7 +74,7 @@ class AgentRegistry:
             self._discover_agents_from_dir(pipeline_dir, group="pipeline")
         else:
             # Flat scan — infer group from name
-            from ..config_store import _SYSTEM_AGENT_NAMES  # noqa: PLC0415
+            from ..constants import SYSTEM_AGENT_NAMES as _SYSTEM_AGENT_NAMES  # noqa: PLC0415
 
             for yaml_file in sorted(self._agents_dir.glob("*.yaml")):
                 try:
