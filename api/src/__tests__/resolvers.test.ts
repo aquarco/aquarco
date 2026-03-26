@@ -5,6 +5,7 @@
  * The mock is typed to match the subset of pg.Pool used by the resolvers.
  */
 
+import { jest } from '@jest/globals'
 import { Query, mapRepository, mapStage } from '../resolvers/queries.js'
 import type { Context } from '../context.js'
 
@@ -596,7 +597,7 @@ describe('Query.pipelineDefinitions', () => {
     await Query.pipelineDefinitions(null, null, ctx)
     const sql = (pool.query.mock.calls[0][0] as string).replace(/\s+/g, ' ').trim()
     expect(sql).toMatch(/is_active\s*=\s*true/i)
-    expect(sql).toMatch(/ORDER BY name/i)
+    expect(sql).toMatch(/ORDER BY name ASC/i)
   })
 
   it('should map pipeline name and version from db row', async () => {
@@ -848,5 +849,150 @@ describe('Query.pipelineDefinitions', () => {
     expect(result).toHaveLength(2)
     expect(result[0].name).toBe('alpha')
     expect(result[1].name).toBe('beta')
+  })
+
+  // ── Edge-case: maxRepeats: 0 must NOT be coerced to null ──────────────────
+  // Bug: `c.maxRepeats ? Number(c.maxRepeats) : null` is a falsy check that
+  // converts 0 → null.  Until the production code is fixed this test documents
+  // the DESIRED behaviour so future devs know exactly what to fix.
+
+  it('should preserve maxRepeats: 0 as 0, not null (simple condition)', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          {
+            name: 'pipeline-maxrepeats-zero',
+            version: '1',
+            categories: {},
+            stages: [
+              {
+                name: 'review',
+                category: 'review',
+                required: true,
+                conditions: [
+                  {
+                    simple: 'always',
+                    yes: null,
+                    no: null,
+                    maxRepeats: 0,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    const cond = result[0].stages[0].conditions[0]
+    // maxRepeats: 0 is a valid value meaning "run at most 0 extra times".
+    // A falsy check `c.maxRepeats ? ... : null` silently drops it.
+    expect(cond.maxRepeats).toBe(0)
+  })
+
+  it('should preserve maxRepeats: 0 as 0, not null (ai condition)', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          {
+            name: 'pipeline-ai-maxrepeats-zero',
+            version: '1',
+            categories: {},
+            stages: [
+              {
+                name: 'test',
+                category: 'test',
+                required: true,
+                conditions: [
+                  {
+                    ai: 'Did tests pass?',
+                    yes: 'next',
+                    no: null,
+                    maxRepeats: 0,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    const cond = result[0].stages[0].conditions[0]
+    expect(cond.maxRepeats).toBe(0)
+  })
+
+  // ── Edge-case: empty-string yes/no must NOT be coerced to null ────────────
+  // Bug: `c.yes ? String(c.yes) : null` treats '' the same as null.
+  // Empty string could be an intentional sentinel; the falsy check silently
+  // drops it.  These tests pin the desired behaviour.
+
+  it('should preserve empty-string onYes as empty string, not null (simple)', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          {
+            name: 'pipeline-empty-yes',
+            version: '1',
+            categories: {},
+            stages: [
+              {
+                name: 'review',
+                category: 'review',
+                required: true,
+                conditions: [
+                  {
+                    simple: 'always',
+                    yes: '',
+                    no: null,
+                    maxRepeats: null,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    const cond = result[0].stages[0].conditions[0]
+    // An explicit '' from the DB should survive as '' (not become null).
+    expect(cond.onYes).toBe('')
+  })
+
+  it('should preserve empty-string onNo as empty string, not null (ai)', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          {
+            name: 'pipeline-empty-no',
+            version: '1',
+            categories: {},
+            stages: [
+              {
+                name: 'test',
+                category: 'test',
+                required: true,
+                conditions: [
+                  {
+                    ai: 'Did tests pass?',
+                    yes: null,
+                    no: '',
+                    maxRepeats: null,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    const cond = result[0].stages[0].conditions[0]
+    expect(cond.onNo).toBe('')
   })
 })
