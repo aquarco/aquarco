@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from aquarco_supervisor.models import (
     Complexity,
+    PipelineConfig,
+    PipelineTrigger,
+    StageConfig,
     Task,
     TaskStatus,
 )
@@ -53,3 +56,51 @@ def test_task_status_values() -> None:
     assert TaskStatus.PENDING.value == "pending"
     assert TaskStatus.EXECUTING.value == "executing"
     assert TaskStatus.COMPLETED.value == "completed"
+
+
+def test_stage_config_name_field() -> None:
+    stage = StageConfig(name="analysis", category="analyze")
+    assert stage.name == "analysis"
+    assert stage.category == "analyze"
+    assert stage.conditions == []
+    assert stage.required is True
+
+
+def test_stage_config_name_default() -> None:
+    stage = StageConfig(category="review")
+    assert stage.name == ""
+
+
+def test_stage_config_structured_conditions() -> None:
+    conditions = [
+        {"simple": "severity == major_issues", "no": "implementation", "maxRepeats": 3},
+        {"ai": "All risks mitigated?", "no": "fix", "maxRepeats": 5},
+    ]
+    stage = StageConfig(name="review", category="review", conditions=conditions)
+    assert len(stage.conditions) == 2
+    assert stage.conditions[0]["simple"] == "severity == major_issues"
+    assert stage.conditions[1]["ai"] == "All risks mitigated?"
+
+
+def test_pipeline_config_categories() -> None:
+    categories = {
+        "analyze": {"type": "object", "required": ["risks"]},
+        "design": {"type": "object"},
+    }
+    pipeline = PipelineConfig(
+        name="test-pipeline",
+        trigger=PipelineTrigger(labels=["test"]),
+        stages=[StageConfig(name="s1", category="analyze")],
+        categories=categories,
+    )
+    assert pipeline.categories["analyze"]["type"] == "object"
+    assert "design" in pipeline.categories
+
+
+def test_pipeline_config_categories_default() -> None:
+    pipeline = PipelineConfig(
+        name="test-pipeline",
+        trigger=PipelineTrigger(labels=["test"]),
+        stages=[StageConfig(name="s1", category="analyze")],
+    )
+    assert pipeline.categories == {}

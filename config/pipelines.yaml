@@ -222,7 +222,7 @@ pipelines:
         required: false
         conditions: 
           - ai: All design.acceptance_criteria fulfilled?
-            no: implementation
+            "no": implementation
             maxRepeats: 5
 
       - name: review
@@ -230,18 +230,18 @@ pipelines:
         required: true
         conditions:
           - ai: All analysis.risks are avoided or mitigated?
-            no: implementation
+            "no": implementation
             maxRepeats: 5
           - simple: severity == major_issues || severity == blocking
-            no: test
+            "no": test
             maxRepeats: 5
 
       - name: fix-review-findings
         category: implementation
         required: false
         conditions:
-          - simple: true
-            yes: review
+          - simple: "true"
+            "yes": review
             maxRepeats: 5
 
       - name: test
@@ -249,7 +249,7 @@ pipelines:
         required: false
         conditions:
           - simple: tests_added == 0 || (coverage_percent >= 80 && tests_failed == 0)
-            no: test
+            "no": test
             maxRepeats: 5
 
       - name: docs
@@ -274,15 +274,15 @@ pipelines:
         required: true
         conditions:
           - simple: severity == major_issues || severity == blocking
-            no: test # skip fix-review-findings
+            "no": test # skip fix-review-findings
             maxRepeats: 3
 
       - name: fix-review-findings
         category: implementation
         required: false
         conditions:
-          - simple: true
-            yes: review
+          - simple: "true"
+            "yes": review
             maxRepeats: 3
       
       - name: test
@@ -290,7 +290,7 @@ pipelines:
         required: true
         conditions:
           - simple: tests_added == 0 || (coverage_percent >= 80 && tests_failed == 0)
-            no: test
+            "no": test
             maxRepeats: 5
 
   - name: pr-review-pipeline
@@ -303,15 +303,15 @@ pipelines:
         required: true
         conditions:
           - simple: recommendation == request_changes
-            no: test
+            "no": test
             maxRepeats: 3
 
       - name: fix-review-findings
         category: implementation
         required: false
         conditions:
-          - simple: true
-            yes: review
+          - simple: "true"
+            "yes": review
             maxRepeats: 5
 
       - name: test

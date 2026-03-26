@@ -66,6 +66,15 @@ def load_pipelines(pipelines_file: str | Path) -> list[PipelineConfig]:
     if not isinstance(raw, dict):
         raise ConfigValidationError("Pipelines file must contain a YAML mapping")
 
+    # Parse top-level categories: list of {name, outputSchema} -> dict
+    raw_categories = raw.get("categories", [])
+    categories_map: dict[str, dict[str, Any]] = {}
+    if isinstance(raw_categories, list):
+        for cat in raw_categories:
+            if isinstance(cat, dict) and "name" in cat:
+                cat_name = cat["name"]
+                categories_map[cat_name] = cat.get("outputSchema", {})
+
     pipelines: list[PipelineConfig] = []
     for entry in raw.get("pipelines", []):
         trigger_data = entry.get("trigger", {})
@@ -79,6 +88,7 @@ def load_pipelines(pipelines_file: str | Path) -> list[PipelineConfig]:
             version=entry.get("version", "0.0.0"),
             trigger=trigger,
             stages=stages,
+            categories=categories_map,
         ))
 
     log.info("pipelines_loaded", count=len(pipelines))
@@ -125,3 +135,13 @@ def get_pipeline_config(
         if pipeline.name == pipeline_name:
             return [s.model_dump() for s in pipeline.stages]
     return None
+
+
+def get_pipeline_categories(
+    pipelines: list[PipelineConfig], pipeline_name: str,
+) -> dict[str, dict[str, Any]]:
+    """Get category -> outputSchema map for a named pipeline."""
+    for pipeline in pipelines:
+        if pipeline.name == pipeline_name:
+            return pipeline.categories
+    return {}

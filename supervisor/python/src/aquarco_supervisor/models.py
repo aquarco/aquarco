@@ -278,9 +278,10 @@ class HealthConfig(BaseModel):
 
 
 class StageConfig(BaseModel):
+    name: str = ""
     category: str
     required: bool = True
-    conditions: list[str] = Field(default_factory=list)
+    conditions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PipelineTrigger(BaseModel):
@@ -293,6 +294,7 @@ class PipelineConfig(BaseModel):
     version: str = "0.0.0"
     trigger: PipelineTrigger
     stages: list[StageConfig]
+    categories: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class PollerSourceConfig(BaseModel):

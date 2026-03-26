@@ -214,6 +214,13 @@ class ScopedAgentView:
         schema = s.get("outputSchema")
         return schema if schema else None
 
+    def get_pipeline_categories(self, pipeline_name: str) -> dict[str, dict[str, Any]]:
+        """Get category -> outputSchema map for a named pipeline from resolved config."""
+        for p in self._resolved.pipelines:
+            if p.get("name") == pipeline_name:
+                return p.get("categories", {})
+        return {}
+
     def cleanup(self) -> None:
         """Remove any tempfiles created for inline prompts."""
         for path in self._temp_files:

@@ -1,5 +1,27 @@
 # Changelog
 
+## [2026-03-26] — Powerful conditions in pipeline (#6)
+
+### Added
+- **Structured exit-gate conditions** — pipeline stages now support `simple:` (expression-based) and `ai:` (Claude CLI-evaluated) conditions with `yes:`/`no:` named-stage jumps and `maxRepeats:` loop guards
+- **Pipeline categories** — `outputSchema` definitions moved from agent definitions into a top-level `categories:` section in `pipelines.yaml`, enabling schema resolution by stage category rather than agent name
+- **Condition evaluation engine** (`supervisor/python/src/aquarco_supervisor/pipeline/conditions.py`) — recursive-descent expression parser supporting `==`, `!=`, `>=`, `>`, `<=`, `<`, `&&`, `||`, parentheses, `true`/`false` literals, and dotted field paths (e.g., `analysis.risks`)
+- **AI condition evaluation** — `ai:` conditions are evaluated via Claude CLI with accumulated pipeline context; returns boolean yes/no
+- **Named-stage execution flow** — stage execution loop replaced from linear `enumerate` to name-indexed while-loop with condition-driven jumps and repeat tracking
+- **Database migration** `029_add_pipeline_categories.sql` — adds `categories JSONB DEFAULT '{}'` column to `pipeline_definitions` table
+- **JSON schema update** (`config/schemas/pipeline-definition-v1.json`) — `categories` array, `name` on stages, structured `ConditionObject` (oneOf `simple`/`ai` with `yes`/`no`/`maxRepeats`)
+- 97 new tests across `test_conditions_extended.py`, `test_executor_conditions.py`, `test_config_store_categories.py`, and `test_config_categories.py`
+
+### Changed
+- `StageConfig` model — added `name: str` field; `conditions` type changed from `list[str]` to `list[dict[str, Any]]`
+- `PipelineConfig` model — added `categories: dict[str, dict[str, Any]]` for category-to-outputSchema mapping
+- `load_pipelines()` — now parses `categories:` from YAML, builds name→outputSchema dict
+- Output schema resolution — primary lookup is now `pipeline.categories[stage.category].outputSchema`; agent-level `outputSchema` is a fallback for backward compatibility
+- `config_store.py` — `store_pipeline_definitions()` now persists `categories` JSONB alongside stages and trigger config
+- `api/src/resolvers/mutations.ts` — removed `'output'` from `REQUIRED_SPEC_KEYS`
+- `cli/agents.py` — removed `output.format` validation and `VALID_OUTPUT_FORMATS` check
+- Pipeline definitions (`config/pipelines.yaml`) — all pipelines now use named stages with structured conditions instead of string-based conditions
+
 ## [2026-03-25] — Autoload .claude agents (#14)
 
 ### Added

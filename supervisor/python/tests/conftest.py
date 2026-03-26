@@ -96,17 +96,15 @@ def sample_config_path(tmp_path: Path) -> Path:
                 "version": "1.0.0",
                 "trigger": {"labels": ["feature", "enhancement"]},
                 "stages": [
-                    {"category": "analyze", "required": True},
+                    {"name": "analysis", "category": "analyze", "required": True},
                     {
+                        "name": "design",
                         "category": "design",
                         "required": True,
-                        "conditions": [
-                            "analysis.estimated_complexity >= medium"
-                        ],
                     },
-                    {"category": "implementation", "required": True},
-                    {"category": "test", "required": True},
-                    {"category": "review", "required": True},
+                    {"name": "implementation", "category": "implementation", "required": True},
+                    {"name": "test", "category": "test", "required": True},
+                    {"name": "review", "category": "review", "required": True},
                 ],
             },
             {
@@ -114,10 +112,10 @@ def sample_config_path(tmp_path: Path) -> Path:
                 "version": "1.0.0",
                 "trigger": {"labels": ["bug"]},
                 "stages": [
-                    {"category": "analyze", "required": True},
-                    {"category": "implementation", "required": True},
-                    {"category": "test", "required": True},
-                    {"category": "review", "required": True},
+                    {"name": "analysis", "category": "analyze", "required": True},
+                    {"name": "implementation", "category": "implementation", "required": True},
+                    {"name": "test", "category": "test", "required": True},
+                    {"name": "review", "category": "review", "required": True},
                 ],
             },
         ],
