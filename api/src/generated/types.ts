@@ -23,6 +23,7 @@ export type AgentDefinition = {
   __typename?: 'AgentDefinition';
   activeCount: Scalars['Int']['output'];
   description: Scalars['String']['output'];
+  group: AgentGroup;
   isDisabled: Scalars['Boolean']['output'];
   isModified: Scalars['Boolean']['output'];
   lastExecutionAt?: Maybe<Scalars['DateTime']['output']>;
@@ -41,6 +42,11 @@ export type AgentDefinitionPayload = {
   agent?: Maybe<AgentDefinition>;
   errors?: Maybe<Array<Error>>;
 };
+
+export enum AgentGroup {
+  Pipeline = 'PIPELINE',
+  System = 'SYSTEM'
+}
 
 export type AgentInstance = {
   __typename?: 'AgentInstance';
@@ -619,6 +625,7 @@ export type DirectiveResolverFn<TResult = {}, TParent = {}, TContext = {}, TArgs
 export type ResolversTypes = ResolversObject<{
   AgentDefinition: ResolverTypeWrapper<AgentDefinition>;
   AgentDefinitionPayload: ResolverTypeWrapper<AgentDefinitionPayload>;
+  AgentGroup: AgentGroup;
   AgentInstance: ResolverTypeWrapper<AgentInstance>;
   AgentSource: AgentSource;
   Boolean: ResolverTypeWrapper<Scalars['Boolean']['output']>;
@@ -711,6 +718,7 @@ export type ResolversParentTypes = ResolversObject<{
 export type AgentDefinitionResolvers<ContextType = Context, ParentType extends ResolversParentTypes['AgentDefinition'] = ResolversParentTypes['AgentDefinition']> = ResolversObject<{
   activeCount?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   description?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  group?: Resolver<ResolversTypes['AgentGroup'], ParentType, ContextType>;
   isDisabled?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   isModified?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   lastExecutionAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;

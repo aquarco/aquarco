@@ -1156,6 +1156,23 @@ class PipelineExecutor:
             await _run_git(clone_dir, "push", "origin", branch_name, "--force-with-lease")
             repo_slug = await self._get_repo_slug(task_id)
             if repo_slug:
+                # Check if a PR already exists for this branch
+                existing_pr = await _run_cmd(
+                    "gh", "pr", "view", branch_name,
+                    "--repo", repo_slug,
+                    "--json", "number,url",
+                    check=False,
+                )
+                if existing_pr:
+                    pr_match = re.search(r'"number"\s*:\s*(\d+)', existing_pr)
+                    if pr_match:
+                        pr_number = int(pr_match.group(1))
+                        log.info("pr_already_exists", task_id=task_id, pr_number=pr_number)
+                        await self._tq.store_pr_info(
+                            task_id, pr_number, branch_name,
+                        )
+                        return
+
                 pr_output = await _run_cmd(
                     "gh", "pr", "create",
                     "--repo", repo_slug,
