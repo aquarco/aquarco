@@ -527,7 +527,16 @@ class TestClaudeResumePrompt:
             # Make process fail so we don't need full setup
             mock_process = AsyncMock()
             mock_process.returncode = 1
-            mock_process.communicate = AsyncMock(return_value=(b"error", b""))
+
+            # Provide an async-iterable stdout (stream-json mode requires this)
+            class _EmptyReader:
+                def __aiter__(self) -> "_EmptyReader":
+                    return self
+
+                async def __anext__(self) -> bytes:
+                    raise StopAsyncIteration
+
+            mock_process.stdout = _EmptyReader()
             mock_process.kill = AsyncMock()
             mock_process.wait = AsyncMock()
             mock_proc_create.return_value = mock_process

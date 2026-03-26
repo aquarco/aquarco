@@ -480,7 +480,7 @@ async def evaluate_ai_condition(
             "claude",
             "--print",
             "--dangerously-skip-permissions",
-            "--output-format", "json",
+            "--output-format", "stream-json",
             "--max-turns", "1",
             "--system-prompt-file", sys_path,
             "--json-schema", json.dumps(_AI_CONDITION_SCHEMA),
@@ -507,15 +507,58 @@ async def evaluate_ai_condition(
                 env=proc_env,
             )
 
+            # Read stdout (NDJSON stream) and stderr concurrently to avoid deadlock
+            async def _read_stdout_lines() -> list[str]:
+                result: list[str] = []
+                assert proc.stdout is not None
+                async for raw_line in proc.stdout:
+                    line = raw_line.decode("utf-8", errors="replace").rstrip("\n").rstrip("\r")
+                    if line.strip():
+                        result.append(line)
+                return result
+
+            stdout_task: asyncio.Task[list[str]] = asyncio.create_task(_read_stdout_lines())
+            stderr_task: asyncio.Task[bytes] = asyncio.create_task(
+                proc.stderr.read()  # type: ignore[union-attr]
+            )
+
             try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout_seconds,
+                await asyncio.wait_for(
+                    asyncio.shield(stdout_task), timeout=timeout_seconds
                 )
             except asyncio.TimeoutError:
                 proc.kill()
-                await proc.communicate()
+                await proc.wait()
+                stdout_task.cancel()
+                stderr_task.cancel()
+                for t in (stdout_task, stderr_task):
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
                 log.warning("ai_condition_timeout", task_id=task_id, prompt=prompt[:100])
                 return False
+
+            ndjson_lines: list[str] = []
+            try:
+                ndjson_lines = stdout_task.result()
+            except Exception:
+                pass
+
+            stderr_bytes = b""
+            if stderr_task.done():
+                try:
+                    stderr_bytes = stderr_task.result()
+                except Exception:
+                    pass
+            else:
+                stderr_task.cancel()
+                try:
+                    await stderr_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+            await proc.wait()
 
         if proc.returncode != 0:
             stderr_text = stderr_bytes.decode("utf-8", errors="replace")[:500]
@@ -527,33 +570,19 @@ async def evaluate_ai_condition(
             )
             return False
 
-        # Parse Claude CLI JSON output
-        stdout_text = stdout_bytes.decode("utf-8", errors="replace")
-        try:
-            output = json.loads(stdout_text)
-        except json.JSONDecodeError:
-            # Claude CLI wraps output in a result array
-            # Try extracting from the last JSON object in output
-            log.warning("ai_condition_json_parse_error", task_id=task_id, raw=stdout_text[:200])
-            return False
+        # Parse NDJSON stream: find the result message and extract 'answer'
+        from ..cli.claude import _parse_ndjson_output  # noqa: PLC0415
 
-        # Handle Claude CLI output format: may be a dict with "result" key
-        # or the structured output directly
-        if isinstance(output, dict):
-            answer = output.get("answer")
-            if answer is None and "result" in output:
-                answer = output["result"].get("answer") if isinstance(output["result"], dict) else None
-        else:
-            answer = False
-
+        output_dict = _parse_ndjson_output(ndjson_lines, task_id, stage_num)
+        answer = output_dict.get("answer")
         result = bool(answer)
-        reasoning = output.get("reasoning", "") if isinstance(output, dict) else ""
+        reasoning = output_dict.get("reasoning", "")
         log.info(
             "ai_condition_result",
             task_id=task_id,
             prompt=prompt[:100],
             answer=result,
-            reasoning=reasoning[:200],
+            reasoning=str(reasoning)[:200],
         )
         return result
 

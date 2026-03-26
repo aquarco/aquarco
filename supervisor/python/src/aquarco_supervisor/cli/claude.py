@@ -28,26 +28,56 @@ log = get_logger("claude-cli")
 _STRUCTURED_OUTPUT_MARKER = "StructuredOutput"
 
 
-async def _monitor_for_inactivity(
-    debug_log: Path,
+async def _read_stream_json(
     proc: asyncio.subprocess.Process,
+    last_event_time: list[float],
+    result_seen: asyncio.Event,
+    on_live_output: Callable[[str], Awaitable[None]] | None,
+) -> list[str]:
+    """Read NDJSON events from process stdout line by line.
+
+    Updates last_event_time[0] on each non-empty line, sets result_seen when a
+    {type: 'result'} event is seen, and calls on_live_output per event.
+    Returns all non-empty NDJSON line strings.
+    """
+    lines: list[str] = []
+    async for raw_line in proc.stdout:  # type: ignore[union-attr]
+        line = raw_line.decode("utf-8", errors="replace").rstrip("\n").rstrip("\r")
+        if not line.strip():
+            continue
+        last_event_time[0] = asyncio.get_event_loop().time()
+        lines.append(line)
+        # Check for result event to signal inactivity monitor
+        try:
+            msg = json.loads(line)
+            if isinstance(msg, dict) and msg.get("type") == "result":
+                result_seen.set()
+        except json.JSONDecodeError:
+            pass
+        # Invoke live output callback immediately per event
+        if on_live_output is not None:
+            await on_live_output(line)
+    return lines
+
+
+async def _monitor_for_inactivity_stream(
+    proc: asyncio.subprocess.Process,
+    last_event_time: list[float],
+    result_seen: asyncio.Event,
     *,
     inactivity_timeout: float = 90.0,
     poll_interval: float = 5.0,
     task_id: str = "",
     stage_num: int = 0,
 ) -> bool:
-    """Monitor a Claude process for inactivity after StructuredOutput.
+    """Monitor for inactivity in stream-json mode.
 
-    Polls the debug log's mtime. Once StructuredOutput is detected in the log
-    and mtime stops advancing for *inactivity_timeout* seconds, kills the process.
+    Polls every poll_interval seconds. Waits until result_seen is set, then
+    tracks time since last_event_time[0]. Kills the process if no events have
+    been received for inactivity_timeout seconds after the result event.
 
     Returns True if the process was killed for inactivity, False otherwise.
     """
-    structured_output_seen = False
-    last_mtime: float = 0.0
-    stale_since: float | None = None
-
     while proc.returncode is None:
         await asyncio.sleep(poll_interval)
 
@@ -55,72 +85,22 @@ async def _monitor_for_inactivity(
         if proc.returncode is not None:
             return False
 
-        try:
-            current_mtime = debug_log.stat().st_mtime
-        except OSError:
+        # Only track inactivity after the result event has been seen
+        if not result_seen.is_set():
             continue
 
-        # Check for StructuredOutput marker if not yet seen
-        if not structured_output_seen:
-            try:
-                # Read only the tail of the file to avoid reading large logs
-                size = debug_log.stat().st_size
-                read_size = min(size, 8192)
-                with open(debug_log, "rb") as f:
-                    if size > read_size:
-                        f.seek(size - read_size)
-                    tail = f.read().decode("utf-8", errors="replace")
-                if _STRUCTURED_OUTPUT_MARKER in tail:
-                    structured_output_seen = True
-                    last_mtime = current_mtime
-                    stale_since = None
-            except OSError:
-                continue
-            continue
-
-        # StructuredOutput has been seen — track inactivity
-        if current_mtime != last_mtime:
-            last_mtime = current_mtime
-            stale_since = None
-        else:
-            if stale_since is None:
-                stale_since = asyncio.get_event_loop().time()
-            elif asyncio.get_event_loop().time() - stale_since >= inactivity_timeout:
-                log.warning(
-                    "claude_killed_inactivity",
-                    task_id=task_id,
-                    stage=stage_num,
-                    seconds_idle=inactivity_timeout,
-                )
-                proc.kill()
-                return True
+        elapsed = asyncio.get_event_loop().time() - last_event_time[0]
+        if elapsed >= inactivity_timeout:
+            log.warning(
+                "claude_killed_inactivity",
+                task_id=task_id,
+                stage=stage_num,
+                seconds_idle=inactivity_timeout,
+            )
+            proc.kill()
+            return True
 
     return False
-
-
-async def _tail_debug_log(
-    debug_log: Path,
-    proc: asyncio.subprocess.Process,
-    callback: Callable[[str], Awaitable[None]],
-    *,
-    interval: float = 10.0,
-    max_bytes: int = 4096,
-) -> None:
-    """Periodically read the tail of the debug log and send it via callback."""
-    while proc.returncode is None:
-        await asyncio.sleep(interval)
-        if proc.returncode is not None:
-            break
-        try:
-            size = debug_log.stat().st_size
-            read_size = min(size, max_bytes)
-            with open(debug_log, "rb") as f:
-                if size > read_size:
-                    f.seek(size - read_size)
-                tail = f.read().decode("utf-8", errors="replace")
-            await callback(tail)
-        except Exception:
-            continue
 
 
 def _format_schema_prompt(schema: dict[str, Any]) -> str:
@@ -154,8 +134,8 @@ async def execute_claude(
 ) -> ClaudeOutput:
     """Invoke the Claude CLI and return structured output.
 
-    Runs claude with --print --dangerously-skip-permissions --output-format json,
-    feeding context via stdin.
+    Runs claude with --print --dangerously-skip-permissions --output-format stream-json,
+    reading NDJSON events line by line from stdout in real time.
 
     When resume_session_id is provided, uses --resume to continue a prior session
     instead of starting fresh (no --system-prompt-file or schema flags needed).
@@ -184,7 +164,7 @@ async def execute_claude(
                 "--resume", resume_session_id,
                 "--print",
                 "--dangerously-skip-permissions",
-                "--output-format", "json",
+                "--output-format", "stream-json",
                 "--max-turns", str(max_turns),
                 "--verbose",
             ]
@@ -193,7 +173,7 @@ async def execute_claude(
                 "claude",
                 "--print",
                 "--dangerously-skip-permissions",
-                "--output-format", "json",
+                "--output-format", "stream-json",
                 "--max-turns", str(max_turns),
                 "--verbose",
                 "--system-prompt-file", str(prompt_file),
@@ -228,6 +208,12 @@ async def execute_claude(
         if extra_env:
             proc_env = {**os.environ, **extra_env}
 
+        # Shared state for stream-based inactivity tracking
+        loop = asyncio.get_event_loop()
+        last_event_time: list[float] = [loop.time()]
+        result_seen = asyncio.Event()
+
+        lines: list[str] = []
         with open(context_file) as stdin_f, open(stderr_log, "w") as stderr_f:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -238,25 +224,20 @@ async def execute_claude(
                 env=proc_env,
             )
 
-            comm_task = asyncio.create_task(proc.communicate())
+            stream_task = asyncio.create_task(
+                _read_stream_json(proc, last_event_time, result_seen, on_live_output)
+            )
             monitor_task = asyncio.create_task(
-                _monitor_for_inactivity(
-                    debug_log, proc,
+                _monitor_for_inactivity_stream(
+                    proc, last_event_time, result_seen,
                     task_id=task_id, stage_num=stage_num,
                 )
             )
 
-            # Fire-and-forget: periodically push debug log tail to DB
-            live_output_task: asyncio.Task[None] | None = None
-            if on_live_output:
-                live_output_task = asyncio.create_task(
-                    _tail_debug_log(debug_log, proc, on_live_output)
-                )
-
             killed_for_inactivity = False
             try:
                 done, pending = await asyncio.wait(
-                    {comm_task, monitor_task},
+                    {stream_task, monitor_task},
                     timeout=timeout_seconds,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
@@ -273,25 +254,25 @@ async def execute_claude(
                     )
 
                 if monitor_task in done and monitor_task.result():
-                    # Killed for inactivity after StructuredOutput
+                    # Killed for inactivity after result event
                     killed_for_inactivity = True
-                    # Wait for communicate to finish collecting buffered output
+                    # Wait for stream_task to collect any remaining buffered output
                     try:
-                        await asyncio.wait_for(comm_task, timeout=5.0)
+                        await asyncio.wait_for(stream_task, timeout=5.0)
                     except (asyncio.TimeoutError, asyncio.CancelledError):
                         pass
 
-                if comm_task.done():
-                    stdout, _ = comm_task.result()
+                if stream_task.done() and not stream_task.cancelled():
+                    try:
+                        lines = stream_task.result()
+                    except Exception:
+                        lines = []
                 else:
-                    # comm_task still pending — cancel and get whatever we can
-                    stdout = b""
-                    comm_task.cancel()
+                    lines = []
+                    stream_task.cancel()
             finally:
                 # Clean up any remaining tasks
-                bg_tasks: list[asyncio.Task[Any]] = [comm_task, monitor_task]
-                if live_output_task:
-                    bg_tasks.append(live_output_task)
+                bg_tasks: list[asyncio.Task[Any]] = [stream_task, monitor_task]
                 for t in bg_tasks:
                     if not t.done():
                         t.cancel()
@@ -300,19 +281,25 @@ async def execute_claude(
                         except (asyncio.CancelledError, Exception):
                             pass
 
+            # Ensure the subprocess has fully exited and returncode is set
+            if proc.returncode is None:
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+
             if killed_for_inactivity:
-                # Try to parse whatever output was buffered
-                raw_output = stdout.decode("utf-8", errors="replace") if stdout else ""
-                if raw_output.strip():
-                    structured = _parse_output(raw_output, task_id, stage_num)
-                    return ClaudeOutput(structured=structured, raw=raw_output)
+                if lines:
+                    structured = _parse_ndjson_output(lines, task_id, stage_num)
+                    return ClaudeOutput(structured=structured, raw="\n".join(lines))
                 raise AgentInactivityError(
-                    f"Claude CLI killed after inactivity post-StructuredOutput "
+                    f"Claude CLI killed after inactivity post-result-event "
                     f"(task={task_id}, stage={stage_num})"
                 )
 
         if proc.returncode != 0:
-            raw_stdout = stdout.decode("utf-8", errors="replace").strip() if stdout else ""
+            raw_stdout = "\n".join(lines[:5]) if lines else ""
             raw_stderr = ""
             for log_file in (stderr_log, debug_log):
                 try:
@@ -331,8 +318,8 @@ async def execute_claude(
                 stderr_tail=raw_stderr,
             )
 
-            # Detect rate-limit errors from the debug log
-            if _is_rate_limited(debug_log):
+            # Detect rate-limit errors from stdout lines or debug log
+            if _is_rate_limited_in_lines(lines) or _is_rate_limited(debug_log):
                 raise RateLimitError(
                     f"Claude API rate limited (429) "
                     f"(task={task_id}, stage={stage_num})"
@@ -343,16 +330,68 @@ async def execute_claude(
                 f"(task={task_id}, stage={stage_num})"
             )
 
-        raw_output = stdout.decode("utf-8", errors="replace") if stdout else ""
-        structured = _parse_output(raw_output, task_id, stage_num)
-        return ClaudeOutput(structured=structured, raw=raw_output)
+        structured = _parse_ndjson_output(lines, task_id, stage_num)
+        return ClaudeOutput(structured=structured, raw="\n".join(lines))
 
     finally:
         context_file.unlink(missing_ok=True)
 
 
+def _parse_ndjson_output(lines: list[str], task_id: str, stage_num: int) -> dict[str, Any]:
+    """Parse NDJSON stream lines and extract structured result.
+
+    Iterates lines, JSON-parses each, finds the first {type: 'result'} event,
+    and delegates to _extract_from_result_message(). Falls back to extracting
+    JSON from assistant text blocks if no result line is found.
+    """
+    if not lines:
+        return {"_no_structured_output": True}
+
+    messages: list[Any] = []
+    for line in lines:
+        try:
+            msg = json.loads(line)
+            messages.append(msg)
+        except json.JSONDecodeError:
+            continue
+
+    # Find the result message
+    result_msg = _find_result_message(messages)
+    if result_msg:
+        return _extract_from_result_message(result_msg)
+
+    # Fallback: concatenate all assistant text blocks
+    texts = []
+    for msg in messages:
+        if isinstance(msg, dict) and msg.get("role") == "assistant":
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        texts.append(block.get("text", ""))
+            elif isinstance(content, str):
+                texts.append(content)
+    result_text = "\n".join(texts)
+    if result_text:
+        structured = _extract_json(result_text)
+        if structured is not None:
+            return structured
+    return {"_no_structured_output": True, "_result_text": result_text[:2000]}
+
+
+def _is_rate_limited_in_lines(lines: list[str]) -> bool:
+    """Check whether any NDJSON stdout line contains rate-limit indicators."""
+    for line in lines:
+        lower = line.lower()
+        if "rate_limit_error" in lower or "status code 429" in lower:
+            return True
+    return False
+
+
 def _parse_output(raw_output: str, task_id: str, stage_num: int) -> dict[str, Any]:
     """Parse Claude CLI JSON output and extract structured result.
+
+    Kept for backward compatibility with tests. New code uses _parse_ndjson_output.
 
     Returns only the structured data — raw output is stored separately.
     The result message from Claude CLI (--output-format json) contains:
