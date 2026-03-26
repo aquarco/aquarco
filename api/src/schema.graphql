@@ -20,6 +20,9 @@ type Query {
   # Pipeline status
   pipelineStatus(taskId: ID!): PipelineStatus
 
+  # Pipeline definitions (from config YAML)
+  pipelineDefinitions: [PipelineDefinition!]!
+
   # GitHub auth
   githubAuthStatus: GithubAuthStatus!
   githubRepositories: [GithubRepo!]!
@@ -344,4 +347,28 @@ type AgentDefinitionPayload {
 type CreatePRPayload {
   prUrl: String
   errors: [Error!]
+}
+
+# --- Pipeline Definitions ---
+
+type PipelineDefinition {
+  name: String!
+  version: String!
+  triggerLabels: [String!]!
+  triggerEvents: [String!]!
+  stages: [PipelineStageDefinition!]!
+}
+
+type PipelineStageDefinition {
+  category: String!
+  required: Boolean!
+  conditions: [String!]!
+  loop: PipelineLoopConfig
+}
+
+type PipelineLoopConfig {
+  condition: String!
+  maxRepeats: Int!
+  evalMode: String!
+  loopStages: [String!]!
 }

@@ -256,10 +256,54 @@ class HealthConfig(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class LoopConfig(BaseModel):
+    """Configuration for conditional stage loops.
+
+    A loop causes a stage (or group of stages) to repeat until a condition
+    is met or ``max_repeats`` is reached.  Conditions can be simple field
+    comparisons (``eval_mode="simple"``) or natural-language predicates
+    evaluated by the Claude CLI (``eval_mode="ai"``).
+    """
+
+    condition: str = Field(
+        ...,
+        description=(
+            "Condition that must be true for the loop to STOP (exit condition). "
+            "In 'simple' mode this uses field == value syntax. "
+            "In 'ai' mode this is a natural-language predicate evaluated by Claude."
+        ),
+    )
+    max_repeats: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Maximum number of loop iterations (safety cap).",
+    )
+    eval_mode: str = Field(
+        default="simple",
+        pattern=r"^(simple|ai)$",
+        description="How to evaluate the condition: 'simple' (field comparison) or 'ai' (Claude CLI).",
+    )
+    loop_stages: list[str] = Field(
+        default_factory=list,
+        alias="loopStages",
+        description=(
+            "Categories of stages to repeat inside the loop. "
+            "If empty, only the current stage is repeated."
+        ),
+    )
+
+    model_config = {"populate_by_name": True}
+
+
 class StageConfig(BaseModel):
     category: str
     required: bool = True
     conditions: list[str] = Field(default_factory=list)
+    loop: LoopConfig | None = Field(
+        default=None,
+        description="Optional loop configuration for conditional stage repetition.",
+    )
 
 
 class PipelineTrigger(BaseModel):
