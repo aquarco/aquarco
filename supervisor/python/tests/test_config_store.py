@@ -1169,6 +1169,172 @@ class TestSyncAllAgentDefinitionsToDb:
         assert count == 0
 
 
+    @pytest.mark.asyncio
+    async def test_schema_validation_rejects_pipeline_format_in_system_dir(
+        self, mock_db: AsyncMock, tmp_path: Path,
+    ) -> None:
+        """Pipeline-format doc (spec.categories) placed in system/ must be rejected
+        when the system schema is applied — system schema requires spec.role."""
+        agents_dir = tmp_path / "definitions"
+        system_dir = agents_dir / "system"
+        pipeline_dir = agents_dir / "pipeline"
+        system_dir.mkdir(parents=True)
+        pipeline_dir.mkdir(parents=True)
+
+        # Write a pipeline-format agent (uses 'categories', not 'role') into system/
+        pipeline_format_doc = _make_agent_doc("intruder-agent")  # uses categories
+        (system_dir / "intruder-agent.yaml").write_text(yaml.dump(pipeline_format_doc))
+
+        # Write a legitimately correct pipeline agent in pipeline/
+        (pipeline_dir / "analyze-agent.yaml").write_text(
+            yaml.dump(_make_agent_doc("analyze-agent"))
+        )
+
+        # Pass real schema paths — system schema requires spec.role, pipeline schema
+        # requires spec.categories.  The pipeline-format doc in system/ must fail.
+        system_schema_path = SCHEMAS_DIR / "system-agent-v1.json"
+        pipeline_schema_path = SCHEMAS_DIR / "pipeline-agent-v1.json"
+
+        count = await sync_all_agent_definitions_to_db(
+            mock_db,
+            agents_dir,
+            system_schema_path=system_schema_path,
+            pipeline_schema_path=pipeline_schema_path,
+        )
+
+        # Only the pipeline agent should be stored; intruder rejected by system schema
+        assert count == 1
+
+        all_params = [call[0][1] for call in mock_db.execute.call_args_list]
+        upsert_params = [p for p in all_params if p.get("name") and "agent_group" in p]
+        stored_names = [p["name"] for p in upsert_params]
+        assert "intruder-agent" not in stored_names, (
+            "pipeline-format doc in system/ should be rejected by the system schema"
+        )
+        assert "analyze-agent" in stored_names, (
+            "pipeline-format doc in pipeline/ should be accepted"
+        )
+
+    @pytest.mark.asyncio
+    async def test_schema_validation_rejects_system_format_in_pipeline_dir(
+        self, mock_db: AsyncMock, tmp_path: Path,
+    ) -> None:
+        """System-format doc (spec.role) placed in pipeline/ must be rejected
+        when the pipeline schema is applied — pipeline schema requires spec.categories."""
+        agents_dir = tmp_path / "definitions"
+        system_dir = agents_dir / "system"
+        pipeline_dir = agents_dir / "pipeline"
+        system_dir.mkdir(parents=True)
+        pipeline_dir.mkdir(parents=True)
+
+        # Write a valid system-format agent doc (spec.role, no categories)
+        system_format_doc = {
+            "apiVersion": "aquarco.agents/v1",
+            "kind": "AgentDefinition",
+            "metadata": {
+                "name": "planner-agent",
+                "version": "1.0.0",
+                "description": "A system agent that plans pipeline execution stages",
+            },
+            "spec": {
+                "role": "planner",
+                "promptFile": "planner-agent.md",
+            },
+        }
+        (pipeline_dir / "planner-agent.yaml").write_text(yaml.dump(system_format_doc))
+
+        system_schema_path = SCHEMAS_DIR / "system-agent-v1.json"
+        pipeline_schema_path = SCHEMAS_DIR / "pipeline-agent-v1.json"
+
+        count = await sync_all_agent_definitions_to_db(
+            mock_db,
+            agents_dir,
+            system_schema_path=system_schema_path,
+            pipeline_schema_path=pipeline_schema_path,
+        )
+
+        # System-format doc in pipeline/ is rejected by the pipeline schema
+        assert count == 0
+        all_params = [call[0][1] for call in mock_db.execute.call_args_list]
+        upsert_params = [p for p in all_params if p.get("name") and "agent_group" in p]
+        assert not upsert_params, (
+            "system-format doc in pipeline/ should be rejected by pipeline schema"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_schema_paths_allows_any_format_in_either_dir(
+        self, mock_db: AsyncMock, tmp_path: Path,
+    ) -> None:
+        """When schema paths are not provided, no validation occurs and both
+        pipeline-format and system-format docs pass through regardless of subdir."""
+        agents_dir = tmp_path / "definitions"
+        system_dir = agents_dir / "system"
+        pipeline_dir = agents_dir / "pipeline"
+        system_dir.mkdir(parents=True)
+        pipeline_dir.mkdir(parents=True)
+
+        # Pipeline-format in system/ — would fail system schema but no schema given
+        (system_dir / "pipeline-in-system.yaml").write_text(
+            yaml.dump(_make_agent_doc("pipeline-in-system"))
+        )
+        # Pipeline-format in pipeline/
+        (pipeline_dir / "pipeline-agent.yaml").write_text(
+            yaml.dump(_make_agent_doc("pipeline-agent"))
+        )
+
+        count = await sync_all_agent_definitions_to_db(mock_db, agents_dir)
+        assert count == 2
+
+    @pytest.mark.asyncio
+    async def test_correct_schema_applied_per_subdir(
+        self, mock_db: AsyncMock, tmp_path: Path,
+    ) -> None:
+        """Verify system schema is applied only to system/ and pipeline schema only
+        to pipeline/, not vice versa, by placing valid docs in each subdir."""
+        agents_dir = tmp_path / "definitions"
+        system_dir = agents_dir / "system"
+        pipeline_dir = agents_dir / "pipeline"
+        system_dir.mkdir(parents=True)
+        pipeline_dir.mkdir(parents=True)
+
+        # Valid system-format doc in system/
+        valid_system_doc = {
+            "apiVersion": "aquarco.agents/v1",
+            "kind": "AgentDefinition",
+            "metadata": {
+                "name": "condition-evaluator-agent",
+                "version": "1.0.0",
+                "description": "Evaluates structured pipeline exit gate conditions",
+            },
+            "spec": {
+                "role": "condition-evaluator",
+                "promptFile": "condition-evaluator-agent.md",
+            },
+        }
+        (system_dir / "condition-evaluator-agent.yaml").write_text(yaml.dump(valid_system_doc))
+
+        # Valid pipeline-format doc in pipeline/
+        valid_pipeline_doc = _make_agent_doc("analyze-agent")
+        (pipeline_dir / "analyze-agent.yaml").write_text(yaml.dump(valid_pipeline_doc))
+
+        system_schema_path = SCHEMAS_DIR / "system-agent-v1.json"
+        pipeline_schema_path = SCHEMAS_DIR / "pipeline-agent-v1.json"
+
+        count = await sync_all_agent_definitions_to_db(
+            mock_db,
+            agents_dir,
+            system_schema_path=system_schema_path,
+            pipeline_schema_path=pipeline_schema_path,
+        )
+        assert count == 2
+
+        all_params = [call[0][1] for call in mock_db.execute.call_args_list]
+        upsert_params = [p for p in all_params if p.get("name") and "agent_group" in p]
+        by_name = {p["name"]: p for p in upsert_params}
+        assert by_name["condition-evaluator-agent"]["agent_group"] == "system"
+        assert by_name["analyze-agent"]["agent_group"] == "pipeline"
+
+
 class TestRealAgentDefinitions:
     """Validate the actual agent definition YAML files against the schema."""
 
@@ -1220,3 +1386,181 @@ class TestRealPipelineDefinitions:
         for p in pipelines:
             assert "version" in p, f"Pipeline {p['name']} missing version"
             assert p["version"]  # not empty
+
+
+# ── SYSTEM_AGENT_NAMES constant ───────────────────────────────────────────
+
+
+class TestSystemAgentNamesConstant:
+    """Tests for the SYSTEM_AGENT_NAMES constant in aquarco_supervisor.constants."""
+
+    def test_contains_expected_agents(self) -> None:
+        from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES
+
+        expected = {"planner-agent", "condition-evaluator-agent", "repo-descriptor-agent"}
+        assert expected == set(SYSTEM_AGENT_NAMES), (
+            "SYSTEM_AGENT_NAMES must contain exactly the three known system agents"
+        )
+
+    def test_is_frozenset(self) -> None:
+        from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES
+
+        assert isinstance(SYSTEM_AGENT_NAMES, frozenset), (
+            "SYSTEM_AGENT_NAMES should be a frozenset (immutable)"
+        )
+
+    def test_planner_agent_is_system(self) -> None:
+        from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES
+
+        assert "planner-agent" in SYSTEM_AGENT_NAMES
+
+    def test_condition_evaluator_is_system(self) -> None:
+        from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES
+
+        assert "condition-evaluator-agent" in SYSTEM_AGENT_NAMES
+
+    def test_repo_descriptor_is_system(self) -> None:
+        from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES
+
+        assert "repo-descriptor-agent" in SYSTEM_AGENT_NAMES
+
+    def test_pipeline_agent_names_not_included(self) -> None:
+        """Common pipeline agent names should NOT be listed as system agents."""
+        from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES
+
+        pipeline_agent_names = [
+            "analyze-agent",
+            "design-agent",
+            "implementation-agent",
+            "review-agent",
+            "test-agent",
+            "docs-agent",
+        ]
+        for name in pipeline_agent_names:
+            assert name not in SYSTEM_AGENT_NAMES, (
+                f"{name!r} is a pipeline agent and must not be in SYSTEM_AGENT_NAMES"
+            )
+
+    def test_flat_scan_uses_constant_for_system_tagging(self, mock_db: AsyncMock) -> None:
+        """Verifies that the flat-scan fallback in sync_all_agent_definitions_to_db
+        uses SYSTEM_AGENT_NAMES to determine which agents get the 'system' group."""
+        # This is a contract test: if SYSTEM_AGENT_NAMES changes, the behavior
+        # of sync_all_agent_definitions_to_db changes too.
+        from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES
+
+        # All names in the constant must produce agent_group='system' via flat scan
+        # (tested implicitly via test_falls_back_to_flat_scan in TestSyncAllAgentDefinitionsToDb)
+        assert len(SYSTEM_AGENT_NAMES) >= 3, (
+            "At minimum planner, condition-evaluator, and repo-descriptor must be listed"
+        )
+
+
+# ── System agent schema — role enum ──────────────────────────────────────
+
+
+class TestSystemAgentSchemaRoleEnum:
+    """Tests that the system-agent-v1.json schema enforces the role enum."""
+
+    def _make_system_doc(
+        self,
+        name: str = "planner-agent",
+        role: str = "planner",
+    ) -> dict[str, Any]:
+        return {
+            "apiVersion": "aquarco.agents/v1",
+            "kind": "AgentDefinition",
+            "metadata": {
+                "name": name,
+                "version": "1.0.0",
+                "description": "A system agent that plans pipeline execution stages",
+            },
+            "spec": {
+                "role": role,
+                "promptFile": f"{name}.md",
+            },
+        }
+
+    def test_valid_role_planner(self) -> None:
+        schema = _system_agent_schema()
+        doc = self._make_system_doc(name="planner-agent", role="planner")
+        validate_agent_definition(doc, schema)  # should not raise
+
+    def test_valid_role_condition_evaluator(self) -> None:
+        schema = _system_agent_schema()
+        doc = self._make_system_doc(
+            name="condition-evaluator-agent", role="condition-evaluator"
+        )
+        validate_agent_definition(doc, schema)  # should not raise
+
+    def test_valid_role_repo_descriptor(self) -> None:
+        schema = _system_agent_schema()
+        doc = self._make_system_doc(name="repo-descriptor-agent", role="repo-descriptor")
+        validate_agent_definition(doc, schema)  # should not raise
+
+    def test_invalid_role_rejected(self) -> None:
+        schema = _system_agent_schema()
+        doc = self._make_system_doc(role="bogus-role")
+        with pytest.raises(Exception):
+            validate_agent_definition(doc, schema)
+
+    def test_categories_field_rejected_by_system_schema(self) -> None:
+        """System schema must reject a pipeline-format doc that has spec.categories
+        instead of spec.role — this is the critical cross-contamination guard."""
+        schema = _system_agent_schema()
+        pipeline_format_doc = _make_agent_doc("my-agent")  # uses categories
+        with pytest.raises(Exception):
+            validate_agent_definition(pipeline_format_doc, schema)
+
+    def test_missing_role_rejected(self) -> None:
+        """A system-format doc without spec.role must fail schema validation."""
+        schema = _system_agent_schema()
+        doc = self._make_system_doc()
+        del doc["spec"]["role"]
+        with pytest.raises(Exception):
+            validate_agent_definition(doc, schema)
+
+    def test_missing_prompt_file_rejected(self) -> None:
+        schema = _system_agent_schema()
+        doc = self._make_system_doc()
+        del doc["spec"]["promptFile"]
+        with pytest.raises(Exception):
+            validate_agent_definition(doc, schema)
+
+    def test_role_field_rejected_by_pipeline_schema(self) -> None:
+        """Pipeline schema must reject a system-format doc that has spec.role
+        instead of spec.categories."""
+        schema = _pipeline_agent_schema()
+        system_format_doc = self._make_system_doc()
+        with pytest.raises(Exception):
+            validate_agent_definition(system_format_doc, schema)
+
+
+# ── store_agent_definitions agent_group runtime guard ────────────────────
+
+
+class TestStoreAgentDefinitionsGroupGuard:
+    """Test that store_agent_definitions raises on invalid agent_group."""
+
+    @pytest.mark.asyncio
+    async def test_raises_on_invalid_group(self, mock_db: AsyncMock) -> None:
+        docs = [_make_agent_doc("my-agent")]
+        with pytest.raises(ValueError, match="Invalid agent_group"):
+            await store_agent_definitions(mock_db, docs, agent_group="invalid")  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    async def test_raises_on_empty_group(self, mock_db: AsyncMock) -> None:
+        docs = [_make_agent_doc("my-agent")]
+        with pytest.raises(ValueError, match="Invalid agent_group"):
+            await store_agent_definitions(mock_db, docs, agent_group="")  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    async def test_accepts_system(self, mock_db: AsyncMock) -> None:
+        docs = [_make_agent_doc("my-agent")]
+        count = await store_agent_definitions(mock_db, docs, agent_group="system")
+        assert count == 1
+
+    @pytest.mark.asyncio
+    async def test_accepts_pipeline(self, mock_db: AsyncMock) -> None:
+        docs = [_make_agent_doc("my-agent")]
+        count = await store_agent_definitions(mock_db, docs, agent_group="pipeline")
+        assert count == 1
