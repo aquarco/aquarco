@@ -1,5 +1,23 @@
 # Changelog
 
+## [2026-03-26] — Stream-json CLI output for real-time agent events (#17)
+
+### Added
+- **`--output-format stream-json`** — `execute_claude()` now runs the Claude CLI with `--output-format stream-json`, reading live NDJSON events from stdout line by line instead of waiting for full output
+- **`ClaudeOutput` dataclass** — separates structured output (parsed from the `result` event) and raw output (all NDJSON lines joined) for clean downstream consumption
+- **`_read_stream_json()`** — async coroutine that reads NDJSON lines from the subprocess stdout pipe, updates an inactivity timestamp on each event, signals when the `result` event arrives, and invokes an optional `on_live_output` callback per event
+- **`_monitor_for_inactivity_stream()`** — async coroutine that polls for inactivity after the `result` event is seen and kills the subprocess if no events arrive within `inactivity_timeout` seconds (default 90s)
+- **`_parse_ndjson_output()`** — parses a list of NDJSON lines, locates the `{type: "result"}` event, and delegates to `_extract_from_result_message()`; falls back to extracting JSON from assistant text blocks
+- **`_is_rate_limited_in_lines()`** — checks NDJSON stdout lines for rate-limit indicators (`rate_limit_error`, `status code 429`)
+- **`on_live_output` parameter** on `execute_claude()` — optional async callback `Callable[[str], Awaitable[None]]` invoked immediately per NDJSON event for real-time streaming to callers
+- 68 new tests in `supervisor/python/tests/test_stream_json.py` and `test_stream_json_coverage.py`
+
+### Changed
+- `execute_claude()` — replaced single `await proc.communicate()` call with concurrent `stream_task` + `monitor_task` managed via `asyncio.wait()`; inactivity detection is now event-driven (tied to `result` event) rather than based on overall wall-clock timeout
+- Return type of `execute_claude()` changed from `dict[str, Any]` to `ClaudeOutput`
+- `_parse_output()` retained as a backward-compatible function for existing tests; new code uses `_parse_ndjson_output()`
+- Stderr is now written to a separate `.stderr` log file alongside the existing debug log; rate-limit detection reads from both files
+
 ## [2026-03-26] — Powerful conditions in pipeline (#6)
 
 ### Added
