@@ -20,6 +20,7 @@ from aquarco_supervisor.config_store import (
     store_agent_definitions,
     store_pipeline_definitions,
     sync_agent_definitions_to_db,
+    sync_all_agent_definitions_to_db,
     sync_pipeline_definitions_to_db,
     validate_agent_definition,
     validate_pipeline_definition,
@@ -33,6 +34,14 @@ SCHEMAS_DIR = Path(__file__).parent.parent.parent.parent / "config" / "schemas"
 
 def _agent_schema() -> dict[str, Any]:
     return json.loads((SCHEMAS_DIR / "agent-definition-v1.json").read_text())
+
+
+def _pipeline_agent_schema() -> dict[str, Any]:
+    return json.loads((SCHEMAS_DIR / "pipeline-agent-v1.json").read_text())
+
+
+def _system_agent_schema() -> dict[str, Any]:
+    return json.loads((SCHEMAS_DIR / "system-agent-v1.json").read_text())
 
 
 def _pipeline_schema() -> dict[str, Any]:
@@ -1053,14 +1062,132 @@ class TestVersioning:
 # ── Real schema files from config/schemas/ ────────────────────────────────
 
 
+class TestStoreAgentDefinitionsWithGroup:
+    """Tests for agent_group parameter in store_agent_definitions."""
+
+    @pytest.mark.asyncio
+    async def test_stores_with_pipeline_group(self, mock_db: AsyncMock) -> None:
+        docs = [_make_agent_doc("my-agent")]
+        await store_agent_definitions(mock_db, docs, agent_group="pipeline")
+
+        upsert_call = mock_db.execute.call_args_list[1]
+        params = upsert_call[0][1]
+        assert params["agent_group"] == "pipeline"
+
+    @pytest.mark.asyncio
+    async def test_stores_with_system_group(self, mock_db: AsyncMock) -> None:
+        docs = [_make_agent_doc("sys-agent")]
+        await store_agent_definitions(mock_db, docs, agent_group="system")
+
+        upsert_call = mock_db.execute.call_args_list[1]
+        params = upsert_call[0][1]
+        assert params["agent_group"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_default_group_is_pipeline(self, mock_db: AsyncMock) -> None:
+        docs = [_make_agent_doc("default-agent")]
+        await store_agent_definitions(mock_db, docs)
+
+        upsert_call = mock_db.execute.call_args_list[1]
+        params = upsert_call[0][1]
+        assert params["agent_group"] == "pipeline"
+
+    @pytest.mark.asyncio
+    async def test_agent_group_in_upsert_sql(self, mock_db: AsyncMock) -> None:
+        docs = [_make_agent_doc("my-agent")]
+        await store_agent_definitions(mock_db, docs, agent_group="system")
+
+        upsert_call = mock_db.execute.call_args_list[1]
+        sql = upsert_call[0][0]
+        assert "agent_group" in sql
+
+
+class TestSyncAllAgentDefinitionsToDb:
+    """Tests for sync_all_agent_definitions_to_db — split-directory loading."""
+
+    @pytest.mark.asyncio
+    async def test_loads_from_system_and_pipeline_subdirs(
+        self, mock_db: AsyncMock, tmp_path: Path,
+    ) -> None:
+        agents_dir = tmp_path / "definitions"
+        system_dir = agents_dir / "system"
+        pipeline_dir = agents_dir / "pipeline"
+        system_dir.mkdir(parents=True)
+        pipeline_dir.mkdir(parents=True)
+
+        (system_dir / "planner-agent.yaml").write_text(yaml.dump(_make_agent_doc("planner-agent")))
+        (pipeline_dir / "analyze-agent.yaml").write_text(yaml.dump(_make_agent_doc("analyze-agent")))
+
+        count = await sync_all_agent_definitions_to_db(mock_db, agents_dir)
+        assert count == 2
+
+        # Verify system agent was stored with group='system'
+        all_params = [call[0][1] for call in mock_db.execute.call_args_list]
+        upsert_params = [p for p in all_params if p.get("name") and "agent_group" in p]
+        system_params = [p for p in upsert_params if p["name"] == "planner-agent"]
+        pipeline_params = [p for p in upsert_params if p["name"] == "analyze-agent"]
+        assert system_params[0]["agent_group"] == "system"
+        assert pipeline_params[0]["agent_group"] == "pipeline"
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_flat_scan(
+        self, mock_db: AsyncMock, tmp_path: Path,
+    ) -> None:
+        agents_dir = tmp_path / "definitions"
+        agents_dir.mkdir()
+
+        (agents_dir / "planner-agent.yaml").write_text(yaml.dump(_make_agent_doc("planner-agent")))
+        (agents_dir / "analyze-agent.yaml").write_text(yaml.dump(_make_agent_doc("analyze-agent")))
+
+        count = await sync_all_agent_definitions_to_db(mock_db, agents_dir)
+        assert count == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_dirs(
+        self, mock_db: AsyncMock, tmp_path: Path,
+    ) -> None:
+        agents_dir = tmp_path / "definitions"
+        (agents_dir / "system").mkdir(parents=True)
+        (agents_dir / "pipeline").mkdir(parents=True)
+
+        count = await sync_all_agent_definitions_to_db(mock_db, agents_dir)
+        assert count == 0
+
+
 class TestRealAgentDefinitions:
     """Validate the actual agent definition YAML files against the schema."""
 
-    def test_all_definitions_valid(self) -> None:
-        agents_dir = Path(__file__).parent.parent.parent.parent / "config" / "agents" / "definitions"
-        schema = _agent_schema()
-        definitions = load_agent_definitions_from_files(agents_dir, schema=schema)
-        assert len(definitions) == 6  # 6 valid agents (planner-agent fails priority validation)
+    def test_pipeline_definitions_valid(self) -> None:
+        pipeline_dir = (
+            Path(__file__).parent.parent.parent.parent
+            / "config" / "agents" / "definitions" / "pipeline"
+        )
+        schema = _pipeline_agent_schema()
+        definitions = load_agent_definitions_from_files(pipeline_dir, schema=schema)
+        assert len(definitions) == 6  # analyze, design, implementation, review, test, docs
+
+    def test_system_definitions_valid(self) -> None:
+        system_dir = (
+            Path(__file__).parent.parent.parent.parent
+            / "config" / "agents" / "definitions" / "system"
+        )
+        schema = _system_agent_schema()
+        definitions = load_agent_definitions_from_files(system_dir, schema=schema)
+        assert len(definitions) == 3  # planner, condition-evaluator, repo-descriptor
+
+    def test_planner_agent_has_role(self) -> None:
+        """planner-agent.yaml must have spec.role (not categories/priority)."""
+        system_dir = (
+            Path(__file__).parent.parent.parent.parent
+            / "config" / "agents" / "definitions" / "system"
+        )
+        definitions = load_agent_definitions_from_files(system_dir)
+        planner = next(
+            (d for d in definitions if d["metadata"]["name"] == "planner-agent"), None
+        )
+        assert planner is not None
+        assert "role" in planner["spec"]
+        assert "categories" not in planner["spec"]
 
 
 class TestRealPipelineDefinitions:

@@ -105,6 +105,7 @@ async def store_agent_definitions(
     db: Database,
     definitions: list[dict[str, Any]],
     source: str = "default",
+    agent_group: str = "pipeline",
 ) -> int:
     """Upsert agent definitions into the ``agent_definitions`` table.
 
@@ -117,6 +118,8 @@ async def store_agent_definitions(
             - ``'default'`` for built-in agents
             - ``'global:<repo_name>'`` for global config repo agents
             - ``'repo:<repo_name>'`` for repository-specific agents
+        agent_group: Either ``'system'`` or ``'pipeline'``. System agents
+            orchestrate pipelines; pipeline agents execute stages.
 
     Returns the number of rows upserted.
     """
@@ -139,15 +142,16 @@ async def store_agent_definitions(
         # Upsert current version
         await db.execute(
             """INSERT INTO agent_definitions
-                   (name, version, description, labels, spec, is_active, source)
+                   (name, version, description, labels, spec, is_active, source, agent_group)
                VALUES
-                   (%(name)s, %(version)s, %(description)s, %(labels)s, %(spec)s, true, %(source)s)
+                   (%(name)s, %(version)s, %(description)s, %(labels)s, %(spec)s, true, %(source)s, %(agent_group)s)
                ON CONFLICT (name, version) DO UPDATE SET
                    description = EXCLUDED.description,
                    labels      = EXCLUDED.labels,
                    spec        = EXCLUDED.spec,
                    is_active   = true,
-                   source      = EXCLUDED.source""",
+                   source      = EXCLUDED.source,
+                   agent_group = EXCLUDED.agent_group""",
             {
                 "name": name,
                 "version": version,
@@ -155,13 +159,28 @@ async def store_agent_definitions(
                 "labels": json.dumps(meta.get("labels", {})),
                 "spec": json.dumps(doc.get("spec", {})),
                 "source": source,
+                "agent_group": agent_group,
             },
         )
         count += 1
-        log.debug("agent_definition_stored", agent=name, version=version, source=source)
+        log.debug(
+            "agent_definition_stored",
+            agent=name,
+            version=version,
+            source=source,
+            group=agent_group,
+        )
 
-    log.info("agent_definitions_stored", count=count, source=source)
+    log.info("agent_definitions_stored", count=count, source=source, group=agent_group)
     return count
+
+
+# Known system agent names — used to infer group when scanning flat directories
+_SYSTEM_AGENT_NAMES: frozenset[str] = frozenset({
+    "planner-agent",
+    "condition-evaluator-agent",
+    "repo-descriptor-agent",
+})
 
 
 async def sync_agent_definitions_to_db(
@@ -176,6 +195,55 @@ async def sync_agent_definitions_to_db(
     schema = _load_json_schema(schema_path) if schema_path else None
     definitions = load_agent_definitions_from_files(agents_dir, schema)
     return await store_agent_definitions(db, definitions)
+
+
+async def sync_all_agent_definitions_to_db(
+    db: Database,
+    agents_dir: Path,
+    system_schema_path: Path | None = None,
+    pipeline_schema_path: Path | None = None,
+) -> int:
+    """High-level: load from both system/ and pipeline/ subdirectories (or flat).
+
+    When ``agents_dir/system/`` and ``agents_dir/pipeline/`` exist, loads each
+    subdirectory with the correct schema and agent_group tag.  Falls back to a
+    flat scan of ``agents_dir`` for backward compatibility; in that case, agents
+    whose name appears in ``_SYSTEM_AGENT_NAMES`` are tagged as 'system'.
+
+    Returns the total number of definitions stored.
+    """
+    system_dir = agents_dir / "system"
+    pipeline_dir = agents_dir / "pipeline"
+
+    if system_dir.is_dir() and pipeline_dir.is_dir():
+        system_schema = _load_json_schema(system_schema_path) if system_schema_path else None
+        pipeline_schema = (
+            _load_json_schema(pipeline_schema_path) if pipeline_schema_path else None
+        )
+
+        sys_defs = load_agent_definitions_from_files(system_dir, system_schema)
+        pipe_defs = load_agent_definitions_from_files(pipeline_dir, pipeline_schema)
+
+        count = await store_agent_definitions(db, sys_defs, agent_group="system")
+        count += await store_agent_definitions(db, pipe_defs, agent_group="pipeline")
+        return count
+
+    # Backward-compat: flat directory scan — infer group from name
+    schema = _load_json_schema(pipeline_schema_path) if pipeline_schema_path else None
+    all_defs = load_agent_definitions_from_files(agents_dir, schema)
+
+    sys_defs = [
+        d for d in all_defs
+        if d.get("metadata", {}).get("name", "") in _SYSTEM_AGENT_NAMES
+    ]
+    pipe_defs = [
+        d for d in all_defs
+        if d.get("metadata", {}).get("name", "") not in _SYSTEM_AGENT_NAMES
+    ]
+
+    count = await store_agent_definitions(db, sys_defs, agent_group="system")
+    count += await store_agent_definitions(db, pipe_defs, agent_group="pipeline")
+    return count
 
 
 def load_pipeline_definitions_from_file(
@@ -359,11 +427,14 @@ async def read_agent_definitions_from_db(
     """
     where = "WHERE is_active = true" if active_only else ""
     rows = await db.fetch_all(
-        f"SELECT name, version, description, labels, spec, is_active "
+        f"SELECT name, version, description, labels, spec, is_active, "
+        f"COALESCE(agent_group, 'pipeline') AS agent_group "
         f"FROM agent_definitions {where} ORDER BY name, version"
     )
     docs: list[dict[str, Any]] = []
     for row in rows:
+        # agent_group is stored as metadata only — not included in the
+        # YAML-format document to keep the schema clean.
         doc: dict[str, Any] = {
             "apiVersion": AGENT_API_VERSION,
             "kind": AGENT_KIND,

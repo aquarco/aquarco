@@ -338,3 +338,123 @@ def test_get_agent_output_schema_returns_none_for_empty_schema(tmp_path: Path) -
     reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
     reg._agents = {"agent1": {"outputSchema": {}}}
     assert reg.get_agent_output_schema("agent1") is None
+
+
+# ---------------------------------------------------------------------------
+# Group-based filtering (system vs pipeline)
+# ---------------------------------------------------------------------------
+
+
+def test_get_agents_for_category_excludes_system_agents(tmp_path: Path) -> None:
+    """System agents must never appear in get_agents_for_category results."""
+    mock_db = AsyncMock(spec=Database)
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {
+        "planner-agent": {"_group": "system", "categories": [], "priority": 1},
+        "condition-evaluator-agent": {"_group": "system", "categories": [], "priority": 1},
+        "analyze-agent": {"_group": "pipeline", "categories": ["analyze"], "priority": 10},
+    }
+    result = reg.get_agents_for_category("analyze")
+    assert result == ["analyze-agent"]
+    assert "planner-agent" not in result
+    assert "condition-evaluator-agent" not in result
+
+
+def test_get_agent_group_returns_system(tmp_path: Path) -> None:
+    """get_agent_group returns 'system' for system agents."""
+    mock_db = AsyncMock(spec=Database)
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {
+        "planner-agent": {"_group": "system"},
+        "analyze-agent": {"_group": "pipeline"},
+    }
+    assert reg.get_agent_group("planner-agent") == "system"
+    assert reg.get_agent_group("analyze-agent") == "pipeline"
+
+
+def test_get_agent_group_returns_pipeline_for_unknown(tmp_path: Path) -> None:
+    """get_agent_group defaults to 'pipeline' for unknown agents."""
+    mock_db = AsyncMock(spec=Database)
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {}
+    assert reg.get_agent_group("nonexistent") == "pipeline"
+
+
+def test_get_system_agent_by_role_returns_name(tmp_path: Path) -> None:
+    """get_system_agent_by_role returns the agent name with the matching role."""
+    mock_db = AsyncMock(spec=Database)
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {
+        "planner-agent": {"_group": "system", "role": "planner"},
+        "condition-evaluator-agent": {"_group": "system", "role": "condition-evaluator"},
+        "analyze-agent": {"_group": "pipeline", "categories": ["analyze"]},
+    }
+    assert reg.get_system_agent_by_role("planner") == "planner-agent"
+    assert reg.get_system_agent_by_role("condition-evaluator") == "condition-evaluator-agent"
+
+
+def test_get_system_agent_by_role_returns_none_for_unknown(tmp_path: Path) -> None:
+    """get_system_agent_by_role returns None when no match."""
+    mock_db = AsyncMock(spec=Database)
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {
+        "planner-agent": {"_group": "system", "role": "planner"},
+    }
+    assert reg.get_system_agent_by_role("nonexistent-role") is None
+
+
+@pytest.mark.asyncio
+async def test_discover_agents_from_system_and_pipeline_subdirs(
+    mock_db: AsyncMock, tmp_path: Path
+) -> None:
+    """Discovery from system/ and pipeline/ subdirs tags agents with the right group."""
+    agents_dir = tmp_path / "definitions"
+    system_dir = agents_dir / "system"
+    pipeline_dir = agents_dir / "pipeline"
+    system_dir.mkdir(parents=True)
+    pipeline_dir.mkdir(parents=True)
+
+    system_defn = {
+        "kind": "AgentDefinition",
+        "metadata": {"name": "planner-agent"},
+        "spec": {"role": "planner", "promptFile": "planner-agent.md"},
+    }
+    pipeline_defn = {
+        "kind": "AgentDefinition",
+        "metadata": {"name": "analyze-agent"},
+        "spec": {"categories": ["analyze"], "priority": 10, "promptFile": "analyze-agent.md"},
+    }
+    (system_dir / "planner-agent.yaml").write_text(yaml.dump(system_defn))
+    (pipeline_dir / "analyze-agent.yaml").write_text(yaml.dump(pipeline_defn))
+
+    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    await reg.load(str(tmp_path / "nonexistent.json"))
+
+    assert reg.get_agent_group("planner-agent") == "system"
+    assert reg.get_agent_group("analyze-agent") == "pipeline"
+
+    # Planner should not appear in category selection
+    assert "planner-agent" not in reg.get_agents_for_category("analyze")
+    assert "analyze-agent" in reg.get_agents_for_category("analyze")
+
+
+@pytest.mark.asyncio
+async def test_autoloaded_agents_tagged_as_pipeline(
+    mock_db: AsyncMock, tmp_path: Path
+) -> None:
+    """Autoloaded agents from DB are always tagged as pipeline agents."""
+    mock_db.fetch_all.return_value = [
+        {
+            "name": "repo-custom-agent",
+            "spec": {"categories": ["review"], "priority": 50},
+            "source": "autoload:my-repo",
+        }
+    ]
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+
+    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    await reg.load(str(tmp_path / "nonexistent.json"))
+
+    assert reg.get_agent_group("repo-custom-agent") == "pipeline"
+    assert "repo-custom-agent" in reg.get_agents_for_category("review")

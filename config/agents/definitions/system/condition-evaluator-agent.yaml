@@ -1,0 +1,31 @@
+apiVersion: aquarco.agents/v1
+kind: AgentDefinition
+metadata:
+  name: condition-evaluator-agent
+  version: "1.0.0"
+  description: "Evaluates pipeline exit-gate conditions by answering yes/no questions about stage outputs"
+  labels:
+    team: platform
+    domain: orchestration
+
+spec:
+  role: condition-evaluator
+
+  promptFile: condition-evaluator-agent.md
+
+  tools:
+    allowed: []
+    denied: []
+
+  resources:
+    maxTokens: 10000
+    timeoutMinutes: 2
+    maxConcurrent: 5
+    maxTurns: 1
+    maxCost: 0.05
+
+  environment:
+    AGENT_MODE: "condition-evaluation"
+
+  healthCheck:
+    enabled: false

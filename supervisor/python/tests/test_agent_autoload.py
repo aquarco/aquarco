@@ -197,10 +197,11 @@ def test_analyze_agent_prompt_implementation():
 
 
 def test_analyze_agent_prompt_security():
-    """Agent with security-related content gets security category."""
+    """Agent with security-related content gets review category (closest valid category)."""
     content = "Checks for security vulnerabilities and OWASP issues."
     result = analyze_agent_prompt(content, "sec-scanner.md")
-    assert result["category"] == "security"
+    # 'security' is not a valid pipeline category — maps to 'review'
+    assert result["category"] == "review"
 
 
 def test_analyze_agent_prompt_design_category():
@@ -722,6 +723,30 @@ async def test_store_autoloaded_agents_deactivates_old_versions():
     assert first_call[0][1]["version"] == "2.0.0"
 
 
+@pytest.mark.asyncio
+async def test_store_autoloaded_agents_sets_pipeline_group():
+    """Autoloaded agents are always stored with agent_group='pipeline'."""
+    db = AsyncMock()
+    definitions = [
+        {
+            "metadata": {"name": "repo-agent-a", "version": "1.0.0", "description": "Agent A"},
+            "spec": {"categories": ["test"]},
+        },
+    ]
+
+    await store_autoloaded_agents(db, definitions, "my-repo")
+
+    upsert_calls = [
+        c for c in db.execute.call_args_list
+        if "INSERT INTO agent_definitions" in str(c)
+    ]
+    assert len(upsert_calls) == 1
+    sql = upsert_calls[0][0][0]
+    assert "agent_group" in sql
+    # Hardcoded 'pipeline' in the SQL (not a parameter)
+    assert "'pipeline'" in sql
+
+
 # ---------------------------------------------------------------------------
 # autoload_repo_agents (integration with mocked DB)
 # ---------------------------------------------------------------------------
@@ -1015,5 +1040,6 @@ async def test_full_pipeline_categories_inferred(tmp_path: Path):
         analysis = analyze_agent_prompt(content, f.name)
         analyses[analysis["name"]] = analysis
 
-    assert analyses["sec-checker"]["category"] == "security"
+    # 'security' is not a valid pipeline category — maps to 'review'
+    assert analyses["sec-checker"]["category"] == "review"
     assert analyses["docs-gen"]["category"] == "docs"

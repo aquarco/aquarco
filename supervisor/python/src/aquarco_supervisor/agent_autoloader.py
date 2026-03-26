@@ -110,7 +110,12 @@ def analyze_agent_prompt(prompt_content: str, filename: str) -> dict[str, Any]:
 
 
 def _infer_category(name: str, content: str) -> str:
-    """Infer the pipeline category from agent name and prompt content."""
+    """Infer the pipeline category from agent name and prompt content.
+
+    Only returns valid pipeline category values.  Keywords that previously
+    mapped to 'security' now fall through to 'review', which is the closest
+    valid category for security-focused agents.
+    """
     content_lower = content.lower()
     name_lower = name.lower()
 
@@ -119,9 +124,8 @@ def _infer_category(name: str, content: str) -> str:
         "design": ["design", "architect", "plan"],
         "implementation": ["implement", "develop", "code", "build", "write code"],
         "test": ["test", "spec", "coverage", "e2e", "playwright"],
-        "review": ["review", "quality", "qa", "lint"],
+        "review": ["review", "quality", "qa", "lint", "security", "auth", "owasp", "vulnerabilit"],
         "docs": ["document", "readme", "changelog", "docs"],
-        "security": ["security", "auth", "owasp", "vulnerabilit"],
     }
 
     for category, hints in category_hints.items():
@@ -339,18 +343,19 @@ async def store_autoloaded_agents(
             {"name": name, "version": version},
         )
 
-        # Upsert current version
+        # Upsert current version — autoloaded agents are always pipeline agents
         await db.execute(
             """INSERT INTO agent_definitions
-                   (name, version, description, labels, spec, is_active, source)
+                   (name, version, description, labels, spec, is_active, source, agent_group)
                VALUES
-                   (%(name)s, %(version)s, %(description)s, %(labels)s, %(spec)s, true, %(source)s)
+                   (%(name)s, %(version)s, %(description)s, %(labels)s, %(spec)s, true, %(source)s, 'pipeline')
                ON CONFLICT (name, version) DO UPDATE SET
                    description = EXCLUDED.description,
                    labels      = EXCLUDED.labels,
                    spec        = EXCLUDED.spec,
                    is_active   = true,
-                   source      = EXCLUDED.source""",
+                   source      = EXCLUDED.source,
+                   agent_group = 'pipeline'""",
             {
                 "name": name,
                 "version": version,

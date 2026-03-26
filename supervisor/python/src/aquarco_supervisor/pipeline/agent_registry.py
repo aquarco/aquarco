@@ -55,19 +55,53 @@ class AgentRegistry:
         log.info("registry_loaded", agent_count=len(self._agents))
 
     async def _discover_agents(self) -> None:
-        """Discover agents from YAML definition files."""
+        """Discover agents from YAML definition files.
+
+        When ``agents_dir/system/`` and ``agents_dir/pipeline/`` subdirectories
+        exist, scans each with the appropriate group tag.  Falls back to a flat
+        scan of ``agents_dir`` for backward compatibility; agents whose name
+        appears in the known system-agent list are tagged 'system'.
+        """
         if not self._agents_dir.exists():
             log.warning("agents_dir_not_found", path=str(self._agents_dir))
             return
 
-        for yaml_file in sorted(self._agents_dir.glob("*.yaml")):
+        system_dir = self._agents_dir / "system"
+        pipeline_dir = self._agents_dir / "pipeline"
+
+        if system_dir.is_dir() and pipeline_dir.is_dir():
+            self._discover_agents_from_dir(system_dir, group="system")
+            self._discover_agents_from_dir(pipeline_dir, group="pipeline")
+        else:
+            # Flat scan — infer group from name
+            from ..config_store import _SYSTEM_AGENT_NAMES  # noqa: PLC0415
+
+            for yaml_file in sorted(self._agents_dir.glob("*.yaml")):
+                try:
+                    raw = yaml.safe_load(yaml_file.read_text())
+                    if not isinstance(raw, dict) or raw.get("kind") != "AgentDefinition":
+                        continue
+                    name = raw.get("metadata", {}).get("name", yaml_file.stem)
+                    spec = raw.get("spec", raw)
+                    spec["name"] = name
+                    group = "system" if name in _SYSTEM_AGENT_NAMES else "pipeline"
+                    spec["_group"] = group
+                    self._agents[name] = spec
+                except yaml.YAMLError:
+                    log.warning("agent_yaml_parse_error", file=str(yaml_file))
+
+    def _discover_agents_from_dir(self, directory: Path, group: str) -> None:
+        """Scan a single directory and add agents tagged with the given group."""
+        for yaml_file in sorted(directory.glob("*.yaml")):
             try:
                 raw = yaml.safe_load(yaml_file.read_text())
                 if not isinstance(raw, dict) or raw.get("kind") != "AgentDefinition":
                     continue
                 name = raw.get("metadata", {}).get("name", yaml_file.stem)
-                self._agents[name] = raw.get("spec", raw)
-                self._agents[name]["name"] = name
+                spec = raw.get("spec", raw)
+                spec["name"] = name
+                spec["_group"] = group
+                self._agents[name] = spec
             except yaml.YAMLError:
                 log.warning("agent_yaml_parse_error", file=str(yaml_file))
 
@@ -84,6 +118,7 @@ class AgentRegistry:
                 name = row["name"]
                 spec = row["spec"] if isinstance(row["spec"], dict) else json.loads(row["spec"])
                 spec["name"] = name
+                spec["_group"] = "pipeline"  # Autoloaded agents are always pipeline agents
                 self._agents[name] = spec
             if rows:
                 log.info("autoloaded_agents_loaded", count=len(rows))
@@ -103,15 +138,36 @@ class AgentRegistry:
             )
 
     def get_agents_for_category(self, category: str) -> list[str]:
-        """Get agent names that handle a category, sorted by priority."""
+        """Get pipeline agent names that handle a category, sorted by priority.
+
+        System agents (group='system') are always excluded — they are invoked
+        directly by the executor and never compete for pipeline stage slots.
+        """
         matching = []
         for name, spec in self._agents.items():
+            if spec.get("_group") == "system":
+                continue
             categories = spec.get("categories", [])
             if category in categories:
                 priority = spec.get("priority", 50)
                 matching.append((priority, name))
         matching.sort()
         return [name for _, name in matching]
+
+    def get_agent_group(self, agent_name: str) -> str:
+        """Return the group ('system' or 'pipeline') for an agent.
+
+        Returns 'pipeline' for unknown agents (safe default).
+        """
+        spec = self._agents.get(agent_name, {})
+        return spec.get("_group", "pipeline")
+
+    def get_system_agent_by_role(self, role: str) -> str | None:
+        """Return the name of the system agent with the given role, or None."""
+        for name, spec in self._agents.items():
+            if spec.get("_group") == "system" and spec.get("role") == role:
+                return name
+        return None
 
     async def select_agent(self, category: str) -> str:
         """Select the first available agent for a category."""
@@ -247,7 +303,8 @@ class AgentRegistry:
         try:
             rows = await self._db.fetch_all(
                 """
-                SELECT name, version, description, spec
+                SELECT name, version, description, spec,
+                       COALESCE(agent_group, 'pipeline') AS agent_group
                 FROM agent_definitions
                 WHERE is_active = TRUE
                 ORDER BY name
@@ -257,10 +314,12 @@ class AgentRegistry:
                 result: list[dict[str, Any]] = []
                 for row in rows:
                     spec = row["spec"] if isinstance(row["spec"], dict) else json.loads(row["spec"])
+                    db_group = row.get("agent_group", "pipeline")
                     result.append({
                         "name": row["name"],
                         "version": row["version"],
                         "description": row["description"],
+                        "group": db_group.upper(),
                         "categories": spec.get("categories", []),
                         "conditions": spec.get("conditions", {}),
                         "resources": spec.get("resources", {}),
@@ -277,6 +336,7 @@ class AgentRegistry:
                 "name": name,
                 "version": spec.get("version", "0.0.0"),
                 "description": spec.get("description", ""),
+                "group": spec.get("_group", "pipeline").upper(),
                 "categories": spec.get("categories", []),
                 "conditions": spec.get("conditions", {}),
                 "resources": spec.get("resources", {}),
