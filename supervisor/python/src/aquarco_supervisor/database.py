@@ -63,6 +63,21 @@ class Database:
         async with self._pool.connection() as conn:
             yield conn
 
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[psycopg.AsyncConnection[Any]]:
+        """Acquire a connection and wrap all operations in a single transaction.
+
+        Usage::
+
+            async with db.transaction() as conn:
+                await conn.execute(query1, params1)
+                await conn.execute(query2, params2)
+            # Both queries committed atomically; rolled back on any exception.
+        """
+        async with self.acquire() as conn:
+            async with conn.transaction():
+                yield conn
+
     async def execute(
         self,
         query: str,

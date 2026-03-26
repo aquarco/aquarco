@@ -82,7 +82,7 @@ class AgentRegistry:
                     if not isinstance(raw, dict) or raw.get("kind") != "AgentDefinition":
                         continue
                     name = raw.get("metadata", {}).get("name", yaml_file.stem)
-                    spec = raw.get("spec", raw)
+                    spec = dict(raw.get("spec", raw))  # shallow copy to avoid mutating parsed YAML
                     spec["name"] = name
                     group = "system" if name in _SYSTEM_AGENT_NAMES else "pipeline"
                     spec["_group"] = group
@@ -98,7 +98,7 @@ class AgentRegistry:
                 if not isinstance(raw, dict) or raw.get("kind") != "AgentDefinition":
                     continue
                 name = raw.get("metadata", {}).get("name", yaml_file.stem)
-                spec = raw.get("spec", raw)
+                spec = dict(raw.get("spec", raw))  # shallow copy to avoid mutating parsed YAML
                 spec["name"] = name
                 spec["_group"] = group
                 self._agents[name] = spec

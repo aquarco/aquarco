@@ -851,10 +851,9 @@ describe('Query.pipelineDefinitions', () => {
     expect(result[1].name).toBe('beta')
   })
 
-  // ── Edge-case: maxRepeats: 0 must NOT be coerced to null ──────────────────
-  // Bug: `c.maxRepeats ? Number(c.maxRepeats) : null` is a falsy check that
-  // converts 0 → null.  Until the production code is fixed this test documents
-  // the DESIRED behaviour so future devs know exactly what to fix.
+  // ── Regression: maxRepeats: 0 must NOT be coerced to null ────────────────
+  // The falsy check `c.maxRepeats ? ... : null` was coercing 0 → null.
+  // Fixed by using an explicit `!== undefined && !== null` guard.
 
   it('should preserve maxRepeats: 0 as 0, not null (simple condition)', async () => {
     const pool = mockPool([
@@ -887,7 +886,6 @@ describe('Query.pipelineDefinitions', () => {
     const result = await Query.pipelineDefinitions(null, null, ctx)
     const cond = result[0].stages[0].conditions[0]
     // maxRepeats: 0 is a valid value meaning "run at most 0 extra times".
-    // A falsy check `c.maxRepeats ? ... : null` silently drops it.
     expect(cond.maxRepeats).toBe(0)
   })
 
@@ -924,10 +922,9 @@ describe('Query.pipelineDefinitions', () => {
     expect(cond.maxRepeats).toBe(0)
   })
 
-  // ── Edge-case: empty-string yes/no must NOT be coerced to null ────────────
-  // Bug: `c.yes ? String(c.yes) : null` treats '' the same as null.
-  // Empty string could be an intentional sentinel; the falsy check silently
-  // drops it.  These tests pin the desired behaviour.
+  // ── Regression: empty-string yes/no must NOT be coerced to null ──────────
+  // The falsy check `c.yes ? String(c.yes) : null` was treating '' as null.
+  // Fixed by using an explicit `!== undefined && !== null` guard.
 
   it('should preserve empty-string onYes as empty string, not null (simple)', async () => {
     const pool = mockPool([
@@ -959,7 +956,6 @@ describe('Query.pipelineDefinitions', () => {
     const ctx = makeCtx(pool)
     const result = await Query.pipelineDefinitions(null, null, ctx)
     const cond = result[0].stages[0].conditions[0]
-    // An explicit '' from the DB should survive as '' (not become null).
     expect(cond.onYes).toBe('')
   })
 
