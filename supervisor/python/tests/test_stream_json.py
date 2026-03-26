@@ -691,3 +691,199 @@ async def test_evaluate_ai_condition_parses_ndjson_answer_false() -> None:
         )
 
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: _read_stream_json edge cases (lines 55-56)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_read_stream_json_handles_invalid_json_lines_gracefully() -> None:
+    """Non-JSON lines are appended to results but do not set result_seen or raise."""
+    proc = _make_proc()
+    proc.stdout = _AsyncLineReader([
+        b"not-json-at-all\n",
+        (json.dumps({"type": "result"}) + "\n").encode(),
+    ])
+    last_event_time: list[float] = [0.0]
+    result_seen = asyncio.Event()
+
+    lines = await _read_stream_json(proc, last_event_time, result_seen, None)
+
+    # Both lines captured (invalid JSON is still accumulated)
+    assert len(lines) == 2
+    assert lines[0] == "not-json-at-all"
+    # result_seen set by the valid result line
+    assert result_seen.is_set()
+
+
+@pytest.mark.asyncio
+async def test_read_stream_json_non_dict_json_does_not_set_result_seen() -> None:
+    """JSON values that are not dicts (e.g. arrays) do not set result_seen."""
+    proc = _make_proc()
+    proc.stdout = _AsyncLineReader([
+        b'["array", "value"]\n',
+        b'"just a string"\n',
+    ])
+    last_event_time: list[float] = [0.0]
+    result_seen = asyncio.Event()
+
+    lines = await _read_stream_json(proc, last_event_time, result_seen, None)
+
+    assert len(lines) == 2
+    assert not result_seen.is_set()
+
+
+# ---------------------------------------------------------------------------
+# Tests: execute_claude — inactivity kill WITH output lines (lines 293-295)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_claude_inactivity_with_lines_returns_output(tmp_path: Path) -> None:
+    """When killed for inactivity but lines exist, returns ClaudeOutput instead of raising."""
+    prompt_file = tmp_path / "system.md"
+    prompt_file.write_text("You are a test agent.")
+
+    result_line = json.dumps({
+        "type": "result",
+        "subtype": "success",
+        "structured_output": {"partial": True},
+        "total_cost_usd": 0.01,
+    })
+    mock_proc = _make_proc(returncode=None, stdout=_AsyncLineReader(
+        [(result_line + "\n").encode()]
+    ))
+
+    async def fake_inactivity(*args: Any, **kwargs: Any) -> bool:
+        """Simulates inactivity kill after result event — sets returncode."""
+        mock_proc.returncode = -9
+        return True
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+         patch("pathlib.Path.mkdir"), \
+         patch("builtins.open", mock_open()), \
+         patch("aquarco_supervisor.cli.claude._monitor_for_inactivity_stream",
+               side_effect=fake_inactivity):
+        output = await execute_claude(
+            prompt_file=prompt_file,
+            context={},
+            work_dir=str(tmp_path),
+            task_id="t1",
+            stage_num=0,
+        )
+
+    # Should return partial output rather than raise AgentInactivityError
+    assert isinstance(output, ClaudeOutput)
+    assert result_line in output.raw
+
+
+# ---------------------------------------------------------------------------
+# Tests: _is_rate_limited edge cases (lines 533-540)
+# ---------------------------------------------------------------------------
+
+
+def test_is_rate_limited_in_lines_partial_rate_limit_string() -> None:
+    """Partial strings that don't match either pattern return False."""
+    lines = ["rate_limit_exceeded_for_other_reason"]
+    # 'rate_limit_error' is not present, 'status code 429' is not present
+    # 'rate_limit_' is not the same as 'rate_limit_error'
+    # This tests the exact string matching
+    assert _is_rate_limited_in_lines(lines) is False
+
+
+def test_is_rate_limited_in_lines_status_code_without_429() -> None:
+    """'status code 400' does not trigger rate-limit detection."""
+    lines = ["status code 400: bad request"]
+    assert _is_rate_limited_in_lines(lines) is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: _monitor_for_inactivity_stream (D4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_monitor_for_inactivity_stream_returns_false_on_normal_exit() -> None:
+    """Returns False when process exits naturally before inactivity timeout."""
+    proc = _make_proc(returncode=None)
+
+    last_event_time: list[float] = [asyncio.get_event_loop().time()]
+    result_seen = asyncio.Event()
+    result_seen.set()
+
+    # Simulate process exiting quickly
+    async def set_returncode() -> None:
+        proc.returncode = 0
+
+    asyncio.create_task(set_returncode())
+
+    killed = await _monitor_for_inactivity_stream(
+        proc,
+        last_event_time,
+        result_seen,
+        inactivity_timeout=30.0,
+        poll_interval=0.01,
+    )
+
+    assert killed is False
+
+
+@pytest.mark.asyncio
+async def test_monitor_for_inactivity_stream_kills_on_timeout() -> None:
+    """Returns True and kills process when inactivity timeout is exceeded."""
+    proc = _make_proc(returncode=None)
+    # Set last_event_time far in the past to trigger inactivity immediately
+    past_time = asyncio.get_event_loop().time() - 1000.0
+    last_event_time: list[float] = [past_time]
+    result_seen = asyncio.Event()
+    result_seen.set()
+
+    killed = await _monitor_for_inactivity_stream(
+        proc,
+        last_event_time,
+        result_seen,
+        inactivity_timeout=1.0,
+        poll_interval=0.01,
+    )
+
+    assert killed is True
+    proc.kill.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_monitor_for_inactivity_stream_waits_for_result_seen() -> None:
+    """Does not apply inactivity timeout until result_seen is set."""
+    proc = _make_proc(returncode=None)
+
+    # Set last_event_time far in the past (would trigger inactivity if result_seen)
+    past_time = asyncio.get_event_loop().time() - 1000.0
+    last_event_time: list[float] = [past_time]
+    result_seen = asyncio.Event()
+    # NOT setting result_seen — monitor should skip inactivity check
+
+    # Set returncode after a couple of polls to exit the monitor
+    poll_count = 0
+
+    original_sleep = asyncio.sleep
+
+    async def controlled_sleep(t: float) -> None:
+        nonlocal poll_count
+        poll_count += 1
+        if poll_count >= 2:
+            proc.returncode = 0
+        await original_sleep(0)
+
+    with patch("asyncio.sleep", side_effect=controlled_sleep):
+        killed = await _monitor_for_inactivity_stream(
+            proc,
+            last_event_time,
+            result_seen,
+            inactivity_timeout=1.0,
+            poll_interval=0.01,
+        )
+
+    # Process exited without result_seen ever set → not killed for inactivity
+    assert killed is False
+    proc.kill.assert_not_called()
