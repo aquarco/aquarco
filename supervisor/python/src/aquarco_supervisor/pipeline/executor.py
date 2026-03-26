@@ -421,6 +421,7 @@ class PipelineExecutor:
                         task_id, stage_num, category, agents,
                         clone_dir, branch_name,
                         scoped_view=scoped_view,
+                        pipeline_name=pipeline_name,
                     )
                 else:
                     # Sequential execution (single or multiple agents)
@@ -435,6 +436,7 @@ class PipelineExecutor:
                             accumulated, iteration=1,
                             scoped_view=scoped_view,
                             work_dir=clone_dir,
+                            pipeline_name=pipeline_name,
                         )
                         stage_output.update(out)
 
@@ -484,6 +486,7 @@ class PipelineExecutor:
                             validation_items_in=vi_in,
                             scoped_view=scoped_view,
                             work_dir=clone_dir,
+                            pipeline_name=pipeline_name,
                         )
                         stage_output.update(out)
                         await self._process_validation_items(task_id, sk, out)
@@ -572,6 +575,7 @@ class PipelineExecutor:
         validation_items_in: list[dict[str, Any]] | None = None,
         scoped_view: ScopedAgentView | None = None,
         work_dir: str | None = None,
+        pipeline_name: str = "",
     ) -> dict[str, Any]:
         """Execute a single planned stage with a specific agent."""
         stage_key = f"{stage_num}:{category}:{agent_name}"
@@ -618,6 +622,8 @@ class PipelineExecutor:
                 work_dir=work_dir,
                 scoped_view=scoped_view,
                 on_live_output=_live_output_cb,
+                pipeline_name=pipeline_name,
+                category=category,
             )
             await self._tq.store_stage_output(
                 task_id, stage_num, category, agent_name, output,
@@ -651,6 +657,7 @@ class PipelineExecutor:
         branch_name: str,
         *,
         scoped_view: ScopedAgentView | None = None,
+        pipeline_name: str = "",
     ) -> dict[str, Any]:
         """Run multiple agents in parallel using git worktrees."""
         log.info(
@@ -695,6 +702,7 @@ class PipelineExecutor:
                     accumulated, iteration=1,
                     scoped_view=scoped_view,
                     work_dir=wt_dir,
+                    pipeline_name=pipeline_name,
                 )
 
             results = await asyncio.gather(
