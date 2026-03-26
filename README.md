@@ -287,6 +287,24 @@ Standalone file with pipeline definitions. Each pipeline has ordered stages
 specifying which agent runs, what tools it uses, and what context it
 produces/consumes.
 
+Stages support **conditional loops** — a `loop` block causes a stage (or group
+of stages) to repeat until an exit condition is met or `max_repeats` is reached:
+
+```yaml
+- category: review
+  loop:
+    condition: "recommendation == approve"   # exit when true
+    max_repeats: 3                           # safety cap (1–10)
+    eval_mode: simple                        # "simple" or "ai"
+    loopStages: [implementation, review]     # stages to repeat
+```
+
+- **`eval_mode: simple`** — field comparison against the previous stage's structured output (e.g. `recommendation == approve`).
+- **`eval_mode: ai`** — natural-language predicate evaluated by Claude CLI, allowing rich conditions like *"All risks mentioned in STAGE_0.risks are avoided or mitigated"*.
+
+The web UI task detail page visualizes pipeline definitions including loop
+back-edges and conditional paths.
+
 ### Repositories
 
 Repositories are managed **only via the database** (added through the web UI).

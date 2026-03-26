@@ -1,5 +1,23 @@
 # Changelog
 
+## [2026-03-26] — Conditional loops in pipeline (#6)
+
+### Added
+- **Conditional loop support** for pipeline stages — stages can repeat until an exit condition is met or a maximum repeat count is reached, enabling iterative review-fix cycles
+- `loop` configuration on pipeline stage definitions with fields: `condition` (exit condition), `max_repeats` (1–10, default 3), `eval_mode` (`simple` field comparison or `ai` natural-language evaluation via Claude CLI), and `loopStages` (categories to repeat)
+- `LoopConfig` Pydantic model for loop configuration validation
+- **Pipeline visualization** (`supervisor/python/.../pipeline/visualize.py`) — renders pipeline stages as text diagrams showing linear flow, conditional branches, and loop back-edges
+- Pipeline Stages section in PR body showing all possible branches and loop paths
+- **Web UI pipeline viewer** on the task detail page — displays pipeline definitions with loop connections, back-edges, and tooltips
+- `GET_PIPELINE_DEFINITIONS` GraphQL query with `PipelineDefinition` and `PipelineLoopConfig` types
+- `LoopConfig` added to JSON schema (`config/schemas/pipeline-definition-v1.json`) for pipeline definition validation
+- `quality-pipeline` example pipeline using AI-evaluated loop conditions
+- Loop configuration added to `feature-pipeline` (review stage) and `pr-review-pipeline` (review stage)
+
+### Changed
+- `config/pipelines.yaml` — `feature-pipeline` bumped to v2.0.0 with review loop; `pr-review-pipeline` bumped to v2.0.0 with review loop; new `quality-pipeline` added
+- GraphQL schema extended with pipeline definition and loop config types
+
 ## [2026-03-25] — Convert to yoyo migrations (#22)
 
 ### Added

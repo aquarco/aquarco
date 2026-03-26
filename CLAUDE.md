@@ -94,6 +94,8 @@ and `spec.environment` (env vars passed to Claude CLI). The `spec.outputSchema` 
 ### Pipelines (`config/pipelines.yaml`)
 Pipeline definitions are loaded from this standalone file (path configured via `pipelinesFile`
 in `supervisor.yaml`). Each pipeline defines ordered stages with agent assignments.
+Stages can include a `loop` block for conditional repetition (see `LoopConfig` model
+and `pipeline/visualize.py` for rendering).
 
 ### Repositories
 Repositories are stored **only in the database** (not in config). Pollers query the DB
@@ -110,7 +112,8 @@ The supervisor system manages autonomous AI agent pipelines. It was rewritten fr
 | `config.py` | YAML config loading, pipeline loading, Pydantic validation |
 | `database.py` | Async PostgreSQL pool (psycopg) |
 | `task_queue.py` | Task CRUD, status transitions, poll state |
-| `pipeline/executor.py` | Multi-stage pipeline execution, git branching, PR creation |
+| `pipeline/executor.py` | Multi-stage pipeline execution, git branching, PR creation, loop evaluation |
+| `pipeline/visualize.py` | Pipeline text/markdown visualization with loop back-edges |
 | `pipeline/agent_registry.py` | Agent discovery, capacity management, env/tools resolution |
 | `pipeline/context.py` | Context accumulation for stages |
 | `cli/claude.py` | Claude CLI subprocess wrapper (with `extra_env` support) |
