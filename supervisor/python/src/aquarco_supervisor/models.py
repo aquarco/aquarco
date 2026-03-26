@@ -52,6 +52,15 @@ class ValidationItemStatus(str, enum.Enum):
     WONT_FIX = "wont_fix"
 
 
+class RepoAgentScanStatus(str, enum.Enum):
+    PENDING = "pending"
+    SCANNING = "scanning"
+    ANALYZING = "analyzing"
+    WRITING = "writing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class Complexity(str, enum.Enum):
     TRIVIAL = "trivial"
     LOW = "low"
@@ -196,6 +205,18 @@ class ValidationItem(BaseModel):
     status: ValidationItemStatus = ValidationItemStatus.OPEN
     resolved_by: str | None = None
     resolved_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class RepoAgentScan(BaseModel):
+    id: int | None = None
+    repo_name: str
+    status: RepoAgentScanStatus = RepoAgentScanStatus.PENDING
+    agents_found: int = 0
+    agents_created: int = 0
+    error_message: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     created_at: datetime | None = None
 
 

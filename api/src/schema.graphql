@@ -17,6 +17,9 @@ type Query {
   globalAgents: [AgentDefinition!]!
   repoAgentGroups: [RepoAgentGroup!]!
 
+  # Agent scan
+  repoAgentScan(repoName: String!): RepoAgentScan
+
   # Pipeline status
   pipelineStatus(taskId: ID!): PipelineStatus
 
@@ -62,6 +65,9 @@ type Mutation {
 
   # Intervention
   unblockTask(id: ID!, resolution: String!): TaskPayload!
+
+  # Agent scan
+  reloadRepoAgents(repoName: String!): RepoAgentScanPayload!
 
   # Agent overrides
   setAgentDisabled(name: String!, scope: String!, disabled: Boolean!): AgentDefinitionPayload!
@@ -135,6 +141,8 @@ type Repository {
   errorMessage: String
   deployPublicKey: String
   taskCount: Int!
+  hasClaudeAgents: Boolean!
+  lastAgentScan: RepoAgentScan
 }
 
 type AgentInstance {
@@ -313,6 +321,7 @@ enum AgentSource {
   DEFAULT
   GLOBAL_CONFIG
   REPOSITORY
+  AUTOLOADED
 }
 
 type AgentDefinition {
@@ -343,5 +352,33 @@ type AgentDefinitionPayload {
 
 type CreatePRPayload {
   prUrl: String
+  errors: [Error!]
+}
+
+# --- Agent Scan ---
+
+enum RepoAgentScanStatus {
+  PENDING
+  SCANNING
+  ANALYZING
+  WRITING
+  COMPLETED
+  FAILED
+}
+
+type RepoAgentScan {
+  id: ID!
+  repoName: String!
+  status: RepoAgentScanStatus!
+  agentsFound: Int!
+  agentsCreated: Int!
+  errorMessage: String
+  startedAt: DateTime
+  completedAt: DateTime
+  createdAt: DateTime!
+}
+
+type RepoAgentScanPayload {
+  scan: RepoAgentScan
   errors: [Error!]
 }

@@ -1,5 +1,31 @@
 # Changelog
 
+## [2026-03-25] — Autoload .claude agents (#14)
+
+### Added
+- **Agent autoloader** (`supervisor/python/src/aquarco_supervisor/agent_autoloader.py`) — scans a repository's `.claude/agents/` directory for `.md` prompt files, analyzes them via Claude CLI to infer metadata (categories, tools, description), generates aquarco agent YAML definitions, writes them to `aquarco-config/agents/` in the repo, and stores them in the database with `source='autoload:<repo_name>'`
+- **Database migration** `028_repo_agent_scans.sql` — new `repo_agent_scans` table tracking scan status (`pending`, `scanning`, `analyzing`, `writing`, `completed`, `failed`), agents found/created counts, and timestamps per repository
+- **GraphQL query** `repoAgentScan(repoName)` — returns the latest agent scan status for a repository
+- **GraphQL mutation** `reloadRepoAgents(repoName)` — triggers a rescan of `.claude/agents/` for on-demand agent reload
+- **GraphQL types** `RepoAgentScan`, `RepoAgentScanStatus` enum, `RepoAgentScanPayload`
+- **`AUTOLOADED` agent source** — new value in the `AgentSource` GraphQL enum distinguishing autoloaded agents from `DEFAULT`, `GLOBAL_CONFIG`, and `REPOSITORY` agents
+- **Repository fields** `hasClaudeAgents: Boolean!` and `lastAgentScan: RepoAgentScan` on the `Repository` GraphQL type
+- **Reload Agents button** on the Repositories page — triggers `reloadRepoAgents` mutation with scan progress polling and Snackbar result display
+- **Autoloaded agents in RepoAgentsTab** — autoloaded agents displayed with "(autoloaded)" chip in the Repository Agents tab
+- **Config overlay integration** — autoloaded agents merged as a 4th layer: `default → global_overlay → repo_overlay → autoloaded`
+- 75 new tests across `test_agent_autoload.py`, `test_config_store_autoload.py`, and `test_config_overlay_autoload.py`
+
+### Changed
+- `config_store.py` — added `store_agent_definitions()` support for `autoload:` source prefix, `read_autoloaded_agents()`, and `deactivate_autoloaded_agents()` helpers
+- `config_overlay.py` — added `merge_autoloaded_agents()` and updated `resolve_config()` to accept optional autoloaded agents parameter
+- `web/src/app/repos/page.tsx` — added Reload Agents icon button per repository row
+- `web/src/components/agents/RepoAgentsTab.tsx` — updated to display `AUTOLOADED` source agents
+
+### Security
+- Path traversal protection: only scans `.claude/agents/*.md` (no recursive traversal), filenames validated against `^[a-zA-Z0-9_-]+\.md$`
+- Autoloaded agents inherit conservative default tools (`Read`, `Grep`, `Glob` only)
+- Rate limited to 1 scan per repository per 5 minutes, max 20 agent prompts per scan, 50KB max prompt file size
+
 ## [2026-03-25] — Convert to yoyo migrations (#22)
 
 ### Added
