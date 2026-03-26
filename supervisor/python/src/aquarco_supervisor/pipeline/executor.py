@@ -319,7 +319,7 @@ class PipelineExecutor:
 
         try:
             output = await self._execute_agent(
-                "planner-agent", task_id, planner_context, {}, -1
+                "planner-agent", task_id, planner_context, -1
             )
         except Exception as e:
             await self._tq.record_stage_failed(
