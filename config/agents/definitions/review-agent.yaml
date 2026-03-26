@@ -37,60 +37,6 @@ spec:
     AGENT_MODE: "review"
     STRICT_MODE: "true"
 
-  output:
-    format: github-pr-comment
-    mustInclude:
-      - summary
-      - findings
-      - recommendation
-      - severity
-
-  outputSchema:
-    type: object
-    required:
-      - summary
-      - findings
-      - recommendation
-      - severity
-    properties:
-      summary:
-        type: string
-        description: "Brief summary of the review"
-      findings:
-        type: array
-        items:
-          type: object
-          properties:
-            file:
-              type: string
-            line:
-              type: integer
-            severity:
-              type: string
-              enum:
-                - info
-                - warning
-                - error
-                - critical
-            message:
-              type: string
-        description: "Structured list of individual findings"
-      recommendation:
-        type: string
-        enum:
-          - approve
-          - request_changes
-          - comment
-        description: "Final review recommendation"
-      severity:
-        type: string
-        enum:
-          - clean
-          - minor_issues
-          - major_issues
-          - blocking
-        description: "Overall severity classification of all findings combined"
-
   healthCheck:
     enabled: true
     intervalSeconds: 300

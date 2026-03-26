@@ -27,7 +27,7 @@ You run after `implementation-complete` has been emitted. You consume the implem
 
 ## Output Format
 
-Output schema is injected automatically by the system from the agent definition.
+Output schema is injected automatically by the system from the pipeline definition.
 
 ## Guidance
 

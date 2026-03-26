@@ -27,7 +27,7 @@ You operate as a standalone agent that can be triggered directly on any PR, or a
 
 ## Output Format
 
-Output schema is injected automatically by the system from the agent definition.
+Output schema is injected automatically by the system from the pipeline definition.
 
 ## Guidance
 

@@ -1,34 +1,319 @@
 apiVersion: aquarco.agents/v1
 kind: PipelineDefinition
 
+categories:
+  - name: analyze
+    outputSchema:
+      type: object
+      required:
+        - risks
+        - issue_summary
+        - affected_components
+        - recommended_pipeline
+        - estimated_complexity
+      properties:
+        issue_summary:
+          type: string
+          description: "Concise description of the issue or request"
+        affected_components:
+          type: array
+          items:
+            type: string
+          description: "List of components, services, or packages affected"
+        recommended_pipeline:
+          type: string
+          enum:
+            - feature-pipeline
+            - bugfix-pipeline
+            - docs-pipeline
+            - hotfix-pipeline
+          description: "Which pipeline should handle this work"
+        estimated_complexity:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+          description: "Overall complexity estimate"
+        files_to_modify:
+          type: array
+          items:
+            type: string
+          description: "Predicted file paths likely to need changes"
+        risks:
+          type: array
+          items:
+            type: string
+          description: "Identified risks or blockers"
+  - name: design
+    outputSchema:
+      type: object
+      required:
+        - design_summary
+        - components_affected
+        - implementation_steps
+        - acceptance_criteria
+      properties:
+        design_summary:
+          type: string
+          description: "High-level summary of the technical design"
+        components_affected:
+          type: array
+          items:
+            type: string
+          description: "Components, services, or packages that will be modified"
+        implementation_steps:
+          type: array
+          items:
+            type: object
+            properties:
+              step:
+                type: integer
+              description:
+                type: string
+              files:
+                type: array
+                items:
+                  type: string
+          description: "Ordered list of implementation steps"
+        acceptance_criteria:
+          type: array
+          items:
+            type: string
+          description: "Testable acceptance criteria for the implementation"
+        api_changes:
+          type: object
+          description: "Structured description of API changes (or ref to blob)"
+        database_migrations:
+          type: array
+          items:
+            type: string
+          description: "Migration files that will be required"
+  - name: docs
+    outputSchema:
+      type: object
+      required:
+        - files_updated
+        - summary
+      properties:
+        files_updated:
+          type: array
+          items:
+            type: string
+          description: "Paths of all documentation files created or modified"
+        summary:
+          type: string
+          description: "Narrative description of what documentation was changed and why"
+  - name: implementation
+    outputSchema:
+      type: object
+      required:
+        - summary
+        - files_changed
+        - test_status
+      properties:
+        summary:
+          type: string
+          description: "What was implemented"
+        files_changed:
+          type: array
+          items:
+            type: string
+          description: "Relative paths of all modified files"
+        test_status:
+          type: string
+          enum:
+            - passed
+            - failed
+            - skipped
+          description: "Result of running the test suite after implementation"
+  - name: review
+    outputSchema:
+      type: object
+      required:
+        - summary
+        - findings
+        - recommendation
+        - severity
+      properties:
+        summary:
+          type: string
+          description: "Brief summary of the review"
+        findings:
+          type: array
+          items:
+            type: object
+            properties:
+              file:
+                type: string
+              line:
+                type: integer
+              severity:
+                type: string
+                enum:
+                  - info
+                  - warning
+                  - error
+                  - critical
+              message:
+                type: string
+          description: "Structured list of individual findings"
+        recommendation:
+          type: string
+          enum:
+            - approve
+            - request_changes
+            - comment
+          description: "Final review recommendation"
+        severity:
+          type: string
+          enum:
+            - clean
+            - minor_issues
+            - major_issues
+            - blocking
+          description: "Overall severity classification of all findings combined"
+  - name: test
+    outputSchema:
+      type: object
+      required:
+        - tests_added
+        - tests_passed
+        - tests_failed
+        - coverage_percent
+        - test_files
+      properties:
+        tests_added:
+          type: integer
+          description: "Number of new test cases written"
+        tests_passed:
+          type: integer
+          description: "Number of tests that passed in the final run"
+        tests_failed:
+          type: integer
+          description: "Number of tests that failed in the final run"
+        coverage_percent:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: "Overall code coverage percentage after adding tests"
+        test_files:
+          type: array
+          items:
+            type: string
+          description: "Paths of all test files created or modified"
+
 pipelines:
   - name: feature-pipeline
     version: "1.0.0"
     trigger:
       labels: [feature, enhancement]
     stages:
-      - { category: analyze, required: true }
-      - { category: design, required: true, conditions: ["estimated_complexity >= medium"] }
-      - { category: implementation, required: true }
-      - { category: test, required: true }
-      - { category: docs, required: false }
-      - { category: review, required: true }
+      - name: analysis
+        category: analyze
+        required: true
+
+      - name: design
+        category: design
+        required: true
+
+      - name: implementation
+        category: implementation
+        required: false
+        conditions: 
+          - ai: All design.acceptance_criteria fulfilled?
+            no: implementation
+            maxRepeats: 5
+
+      - name: review
+        category: review
+        required: true
+        conditions:
+          - ai: All analysis.risks are avoided or mitigated?
+            no: implementation
+            maxRepeats: 5
+          - simple: severity == major_issues || severity == blocking
+            no: test
+            maxRepeats: 5
+
+      - name: fix-review-findings
+        category: implementation
+        required: false
+        conditions:
+          - simple: true
+            yes: review
+            maxRepeats: 5
+
+      - name: test
+        category: test
+        required: false
+        conditions:
+          - simple: tests_added == 0 || (coverage_percent >= 80 && tests_failed == 0)
+            no: test
+            maxRepeats: 5
+
+      - name: docs
+        category: docs
+        required: false
 
   - name: bugfix-pipeline
     version: "1.0.0"
     trigger:
       labels: [bug]
     stages:
-      - { category: analyze, required: true }
-      - { category: implementation, required: true }
-      - { category: test, required: true }
-      - { category: review, required: true }
+      - name: analysis
+        category: analyze
+        required: true
+
+      - name: implementation
+        category: implementation
+        required: true
+
+      - name: review
+        category: review
+        required: true
+        conditions:
+          - simple: severity == major_issues || severity == blocking
+            no: test # skip fix-review-findings
+            maxRepeats: 3
+
+      - name: fix-review-findings
+        category: implementation
+        required: false
+        conditions:
+          - simple: true
+            yes: review
+            maxRepeats: 3
+      
+      - name: test
+        category: test
+        required: true
+        conditions:
+          - simple: tests_added == 0 || (coverage_percent >= 80 && tests_failed == 0)
+            no: test
+            maxRepeats: 5
 
   - name: pr-review-pipeline
     version: "1.0.0"
     trigger:
       events: [pr_opened, pr_updated]
     stages:
-      - { category: review, required: true }
-      - { category: implementation, required: true, conditions: ["recommendation == request_changes"] }
-      - { category: test, required: true, conditions: ["recommendation == request_changes"] }
+      - name: review
+        category: review
+        required: true
+        conditions:
+          - simple: recommendation == request_changes
+            no: test
+            maxRepeats: 3
+
+      - name: fix-review-findings
+        category: implementation
+        required: false
+        conditions:
+          - simple: true
+            yes: review
+            maxRepeats: 5
+
+      - name: test
+        category: test
+        required: false

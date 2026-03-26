@@ -33,7 +33,7 @@ You run after the review agent. You receive the review findings (severity, file,
 
 ## Output Format
 
-Output schema is injected automatically by the system from the agent definition.
+Output schema is injected automatically by the system from the pipeline definition.
 
 ## Guidance
 

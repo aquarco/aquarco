@@ -15,7 +15,7 @@ spec:
   # Priority 1 — highest priority, runs first in all pipelines
   priority: 1
 
-  promptFile: analyze-agent.md
+  promptFile: ../prompts/analyze-agent.md
 
   tools:
     allowed:
@@ -37,56 +37,6 @@ spec:
   environment:
     AGENT_MODE: "analyze"
     STRICT_MODE: "true"
-
-  output:
-    format: task-file
-    mustInclude:
-      - issue_summary
-      - affected_components
-      - recommended_pipeline
-      - estimated_complexity
-
-  outputSchema:
-    type: object
-    required:
-      - issue_summary
-      - affected_components
-      - recommended_pipeline
-      - estimated_complexity
-    properties:
-      issue_summary:
-        type: string
-        description: "Concise description of the issue or request"
-      affected_components:
-        type: array
-        items:
-          type: string
-        description: "List of components, services, or packages affected"
-      recommended_pipeline:
-        type: string
-        enum:
-          - feature-pipeline
-          - bugfix-pipeline
-          - docs-pipeline
-          - hotfix-pipeline
-        description: "Which pipeline should handle this work"
-      estimated_complexity:
-        type: string
-        enum:
-          - low
-          - medium
-          - high
-        description: "Overall complexity estimate"
-      files_to_modify:
-        type: array
-        items:
-          type: string
-        description: "Predicted file paths likely to need changes"
-      risks:
-        type: array
-        items:
-          type: string
-        description: "Identified risks or blockers"
 
   healthCheck:
     enabled: true

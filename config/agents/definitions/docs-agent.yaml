@@ -34,27 +34,6 @@ spec:
   environment:
     AGENT_MODE: "docs"
 
-  output:
-    format: commit
-    mustInclude:
-      - files_updated
-      - summary
-
-  outputSchema:
-    type: object
-    required:
-      - files_updated
-      - summary
-    properties:
-      files_updated:
-        type: array
-        items:
-          type: string
-        description: "Paths of all documentation files created or modified"
-      summary:
-        type: string
-        description: "Narrative description of what documentation was changed and why"
-
   conditions:
     filePatterns:
       - "src/**"

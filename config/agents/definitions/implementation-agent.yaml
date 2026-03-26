@@ -35,36 +35,6 @@ spec:
   environment:
     AGENT_MODE: "implementation"
 
-  output:
-    format: commit
-    mustInclude:
-      - summary
-      - files_changed
-      - test_status
-
-  outputSchema:
-    type: object
-    required:
-      - summary
-      - files_changed
-      - test_status
-    properties:
-      summary:
-        type: string
-        description: "What was implemented"
-      files_changed:
-        type: array
-        items:
-          type: string
-        description: "Relative paths of all modified files"
-      test_status:
-        type: string
-        enum:
-          - passed
-          - failed
-          - skipped
-        description: "Result of running the test suite after implementation"
-
   conditions:
     filePatterns:
       - "src/**"

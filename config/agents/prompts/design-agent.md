@@ -24,7 +24,7 @@ You run second in feature and bugfix pipelines, after `analysis-complete` has be
 
 ## Output Format
 
-Output schema is injected automatically by the system from the agent definition.
+Output schema is injected automatically by the system from the pipeline definition.
 
 ## Guidance
 

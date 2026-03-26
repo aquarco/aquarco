@@ -46,7 +46,7 @@ For each category, define validation criteria that downstream stages (like revie
 
 ## Output Format
 
-Output schema is injected automatically by the system from the agent definition.
+Output schema is injected automatically by the system from the pipeline definition.
 
 ## Rules
 

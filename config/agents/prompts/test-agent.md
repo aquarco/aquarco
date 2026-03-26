@@ -28,7 +28,7 @@ You run fourth in feature and bugfix pipelines, after `implementation-complete` 
 
 ## Output Format
 
-Output schema is injected automatically by the system from the agent definition.
+Output schema is injected automatically by the system from the pipeline definition.
 
 ## Guidance
 
