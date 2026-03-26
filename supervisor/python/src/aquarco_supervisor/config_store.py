@@ -212,6 +212,14 @@ async def sync_all_agent_definitions_to_db(
     system_dir = agents_dir / "system"
     pipeline_dir = agents_dir / "pipeline"
 
+    # NOTE (atomicity): The two store_agent_definitions calls below are NOT
+    # wrapped in a single transaction.  If the process crashes between the
+    # system and pipeline batches the DB will be left in a partially-updated
+    # state.  A future refactor should extract the SQL loop inside
+    # store_agent_definitions into a connection-accepting helper and wrap both
+    # calls using `async with db.transaction() as conn:` (the transaction()
+    # context manager is already available on the Database class).
+
     if system_dir.is_dir() and pipeline_dir.is_dir():
         system_schema = _load_json_schema(system_schema_path) if system_schema_path else None
         pipeline_schema = (

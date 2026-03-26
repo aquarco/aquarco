@@ -1454,6 +1454,39 @@ class TestSystemAgentNamesConstant:
             "At minimum planner, condition-evaluator, and repo-descriptor must be listed"
         )
 
+    def test_system_agent_names_matches_filesystem(self) -> None:
+        """Automated guard: SYSTEM_AGENT_NAMES must stay in sync with
+        config/agents/definitions/system/*.yaml.
+
+        If a new system agent YAML is added without updating SYSTEM_AGENT_NAMES,
+        the backward-compat flat-scan path will silently tag it as 'pipeline'.
+        This test catches that drift at CI time.
+        """
+        system_dir = (
+            Path(__file__).parent.parent.parent.parent
+            / "config"
+            / "agents"
+            / "definitions"
+            / "system"
+        )
+        if not system_dir.exists():
+            pytest.skip("System agents directory not found — skipping filesystem guard")
+
+        filesystem_names: set[str] = set()
+        for yaml_file in system_dir.glob("*.yaml"):
+            raw = yaml.safe_load(yaml_file.read_text())
+            if isinstance(raw, dict):
+                name = raw.get("metadata", {}).get("name", yaml_file.stem)
+                filesystem_names.add(name)
+
+        from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES
+
+        assert filesystem_names == set(SYSTEM_AGENT_NAMES), (
+            f"SYSTEM_AGENT_NAMES {set(SYSTEM_AGENT_NAMES)!r} does not match names found "
+            f"in {system_dir}: {filesystem_names!r}.\n"
+            "Update constants.py when adding or removing system agent YAML files."
+        )
+
 
 # ── System agent schema — role enum ──────────────────────────────────────
 
