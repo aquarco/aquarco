@@ -287,18 +287,33 @@ SIGHUP triggers a full config reload: `systemctl reload aquarco-supervisor-pytho
 ### Agent Definitions (`config/agents/definitions/`)
 
 Kubernetes-style YAML files defining each agent's tools, environment variables,
-system prompt path, and output schema. Key fields under `spec`:
+and system prompt path. Key fields under `spec`:
 
 - `tools.allowed` / `tools.denied` — tool access control for Claude CLI
 - `environment` — env vars passed to Claude CLI subprocess
 - `systemPrompt` — path to agent's markdown prompt template
-- `outputSchema` — structured output contract
+
+> **Note:** Output schemas are now defined in `pipelines.yaml` under `categories:` rather than in agent definitions. Agent-level `outputSchema` is still supported as a fallback for autoloaded agents.
 
 ### Pipelines (`config/pipelines.yaml`)
 
-Standalone file with pipeline definitions. Each pipeline has ordered stages
-specifying which agent runs, what tools it uses, and what context it
-produces/consumes.
+Standalone file with pipeline definitions. The file contains two top-level sections:
+
+- **`categories:`** — defines output schemas per stage category (e.g., `analyze`, `design`, `implementation`). Each category has a `name` and `outputSchema` (JSON Schema). Output schemas were moved here from agent definitions to decouple schema contracts from individual agents.
+- **`pipelines:`** — ordered stages with named-stage execution. Each stage has a `name`, `category`, and optional structured `conditions` that act as exit gates.
+
+#### Stage Conditions
+
+Conditions are evaluated after each stage completes. Each condition object has one of:
+- `simple:` — expression evaluated against stage outputs (supports `==`, `!=`, `>=`, `>`, `<=`, `<`, `&&`, `||`, parentheses, and dotted field paths like `analysis.risks`)
+- `ai:` — natural-language prompt evaluated by Claude CLI against accumulated pipeline context
+
+Each condition can specify:
+- `yes:` — stage name to jump to if the condition is true
+- `no:` — stage name to jump to if the condition is false
+- `maxRepeats:` — maximum times a jump target can be visited before falling through
+
+If no condition matches, execution advances to the next stage in order (preserving linear flow as the default).
 
 ### Repositories
 
