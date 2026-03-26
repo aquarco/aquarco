@@ -1049,3 +1049,328 @@ async def test_close_task_resources_fallback_rmtree(
         await executor.close_task_resources("task-1")
 
     mock_rmtree.assert_called_once_with(mock_work_dir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Fix: per-agent output routing to _process_validation_items
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_process_validation_items_resolves_and_adds(
+    sample_pipelines: Any,
+) -> None:
+    """_process_validation_items resolves existing items and adds new ones."""
+    # Arrange
+    mock_tq = AsyncMock(spec=TaskQueue)
+    executor = PipelineExecutor(AsyncMock(), mock_tq, AsyncMock(), sample_pipelines)
+
+    agent_output = {
+        "validation_items_resolved": [42, 99],
+        "validation_items_new": [
+            {"category": "test", "description": "Add missing test"},
+        ],
+    }
+
+    # Act
+    await executor._process_validation_items("task-1", "0:test:agent", agent_output)
+
+    # Assert
+    mock_tq.resolve_validation_item.assert_any_await(42, "0:test:agent")
+    mock_tq.resolve_validation_item.assert_any_await(99, "0:test:agent")
+    mock_tq.add_validation_item.assert_awaited_once_with(
+        "task-1", "0:test:agent", "test", "Add missing test",
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_validation_items_ignores_non_int_resolved_ids(
+    sample_pipelines: Any,
+) -> None:
+    """_process_validation_items skips non-integer resolved IDs."""
+    mock_tq = AsyncMock(spec=TaskQueue)
+    executor = PipelineExecutor(AsyncMock(), mock_tq, AsyncMock(), sample_pipelines)
+
+    agent_output = {
+        "validation_items_resolved": ["not-an-int", None, 7],
+    }
+
+    await executor._process_validation_items("task-1", "0:test:agent", agent_output)
+
+    # Only the integer id=7 should be resolved
+    mock_tq.resolve_validation_item.assert_awaited_once_with(7, "0:test:agent")
+
+
+@pytest.mark.asyncio
+async def test_process_validation_items_ignores_incomplete_new_items(
+    sample_pipelines: Any,
+) -> None:
+    """_process_validation_items skips new items missing required fields."""
+    mock_tq = AsyncMock(spec=TaskQueue)
+    executor = PipelineExecutor(AsyncMock(), mock_tq, AsyncMock(), sample_pipelines)
+
+    agent_output = {
+        "validation_items_new": [
+            {"category": "test"},             # missing description
+            {"description": "No category"},   # missing category
+            "not-a-dict",                     # wrong type
+        ],
+    }
+
+    await executor._process_validation_items("task-1", "0:test:agent", agent_output)
+
+    mock_tq.add_validation_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sequential_stage_passes_per_agent_output_to_validation(
+    sample_pipelines: Any,
+) -> None:
+    """Sequential execution: each agent's own output is routed to _process_validation_items,
+    not the merged stage_output accumulated from all agents in the loop."""
+    # Arrange – two agents in one sequential stage; agent-A emits a resolved item,
+    # agent-B emits a different resolved item. The bug would pass the merged output
+    # (both items) to both agents. The fix passes only agent-A's output to agent-A's
+    # validation call and only agent-B's output to agent-B's validation call.
+
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_tq = AsyncMock(spec=TaskQueue)
+    mock_tq.get_task_context = AsyncMock(return_value={})
+    mock_tq.get_open_validation_items = AsyncMock(return_value=[])
+
+    agent_a_output = {"validation_items_resolved": [1], "_agent_name": "agent-a"}
+    agent_b_output = {"validation_items_resolved": [2], "_agent_name": "agent-b"}
+
+    call_sequence = [
+        ClaudeOutput(structured=agent_a_output, raw="{}"),
+        ClaudeOutput(structured=agent_b_output, raw="{}"),
+    ]
+
+    mock_registry = AsyncMock()
+    mock_registry.get_agent_prompt_file = MagicMock(return_value="/p.md")
+    mock_registry.get_agent_timeout = MagicMock(return_value=30)
+    mock_registry.get_allowed_tools = MagicMock(return_value=[])
+    mock_registry.get_denied_tools = MagicMock(return_value=[])
+    mock_registry.get_agent_environment = MagicMock(return_value={})
+    mock_registry.get_agent_output_schema = MagicMock(return_value=None)
+    mock_registry.should_skip_planning = MagicMock(return_value=True)
+    mock_registry.get_agents_for_category = MagicMock(return_value=["agent-a", "agent-b"])
+
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+
+    # Spy on _process_validation_items to capture (stage_key, agent_output) calls
+    captured_calls: list[tuple[str, dict]] = []
+
+    original_fn = executor._process_validation_items
+
+    async def _spy(task_id: str, sk: str, out: dict) -> None:  # type: ignore[override]
+        captured_calls.append((sk, out))
+        await original_fn(task_id, sk, out)
+
+    executor._process_validation_items = _spy  # type: ignore[method-assign]
+
+    task = MagicMock()
+    task.title = "Two-agent task"
+    task.initial_context = {}
+    task.source_ref = None
+    mock_tq.get_task = AsyncMock(return_value=task)
+    mock_tq.get_checkpoint = AsyncMock(return_value=None)
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor.execute_claude",
+        new_callable=AsyncMock,
+        side_effect=call_sequence,
+    ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
+        "aquarco_supervisor.pipeline.executor.load_overlay",
+        return_value=None,
+    ), patch(
+        "aquarco_supervisor.pipeline.executor._run_git",
+        new_callable=AsyncMock,
+        return_value="0",
+    ), patch(
+        "aquarco_supervisor.pipeline.executor._git_checkout",
+        new_callable=AsyncMock,
+    ), patch(
+        "aquarco_supervisor.pipeline.executor._auto_commit",
+        new_callable=AsyncMock,
+    ), patch(
+        "aquarco_supervisor.pipeline.executor._get_ahead_count",
+        new_callable=AsyncMock,
+        return_value=0,
+    ):
+        await executor.execute_pipeline("feature-pipeline", "task-1", {})
+
+    # Verify each agent's validation call received ONLY that agent's output
+    per_agent_calls = {sk: out for sk, out in captured_calls}
+
+    # Agent-A's call must contain only item 1
+    sk_a = [sk for sk in per_agent_calls if "agent-a" in sk]
+    assert sk_a, "Expected a validation call keyed to agent-a"
+    assert per_agent_calls[sk_a[0]].get("validation_items_resolved") == [1], (
+        "agent-a should receive only its own output (item 1), not the merged output"
+    )
+
+    # Agent-B's call must contain only item 2
+    sk_b = [sk for sk in per_agent_calls if "agent-b" in sk]
+    assert sk_b, "Expected a validation call keyed to agent-b"
+    assert per_agent_calls[sk_b[0]].get("validation_items_resolved") == [2], (
+        "agent-b should receive only its own output (item 2), not the merged output"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix: existing-PR guard in _create_pipeline_pr
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_pipeline_pr_skips_create_when_pr_exists(
+    sample_pipelines: Any,
+) -> None:
+    """When gh pr view returns a parseable PR number, store it and skip gh pr create."""
+    # Arrange
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value={"url": "https://github.com/owner/repo.git", "branch": "main"})
+
+    mock_tq = AsyncMock(spec=TaskQueue)
+    task = MagicMock()
+    task.initial_context = {}   # no head_branch → feature-pipeline path
+    task.source_ref = None
+    task.title = "My feature"
+    mock_tq.get_task = AsyncMock(return_value=task)
+
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
+
+    existing_pr_json = '{"number":42,"url":"https://github.com/owner/repo/pull/42"}'
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor._run_cmd",
+        new_callable=AsyncMock,
+    ) as mock_run_cmd, patch(
+        "aquarco_supervisor.pipeline.executor._run_git",
+        new_callable=AsyncMock,
+        return_value="",
+    ), patch(
+        "aquarco_supervisor.pipeline.executor._get_ahead_count",
+        new_callable=AsyncMock,
+        return_value=3,
+    ):
+        # First _run_cmd call is `gh pr view` → return existing PR JSON
+        # Any subsequent call would be `gh pr create` — we want that NOT to happen
+        mock_run_cmd.return_value = existing_pr_json
+
+        await executor._create_pipeline_pr(
+            "task-1", "aquarco/task-1/my-feature", "/repos/test", {},
+        )
+
+    # Assert: store_pr_info called with parsed number
+    mock_tq.store_pr_info.assert_awaited_once_with(
+        "task-1", 42, "aquarco/task-1/my-feature",
+    )
+    # Assert: gh pr create was NOT called
+    create_calls = [
+        c for c in mock_run_cmd.await_args_list
+        if "pr" in c.args and "create" in c.args
+    ]
+    assert not create_calls, "gh pr create must not be called when a PR already exists"
+
+
+@pytest.mark.asyncio
+async def test_create_pipeline_pr_falls_through_when_pr_view_unparseable(
+    sample_pipelines: Any,
+) -> None:
+    """When gh pr view returns non-empty but unparseable output, code falls through to
+    gh pr create. This test documents the known fallthrough behaviour (silent bug) so
+    that any future fix is caught by a test regression."""
+    # Arrange
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value={"url": "https://github.com/owner/repo.git", "branch": "main"})
+
+    mock_tq = AsyncMock(spec=TaskQueue)
+    task = MagicMock()
+    task.initial_context = {}
+    task.source_ref = None
+    task.title = "My feature"
+    mock_tq.get_task = AsyncMock(return_value=task)
+
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
+
+    pr_create_output = "https://github.com/owner/repo/pull/99"
+
+    def _cmd_side_effect(*args: str, **kwargs: Any) -> str:
+        if "view" in args:
+            # gh pr view returns a warning line with no parseable JSON number
+            return "warning: no current branch"
+        # gh pr create
+        return pr_create_output
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor._run_cmd",
+        new_callable=AsyncMock,
+        side_effect=_cmd_side_effect,
+    ), patch(
+        "aquarco_supervisor.pipeline.executor._run_git",
+        new_callable=AsyncMock,
+        return_value="",
+    ), patch(
+        "aquarco_supervisor.pipeline.executor._get_ahead_count",
+        new_callable=AsyncMock,
+        return_value=3,
+    ):
+        await executor._create_pipeline_pr(
+            "task-1", "aquarco/task-1/my-feature", "/repos/test", {},
+        )
+
+    # store_pr_info should be called with the number parsed from the create output (99)
+    mock_tq.store_pr_info.assert_awaited_once_with(
+        "task-1", 99, "aquarco/task-1/my-feature",
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_pipeline_pr_no_existing_pr_creates_new(
+    sample_pipelines: Any,
+) -> None:
+    """When gh pr view returns empty string (no existing PR), gh pr create is called."""
+    # Arrange
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(return_value={"url": "https://github.com/owner/repo.git", "branch": "main"})
+
+    mock_tq = AsyncMock(spec=TaskQueue)
+    task = MagicMock()
+    task.initial_context = {}
+    task.source_ref = None
+    task.title = "New PR task"
+    mock_tq.get_task = AsyncMock(return_value=task)
+
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
+
+    pr_create_output = "https://github.com/owner/repo/pull/7"
+
+    def _cmd_side_effect(*args: str, **kwargs: Any) -> str:
+        if "view" in args:
+            return ""   # no existing PR
+        return pr_create_output
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor._run_cmd",
+        new_callable=AsyncMock,
+        side_effect=_cmd_side_effect,
+    ), patch(
+        "aquarco_supervisor.pipeline.executor._run_git",
+        new_callable=AsyncMock,
+        return_value="",
+    ), patch(
+        "aquarco_supervisor.pipeline.executor._get_ahead_count",
+        new_callable=AsyncMock,
+        return_value=2,
+    ):
+        await executor._create_pipeline_pr(
+            "task-1", "aquarco/task-1/new-pr-task", "/repos/test", {},
+        )
+
+    # PR was created and stored
+    mock_tq.store_pr_info.assert_awaited_once_with(
+        "task-1", 7, "aquarco/task-1/new-pr-task",
+    )
