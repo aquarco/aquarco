@@ -21,13 +21,14 @@ from ..config_overlay import (
 from ..database import Database
 from ..exceptions import NoAvailableAgentError, PipelineError, RateLimitError, StageError
 from ..logging import get_logger
-from ..models import Complexity, PipelineConfig, TaskPhase
+from ..models import Complexity, LoopConfig, PipelineConfig, TaskPhase
 from ..task_queue import TaskQueue
 from ..utils import run_cmd as _run_cmd
 from ..utils import run_git as _run_git
 from ..utils import url_to_slug
 from .agent_registry import AgentRegistry
 from .context import build_accumulated_context
+from .visualize import format_pipeline_stages
 
 log = get_logger("pipeline")
 
@@ -37,6 +38,9 @@ _SAFE_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]*$")
 
 # Maximum number of iteration re-runs per stage to prevent infinite loops
 _MAX_ITERATIONS = 5
+
+# Absolute ceiling for loop repeats (overrides per-stage max_repeats if higher)
+_MAX_LOOP_REPEATS = 10
 
 
 class PipelineExecutor:
@@ -261,7 +265,7 @@ class PipelineExecutor:
             log.warning("task_worktree_final_commit_failed", task_id=task_id)
 
         await self._tq.update_task_phase(task_id, TaskPhase.COMPLETED)
-        await self._create_pipeline_pr(task_id, branch_name, work_dir, {})
+        await self._create_pipeline_pr(task_id, branch_name, work_dir, {}, stage_defs=stages)
         await self._tq.complete_task(task_id)
         await self._tq.delete_checkpoint(task_id)
         log.info("pipeline_completed", task_id=task_id, pipeline=pipeline_name)
@@ -366,28 +370,39 @@ class PipelineExecutor:
         start_stage: int = 0,
         scoped_view: ScopedAgentView | None = None,
     ) -> bool:
-        """Execute planned stages with validation-driven iteration loops.
+        """Execute planned stages with validation-driven iteration loops
+        and conditional loop repetitions.
 
         Returns True if the pipeline failed and should not continue.
         """
         previous_output: dict[str, Any] = {}
+        # Track all stage outputs by stage_num for AI condition evaluation
+        all_stage_outputs: dict[int, dict[str, Any]] = {}
+        # Track which stages are inside an active loop to avoid double-execution
+        loop_skip_set: set[int] = set()
 
-        for stage_num, plan in enumerate(planned_stages):
-            if stage_num < start_stage:
+        stage_num = start_stage
+        while stage_num < len(planned_stages):
+            plan = planned_stages[stage_num]
+
+            # Skip stages that were already executed as part of a loop body
+            if stage_num in loop_skip_set:
+                stage_num += 1
                 continue
 
             category = plan["category"]
             agents = plan.get("agents", [])
             parallel = plan.get("parallel", False)
 
-            # Find matching stage def for conditions/required
+            # Find matching stage def for conditions/required/loop
             stage_def = (
                 stage_defs[stage_num] if stage_num < len(stage_defs) else {}
             )
             required = stage_def.get("required", True)
             conditions = stage_def.get("conditions", [])
+            loop_cfg = self._resolve_loop_config(stage_def)
 
-            # Check conditions
+            # Check entry conditions
             if conditions and not check_conditions(conditions, previous_output):
                 log.info("stage_skipped_conditions", task_id=task_id, stage=stage_num)
                 for agent_name in agents:
@@ -395,9 +410,35 @@ class PipelineExecutor:
                     await self._tq.record_stage_skipped(
                         task_id, stage_num, category, stage_key=sk,
                     )
+                stage_num += 1
                 continue
 
-            # Ensure we're on the right branch
+            # ── Conditional loop handling ──
+            if loop_cfg is not None:
+                loop_failed = await self._execute_loop(
+                    task_id, stage_num, planned_stages, stage_defs,
+                    clone_dir, branch_name, loop_cfg,
+                    previous_output, all_stage_outputs,
+                    scoped_view=scoped_view,
+                )
+                if loop_failed:
+                    return True
+
+                # Mark loop body stages as handled so the outer loop skips them
+                body_indices = resolve_loop_stages(loop_cfg, stage_num, stage_defs)
+                for idx in body_indices:
+                    if idx != stage_num:
+                        loop_skip_set.add(idx)
+
+                # Update previous_output from the last loop iteration
+                for idx in body_indices:
+                    if idx in all_stage_outputs:
+                        previous_output = all_stage_outputs[idx]
+
+                stage_num += 1
+                continue
+
+            # ── Normal (non-loop) stage execution ──
             await _git_checkout(clone_dir, branch_name)
 
             try:
@@ -424,6 +465,7 @@ class PipelineExecutor:
                         stage_output.update(out)
 
                 previous_output = stage_output
+                all_stage_outputs[stage_num] = stage_output
 
                 # Process validation items from agent output
                 for agent_name in agents:
@@ -473,18 +515,16 @@ class PipelineExecutor:
                         await self._process_validation_items(task_id, sk, out)
 
                     previous_output = stage_output
+                    all_stage_outputs[stage_num] = stage_output
 
                 # Checkpoint and auto-commit
                 await self._tq.checkpoint_pipeline(task_id, stage_num)
                 await _auto_commit(clone_dir, task_id, stage_num, category)
 
             except RateLimitError as e:
-                # Rate limited — checkpoint the last *completed* stage (not stage_num - 1,
-                # which might not have completed). Use last_completed_stage to be safe.
                 last_completed = stage_num - 1 if stage_num > 0 else 0
                 await self._tq.checkpoint_pipeline(task_id, last_completed)
                 await self._tq.rate_limit_task(task_id, str(e))
-                # Mark the latest run of each agent's stage as rate_limited.
                 for agent_name in agents:
                     sk = f"{stage_num}:{category}:{agent_name}"
                     await self._db.execute(
@@ -518,6 +558,177 @@ class PipelineExecutor:
                         await self._tq.record_stage_skipped(
                             task_id, stage_num, category, stage_key=sk,
                         )
+
+            stage_num += 1
+
+        return False
+
+    # -----------------------------------------------------------------------
+    # Conditional loop execution
+    # -----------------------------------------------------------------------
+
+    def _resolve_loop_config(
+        self, stage_def: dict[str, Any],
+    ) -> LoopConfig | None:
+        """Extract LoopConfig from a stage definition dict."""
+        loop_data = stage_def.get("loop")
+        if loop_data is None:
+            return None
+        if isinstance(loop_data, LoopConfig):
+            return loop_data
+        if isinstance(loop_data, dict):
+            return LoopConfig(**loop_data)
+        return None
+
+    async def _execute_loop(
+        self,
+        task_id: str,
+        trigger_stage_num: int,
+        planned_stages: list[dict[str, Any]],
+        stage_defs: list[dict[str, Any]],
+        clone_dir: str,
+        branch_name: str,
+        loop_cfg: LoopConfig,
+        previous_output: dict[str, Any],
+        all_stage_outputs: dict[int, dict[str, Any]],
+        *,
+        scoped_view: ScopedAgentView | None = None,
+    ) -> bool:
+        """Execute a conditional loop.
+
+        Repeats a set of stages until the exit condition is met or
+        max_repeats is exhausted.
+
+        Returns True if the pipeline failed and should not continue.
+        """
+        body_indices = resolve_loop_stages(loop_cfg, trigger_stage_num, stage_defs)
+        max_repeats = min(loop_cfg.max_repeats, _MAX_LOOP_REPEATS)
+
+        log.info(
+            "loop_start",
+            task_id=task_id,
+            trigger_stage=trigger_stage_num,
+            body_stages=body_indices,
+            max_repeats=max_repeats,
+            eval_mode=loop_cfg.eval_mode,
+            condition=loop_cfg.condition,
+        )
+
+        for loop_iter in range(1, max_repeats + 1):
+            log.info(
+                "loop_iteration",
+                task_id=task_id,
+                trigger_stage=trigger_stage_num,
+                iteration=loop_iter,
+                max_repeats=max_repeats,
+            )
+
+            # Execute each stage in the loop body
+            for body_stage_num in body_indices:
+                plan = planned_stages[body_stage_num]
+                category = plan["category"]
+                agents = plan.get("agents", [])
+                stage_def = (
+                    stage_defs[body_stage_num]
+                    if body_stage_num < len(stage_defs)
+                    else {}
+                )
+                required = stage_def.get("required", True)
+
+                await _git_checkout(clone_dir, branch_name)
+
+                try:
+                    stage_output = {}
+                    for agent_name in agents:
+                        task_context = (
+                            await self._tq.get_task_context(task_id) or {}
+                        )
+                        accumulated = build_accumulated_context(
+                            task_context, body_stage_num,
+                        )
+                        # Add loop metadata to context
+                        accumulated["loop_iteration"] = loop_iter
+                        accumulated["loop_max_repeats"] = max_repeats
+                        accumulated["loop_condition"] = loop_cfg.condition
+
+                        out = await self._execute_planned_stage(
+                            task_id,
+                            body_stage_num,
+                            category,
+                            agent_name,
+                            accumulated,
+                            iteration=loop_iter,
+                            scoped_view=scoped_view,
+                            work_dir=clone_dir,
+                        )
+                        stage_output.update(out)
+
+                    previous_output = stage_output
+                    all_stage_outputs[body_stage_num] = stage_output
+
+                    # Process validation items
+                    for agent_name in agents:
+                        sk = f"{body_stage_num}:{category}:{agent_name}"
+                        await self._process_validation_items(
+                            task_id, sk, stage_output,
+                        )
+
+                    # Checkpoint and auto-commit per stage in loop body
+                    await self._tq.checkpoint_pipeline(task_id, body_stage_num)
+                    await _auto_commit(
+                        clone_dir, task_id, body_stage_num, category,
+                    )
+
+                except RateLimitError as e:
+                    last_completed = body_stage_num - 1 if body_stage_num > 0 else 0
+                    await self._tq.checkpoint_pipeline(task_id, last_completed)
+                    await self._tq.rate_limit_task(task_id, str(e))
+                    return True
+
+                except (StageError, NoAvailableAgentError) as e:
+                    if required:
+                        await self._tq.update_task_phase(
+                            task_id, TaskPhase.FAILED,
+                        )
+                        await self._tq.fail_task(task_id, str(e))
+                        return True
+                    else:
+                        log.warning(
+                            "loop_optional_stage_failed",
+                            task_id=task_id,
+                            stage=body_stage_num,
+                            iteration=loop_iter,
+                            error=str(e),
+                        )
+
+            # After executing all body stages, evaluate the exit condition
+            condition_met = await evaluate_loop_condition(
+                loop_cfg, previous_output, all_stage_outputs, clone_dir,
+            )
+
+            log.info(
+                "loop_condition_evaluated",
+                task_id=task_id,
+                trigger_stage=trigger_stage_num,
+                iteration=loop_iter,
+                condition_met=condition_met,
+            )
+
+            if condition_met:
+                log.info(
+                    "loop_exit_condition_met",
+                    task_id=task_id,
+                    trigger_stage=trigger_stage_num,
+                    iterations_used=loop_iter,
+                )
+                break
+        else:
+            log.warning(
+                "loop_max_repeats_reached",
+                task_id=task_id,
+                trigger_stage=trigger_stage_num,
+                max_repeats=max_repeats,
+            )
 
         return False
 
@@ -1028,6 +1239,8 @@ class PipelineExecutor:
         branch_name: str,
         clone_dir: str,
         stage_output: dict[str, Any],
+        *,
+        stage_defs: list[dict[str, Any]] | None = None,
     ) -> None:
         """Create or update a PR after pipeline completion."""
         task = await self._tq.get_task(task_id)
@@ -1067,12 +1280,22 @@ class PipelineExecutor:
             await _run_git(clone_dir, "push", "origin", branch_name, "--force-with-lease")
             repo_slug = await self._get_repo_slug(task_id)
             if repo_slug:
+                # Build PR body with pipeline stages visualization
+                pr_body = f"Automated PR for task {task_id}\n"
+                if stage_defs:
+                    stages_diagram = format_pipeline_stages(
+                        stage_defs, markdown=True,
+                    )
+                    pr_body += (
+                        f"\n## Pipeline Stages\n\n{stages_diagram}\n"
+                    )
+
                 pr_output = await _run_cmd(
                     "gh", "pr", "create",
                     "--repo", repo_slug,
                     "--head", branch_name,
                     "--title", f"feat: {task.title}",
-                    "--body", f"Automated PR for task {task_id}",
+                    "--body", pr_body,
                 )
                 # Parse PR number from URL (e.g. https://github.com/.../pull/42)
                 if pr_output:
@@ -1188,6 +1411,128 @@ def _compare_complexity(actual: str, operator: str, expected: str) -> bool:
     elif operator == "<":
         return a < b
     return False
+
+
+async def evaluate_loop_condition(
+    loop: LoopConfig,
+    stage_outputs: dict[str, Any],
+    all_stage_outputs: dict[int, dict[str, Any]],
+    work_dir: str,
+) -> bool:
+    """Evaluate a loop exit condition.
+
+    Returns True if the loop should STOP (condition is met).
+    Returns False if the loop should CONTINUE (condition is not met).
+    """
+    if loop.eval_mode == "simple":
+        # Use existing check_conditions with the exit condition
+        return check_conditions([loop.condition], stage_outputs)
+
+    if loop.eval_mode == "ai":
+        return await _evaluate_ai_condition(
+            loop.condition, stage_outputs, all_stage_outputs, work_dir,
+        )
+
+    # Unknown eval_mode — treat as met (stop looping)
+    return True
+
+
+async def _evaluate_ai_condition(
+    condition: str,
+    stage_outputs: dict[str, Any],
+    all_stage_outputs: dict[int, dict[str, Any]],
+    work_dir: str,
+) -> bool:
+    """Evaluate a natural-language condition using Claude CLI.
+
+    The condition is a predicate like:
+      "All risks mentioned in ANALYSIS.risks are avoided or mitigated"
+
+    Claude returns a JSON object with {"result": true/false, "reasoning": "..."}.
+    """
+    import tempfile as _tmpmod
+
+    # Build a compact summary of stage outputs for the prompt
+    outputs_summary = json.dumps(
+        {f"STAGE_{k}": v for k, v in all_stage_outputs.items()},
+        indent=2,
+        default=str,
+    )
+    # Truncate to avoid exceeding context limits
+    if len(outputs_summary) > 30_000:
+        outputs_summary = outputs_summary[:30_000] + "\n... (truncated)"
+
+    prompt_text = (
+        "You are a condition evaluator for a CI/CD pipeline.\n\n"
+        "Given the following stage outputs from the pipeline:\n"
+        f"```json\n{outputs_summary}\n```\n\n"
+        f"Evaluate whether this condition is TRUE or FALSE:\n"
+        f'"{condition}"\n\n'
+        "Respond ONLY with a JSON object: "
+        '{"result": true, "reasoning": "..."} or {"result": false, "reasoning": "..."}'
+    )
+
+    # Write a temporary prompt file for Claude CLI
+    prompt_path = Path(_tmpmod.mktemp(suffix=".md", prefix="loop-cond-"))
+    prompt_path.write_text(prompt_text)
+
+    try:
+        claude_output = await execute_claude(
+            prompt_file=prompt_path,
+            context={"condition": condition},
+            work_dir=work_dir,
+            timeout_seconds=120,
+            allowed_tools=[],
+            denied_tools=[],
+            task_id="loop-condition-eval",
+            stage_num=-1,
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "result": {"type": "boolean"},
+                    "reasoning": {"type": "string"},
+                },
+                "required": ["result", "reasoning"],
+            },
+        )
+        result = claude_output.structured
+        if isinstance(result, dict) and "result" in result:
+            return bool(result["result"])
+
+        # Try to parse from raw output
+        raw = claude_output.raw or ""
+        if '"result": true' in raw.lower() or '"result":true' in raw.lower():
+            return True
+        if '"result": false' in raw.lower() or '"result":false' in raw.lower():
+            return False
+
+    except Exception as e:
+        log.warning("ai_condition_eval_failed", error=str(e), condition=condition)
+    finally:
+        prompt_path.unlink(missing_ok=True)
+
+    # On failure, assume condition is NOT met (continue looping until max)
+    return False
+
+
+def resolve_loop_stages(
+    loop: LoopConfig,
+    current_stage_idx: int,
+    stage_defs: list[dict[str, Any]],
+) -> list[int]:
+    """Resolve which stage indices are included in a loop.
+
+    If loop.loop_stages is empty, only the current stage is looped.
+    Otherwise, find stage indices whose category matches the loop_stages list.
+    """
+    if not loop.loop_stages:
+        return [current_stage_idx]
+
+    indices = []
+    for i, sdef in enumerate(stage_defs):
+        if sdef["category"] in loop.loop_stages:
+            indices.append(i)
+    return indices if indices else [current_stage_idx]
 
 
 # --- Git helpers ---

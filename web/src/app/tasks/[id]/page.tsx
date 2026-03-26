@@ -25,7 +25,12 @@ import Accordion from '@mui/material/Accordion'
 import AccordionSummary from '@mui/material/AccordionSummary'
 import AccordionDetails from '@mui/material/AccordionDetails'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import { GET_TASK, RETRY_TASK, RERUN_TASK, CLOSE_TASK, CANCEL_TASK, UNBLOCK_TASK } from '@/lib/graphql/queries'
+import LoopIcon from '@mui/icons-material/Loop'
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
+import RepeatIcon from '@mui/icons-material/Repeat'
+import Tooltip from '@mui/material/Tooltip'
+import Divider from '@mui/material/Divider'
+import { GET_TASK, GET_PIPELINE_DEFINITIONS, RETRY_TASK, RERUN_TASK, CLOSE_TASK, CANCEL_TASK, UNBLOCK_TASK } from '@/lib/graphql/queries'
 import { StatusChip } from '@/components/ui/StatusChip'
 import { monoStyle } from '@/lib/theme'
 import { formatDate } from '@/lib/format'
@@ -57,6 +62,28 @@ interface ContextEntry {
   valueFileRef: string | null
   createdAt: string
   stageNumber: number | null
+}
+
+interface PipelineLoopConfig {
+  condition: string
+  maxRepeats: number
+  evalMode: string
+  loopStages: string[]
+}
+
+interface PipelineStageDefinition {
+  category: string
+  required: boolean
+  conditions: string[]
+  loop: PipelineLoopConfig | null
+}
+
+interface PipelineDefinition {
+  name: string
+  version: string
+  triggerLabels: string[]
+  triggerEvents: string[]
+  stages: PipelineStageDefinition[]
 }
 
 interface Task {
@@ -109,6 +136,8 @@ export default function TaskDetailPage() {
     skip: !id,
     pollInterval: 5000,
   })
+
+  const { data: pipelineData } = useQuery(GET_PIPELINE_DEFINITIONS)
 
   const [retryTask, { loading: retrying }] = useMutation(RETRY_TASK, {
     variables: { id },
@@ -210,6 +239,26 @@ export default function TaskDetailPage() {
     (s) => s.status === 'EXECUTING' || (s.status !== 'COMPLETED' && s.status !== 'SKIPPED')
   )
 
+  // Group stages by stageNumber to detect loop iterations
+  // Stages with the same stageNumber + category but different retryCount are loop iterations
+  const stagesByNumber = new Map<number, Stage[]>()
+  for (const stage of stages) {
+    const key = stage.stageNumber
+    if (!stagesByNumber.has(key)) {
+      stagesByNumber.set(key, [])
+    }
+    stagesByNumber.get(key)!.push(stage)
+  }
+
+  // Deduplicated stages for the stepper (one per stageNumber)
+  const uniqueStages = Array.from(stagesByNumber.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([, group]) => {
+      // Pick the latest iteration as the "representative" stage
+      const latest = group[group.length - 1]
+      return { ...latest, iterationCount: group.length }
+    })
+
   return (
     <Box>
       {/* Header */}
@@ -293,7 +342,7 @@ export default function TaskDetailPage() {
               Pipeline Stages
             </Typography>
             <Stepper activeStep={activeStep} orientation="horizontal" alternativeLabel>
-              {stages.map((stage) => (
+              {uniqueStages.map((stage) => (
                 <Step
                   key={stage.id}
                   completed={stage.status === 'COMPLETED'}
@@ -301,11 +350,25 @@ export default function TaskDetailPage() {
                   <StepLabel
                     error={stage.status === 'FAILED'}
                     optional={
-                      stage.agent ? (
-                        <Typography variant="caption" color="text.secondary" display="block" textAlign="center">
-                          {stage.agent}
-                        </Typography>
-                      ) : undefined
+                      <Box textAlign="center">
+                        {stage.agent && (
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            {stage.agent}
+                          </Typography>
+                        )}
+                        {stage.iterationCount > 1 && (
+                          <Tooltip title={`${stage.iterationCount} iterations (loop)`}>
+                            <Chip
+                              icon={<LoopIcon sx={{ fontSize: 14 }} />}
+                              label={`x${stage.iterationCount}`}
+                              size="small"
+                              variant="outlined"
+                              color="info"
+                              sx={{ mt: 0.5, height: 20, '& .MuiChip-label': { px: 0.5, fontSize: '0.7rem' } }}
+                            />
+                          </Tooltip>
+                        )}
+                      </Box>
                     }
                   >
                     {stage.category}
@@ -313,6 +376,115 @@ export default function TaskDetailPage() {
                 </Step>
               ))}
             </Stepper>
+
+            {/* Pipeline definition with branches/loops */}
+            {(() => {
+              const pipelineDef: PipelineDefinition | undefined =
+                pipelineData?.pipelineDefinitions?.find(
+                  (p: PipelineDefinition) => p.name === task.pipeline
+                )
+              if (!pipelineDef) return null
+
+              const hasLoops = pipelineDef.stages.some((s) => s.loop)
+              const hasConditions = pipelineDef.stages.some((s) => s.conditions?.length > 0)
+              if (!hasLoops && !hasConditions) return null
+
+              return (
+                <>
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                    Pipeline Definition (v{pipelineDef.version})
+                  </Typography>
+                  <Stack spacing={0.5}>
+                    {pipelineDef.stages.map((stageDef, idx) => {
+                      const isLoopTarget = pipelineDef.stages.some(
+                        (s) => s.loop?.loopStages?.includes(stageDef.category)
+                      )
+                      return (
+                        <Box key={idx}>
+                          {/* Connector arrow */}
+                          {idx > 0 && (
+                            <Box sx={{ display: 'flex', alignItems: 'center', ml: 2, color: 'text.disabled' }}>
+                              {stageDef.conditions?.length ? (
+                                <Typography variant="caption" sx={{ fontStyle: 'italic', mr: 1 }}>
+                                  if: {stageDef.conditions.join(' AND ')}
+                                </Typography>
+                              ) : null}
+                              <ArrowForwardIcon sx={{ fontSize: 14, transform: 'rotate(90deg)' }} />
+                            </Box>
+                          )}
+
+                          {/* Stage box */}
+                          <Box
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 1,
+                              p: 0.75,
+                              pl: 1.5,
+                              borderRadius: 1,
+                              backgroundColor: isLoopTarget ? 'action.hover' : 'transparent',
+                              border: isLoopTarget ? '1px dashed' : 'none',
+                              borderColor: 'info.main',
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ minWidth: 24, color: 'text.secondary' }}>
+                              {idx}
+                            </Typography>
+                            <Chip
+                              label={stageDef.category}
+                              size="small"
+                              variant={stageDef.required ? 'filled' : 'outlined'}
+                              color="default"
+                              sx={{ fontWeight: 600 }}
+                            />
+                            {!stageDef.required && (
+                              <Typography variant="caption" color="text.secondary">
+                                optional
+                              </Typography>
+                            )}
+
+                            {/* Loop indicator */}
+                            {stageDef.loop && (
+                              <Tooltip
+                                title={
+                                  <Box>
+                                    <Typography variant="caption" display="block">
+                                      <strong>Loop:</strong>{' '}
+                                      {stageDef.loop.loopStages?.length
+                                        ? stageDef.loop.loopStages.join(' → ')
+                                        : stageDef.category}
+                                    </Typography>
+                                    <Typography variant="caption" display="block">
+                                      <strong>Exit when:</strong> {stageDef.loop.condition}
+                                    </Typography>
+                                    <Typography variant="caption" display="block">
+                                      <strong>Max repeats:</strong> {stageDef.loop.maxRepeats}x ({stageDef.loop.evalMode})
+                                    </Typography>
+                                  </Box>
+                                }
+                              >
+                                <Chip
+                                  icon={<RepeatIcon sx={{ fontSize: 14 }} />}
+                                  label={`loop ${stageDef.loop.loopStages?.length ? stageDef.loop.loopStages.join(' → ') : stageDef.category} (max ${stageDef.loop.maxRepeats}x)`}
+                                  size="small"
+                                  variant="outlined"
+                                  color="info"
+                                  sx={{
+                                    height: 22,
+                                    '& .MuiChip-label': { px: 0.75, fontSize: '0.7rem' },
+                                  }}
+                                />
+                              </Tooltip>
+                            )}
+                          </Box>
+                        </Box>
+                      )
+                    })}
+                  </Stack>
+                </>
+              )
+            })()}
           </CardContent>
         </Card>
       )}
@@ -341,6 +513,18 @@ export default function TaskDetailPage() {
                       <Typography fontWeight={600}>
                         Stage {stage.stageNumber}: {stage.category}
                       </Typography>
+                      {stage.retryCount > 0 && (
+                        <Tooltip title={`Iteration ${stage.retryCount + 1} (loop)`}>
+                          <Chip
+                            icon={<LoopIcon sx={{ fontSize: 14 }} />}
+                            label={`iter ${stage.retryCount + 1}`}
+                            size="small"
+                            variant="outlined"
+                            color="info"
+                            sx={{ height: 20, '& .MuiChip-label': { px: 0.5, fontSize: '0.7rem' } }}
+                          />
+                        </Tooltip>
+                      )}
                       {stage.agent && (
                         <Typography variant="caption" color="text.secondary">
                           {stage.agent}

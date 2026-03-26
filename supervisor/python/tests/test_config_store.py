@@ -1066,7 +1066,7 @@ class TestRealPipelineDefinitions:
         pipelines_file = Path(__file__).parent.parent.parent.parent / "config" / "pipelines.yaml"
         schema = _pipeline_schema()
         pipelines = load_pipeline_definitions_from_file(pipelines_file, schema=schema)
-        assert len(pipelines) == 3  # 3 pipelines in config
+        assert len(pipelines) == 4  # feature, bugfix, pr-review, quality pipelines
 
     def test_pipelines_have_versions(self) -> None:
         pipelines_file = Path(__file__).parent.parent.parent.parent / "config" / "pipelines.yaml"

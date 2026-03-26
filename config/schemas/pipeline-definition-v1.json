@@ -92,6 +92,45 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Conditions that must be met for this stage to run"
+        },
+        "loop": {
+          "$ref": "#/$defs/LoopConfig",
+          "description": "Optional loop configuration for conditional stage repetition"
+        }
+      }
+    },
+    "LoopConfig": {
+      "type": "object",
+      "required": ["condition"],
+      "additionalProperties": false,
+      "description": "Conditional loop that repeats a stage or group of stages until exit condition is met or max_repeats reached",
+      "properties": {
+        "condition": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exit condition — loop STOPS when this is true. In 'simple' mode: 'field == value'. In 'ai' mode: natural-language predicate evaluated by Claude."
+        },
+        "max_repeats": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 3,
+          "description": "Maximum number of loop iterations (safety cap)"
+        },
+        "eval_mode": {
+          "type": "string",
+          "enum": ["simple", "ai"],
+          "default": "simple",
+          "description": "How to evaluate the condition: 'simple' (field comparison) or 'ai' (Claude CLI natural language)"
+        },
+        "loopStages": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["review", "implementation", "test", "design", "docs", "analyze"]
+          },
+          "uniqueItems": true,
+          "description": "Categories of stages to repeat inside the loop. If empty, only the current stage is repeated."
         }
       }
     }

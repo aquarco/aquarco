@@ -112,6 +112,30 @@ export const GET_TASK = gql`
   }
 `
 
+// ── Pipeline Definitions ──────────────────────────────────────────────────────
+
+export const GET_PIPELINE_DEFINITIONS = gql`
+  query GetPipelineDefinitions {
+    pipelineDefinitions {
+      name
+      version
+      triggerLabels
+      triggerEvents
+      stages {
+        category
+        required
+        conditions
+        loop {
+          condition
+          maxRepeats
+          evalMode
+          loopStages
+        }
+      }
+    }
+  }
+`
+
 // ── Repositories ──────────────────────────────────────────────────────────────
 
 export const GET_REPOSITORIES = gql`

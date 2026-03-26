@@ -3,7 +3,7 @@ kind: PipelineDefinition
 
 pipelines:
   - name: feature-pipeline
-    version: "1.0.0"
+    version: "2.0.0"
     trigger:
       labels: [feature, enhancement]
     stages:
@@ -12,7 +12,15 @@ pipelines:
       - { category: implementation, required: true }
       - { category: test, required: true }
       - { category: docs, required: false }
-      - { category: review, required: true }
+      # Review stage with conditional loop: repeats review -> fix cycle until
+      # no new findings or max_repeats reached.
+      - category: review
+        required: true
+        loop:
+          condition: "recommendation == approve"
+          max_repeats: 3
+          eval_mode: simple
+          loopStages: [implementation, review]
 
   - name: bugfix-pipeline
     version: "1.0.0"
@@ -25,10 +33,37 @@ pipelines:
       - { category: review, required: true }
 
   - name: pr-review-pipeline
-    version: "1.0.0"
+    version: "2.0.0"
     trigger:
       events: [pr_opened, pr_updated]
     stages:
       - { category: review, required: true }
       - { category: implementation, required: true, conditions: ["recommendation == request_changes"] }
       - { category: test, required: true, conditions: ["recommendation == request_changes"] }
+      # Loop: re-review after fixes until approved or max repeats
+      - category: review
+        required: false
+        conditions: ["recommendation == request_changes"]
+        loop:
+          condition: "recommendation == approve"
+          max_repeats: 3
+          eval_mode: simple
+          loopStages: [review, implementation]
+
+  # Example pipeline using AI-evaluated conditions for iterative refinement
+  - name: quality-pipeline
+    version: "1.0.0"
+    trigger:
+      labels: [quality]
+    stages:
+      - { category: analyze, required: true }
+      - { category: design, required: true }
+      - { category: implementation, required: true }
+      - { category: test, required: true }
+      - category: review
+        required: true
+        loop:
+          condition: "All risks mentioned in STAGE_0.risks are avoided or mitigated and all acceptance criteria are fulfilled"
+          max_repeats: 5
+          eval_mode: ai
+          loopStages: [implementation, test, review]
