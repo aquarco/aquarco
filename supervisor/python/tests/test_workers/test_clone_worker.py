@@ -54,8 +54,11 @@ def test_get_auth_env_with_token() -> None:
     db = AsyncMock(spec=Database)
     worker = CloneWorker(db, github_token="ghp_test123")
     env = worker._get_auth_env("https://github.com/owner/repo.git")
-    assert "GIT_CONFIG_VALUE_0" in env
-    assert "ghp_test123" in env["GIT_CONFIG_VALUE_0"]
+    # New GIT_ASKPASS approach: token is set in GITHUB_TOKEN env var,
+    # GIT_ASKPASS points to a helper script that reads it
+    assert "GITHUB_TOKEN" in env
+    assert env["GITHUB_TOKEN"] == "ghp_test123"
+    assert "GIT_ASKPASS" in env
 
 
 def test_get_auth_env_no_token() -> None:
@@ -84,10 +87,11 @@ def test_get_auth_env_contains_all_keys() -> None:
     db = AsyncMock(spec=Database)
     worker = CloneWorker(db, github_token="my-token")
     env = worker._get_auth_env("https://github.com/org/repo.git")
-    assert env["GIT_ASKPASS"] == "/bin/echo"
+    # New GIT_ASKPASS approach: uses a helper script, not /bin/echo or GIT_CONFIG_*
+    assert "GIT_ASKPASS" in env
+    assert env["GIT_ASKPASS"] != "/bin/echo"  # Must be a real helper script path
     assert env["GIT_TERMINAL_PROMPT"] == "0"
-    assert "GIT_CONFIG_COUNT" in env
-    assert "GIT_CONFIG_KEY_0" in env
+    assert "GITHUB_TOKEN" in env
 
 
 def test_get_ssh_command_no_key_returns_none(tmp_path: Any) -> None:
@@ -653,3 +657,97 @@ async def test_do_clone_no_env_when_no_extras_and_no_ssh(tmp_path: Any) -> None:
         )
 
     assert captured_kwargs.get("env") is None
+
+
+# ── _get_auth_env GIT_ASKPASS behavior (new in 590a8137) ──────────────────────
+
+
+def test_get_auth_env_askpass_points_to_script_file(tmp_path: Any) -> None:
+    """GIT_ASKPASS must point to an executable shell script, not /bin/echo."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db, github_token="ghp_abc123")
+
+    askpass_script = tmp_path / "git-askpass-helper.sh"
+
+    with patch("tempfile.gettempdir", return_value=str(tmp_path)):
+        env = worker._get_auth_env("https://github.com/owner/repo.git")
+
+    assert env["GIT_ASKPASS"] == str(askpass_script)
+    assert askpass_script.exists(), "Helper script must be created on disk"
+
+
+def test_get_auth_env_askpass_script_is_executable(tmp_path: Any) -> None:
+    """The helper script must have executable bit set (S_IRWXU)."""
+    import stat
+
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db, github_token="ghp_exec_test")
+
+    with patch("tempfile.gettempdir", return_value=str(tmp_path)):
+        worker._get_auth_env("https://github.com/owner/repo.git")
+
+    script = tmp_path / "git-askpass-helper.sh"
+    mode = script.stat().st_mode
+    assert bool(mode & stat.S_IXUSR), "Script must be executable by owner"
+
+
+def test_get_auth_env_askpass_script_content(tmp_path: Any) -> None:
+    """The helper script must respond to 'Password:' prompts with the token."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db, github_token="gho_oauth_token")
+
+    with patch("tempfile.gettempdir", return_value=str(tmp_path)):
+        worker._get_auth_env("https://github.com/owner/repo.git")
+
+    content = (tmp_path / "git-askpass-helper.sh").read_text()
+    # Script should handle password prompts
+    assert "*assword*" in content or "Password" in content
+    # Script should reference GITHUB_TOKEN env var
+    assert "GITHUB_TOKEN" in content
+
+
+def test_get_auth_env_askpass_not_recreated_if_exists(tmp_path: Any) -> None:
+    """If the helper script already exists, it is NOT overwritten (idempotent)."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db, github_token="ghp_idempotent")
+
+    # Pre-create the script with sentinel content
+    script = tmp_path / "git-askpass-helper.sh"
+    script.write_text("#!/bin/sh\necho sentinel\n")
+    original_mtime = script.stat().st_mtime
+
+    with patch("tempfile.gettempdir", return_value=str(tmp_path)):
+        worker._get_auth_env("https://github.com/owner/repo.git")
+
+    # Script should not be modified when it already exists
+    assert script.read_text() == "#!/bin/sh\necho sentinel\n"
+    assert script.stat().st_mtime == original_mtime
+
+
+def test_get_auth_env_oauth_token_sets_github_token(tmp_path: Any) -> None:
+    """OAuth tokens (gho_ prefix) are set in GITHUB_TOKEN just like PATs (ghp_)."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db, github_token="gho_oauth_token_xyz")
+
+    with patch("tempfile.gettempdir", return_value=str(tmp_path)):
+        env = worker._get_auth_env("https://github.com/owner/repo.git")
+
+    assert env["GITHUB_TOKEN"] == "gho_oauth_token_xyz"
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def test_get_auth_env_github_token_not_embedded_in_url(tmp_path: Any) -> None:
+    """Token must NOT appear in a URL credential (e.g. no Authorization header in GIT_CONFIG)."""
+    db = AsyncMock(spec=Database)
+    worker = CloneWorker(db, github_token="super_secret_token")
+
+    with patch("tempfile.gettempdir", return_value=str(tmp_path)):
+        env = worker._get_auth_env("https://github.com/owner/repo.git")
+
+    # The token value should only appear in GITHUB_TOKEN, not in URL-credential fields
+    for key, value in env.items():
+        if key == "GITHUB_TOKEN":
+            continue
+        assert "super_secret_token" not in str(value), (
+            f"Token leaked into env var {key!r}: {value!r}"
+        )
