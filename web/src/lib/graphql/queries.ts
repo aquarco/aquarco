@@ -460,6 +460,30 @@ export const CREATE_AGENT_PR = gql`
   }
 `
 
+// ── Pipeline Definitions ─────────────────────────────────────────────────────
+
+export const GET_PIPELINE_DEFINITIONS = gql`
+  query GetPipelineDefinitions {
+    pipelineDefinitions {
+      name
+      version
+      categories
+      stages {
+        name
+        category
+        required
+        conditions {
+          type
+          expression
+          onYes
+          onNo
+          maxRepeats
+        }
+      }
+    }
+  }
+`
+
 // ── Task mutations ────────────────────────────────────────────────────────────
 
 export const CREATE_TASK = gql`

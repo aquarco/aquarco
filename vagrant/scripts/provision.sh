@@ -157,7 +157,6 @@ mkdir -p \
   "${LOG_DIR}" \
   "${LOG_DIR}/agents" \
   "/var/log/aquarco-export" \
-  "/var/run/aquarco" \
   "${AGENT_HOME}/repos" \
   "${AGENT_HOME}/config" \
   "${AGENT_HOME}/system" \
@@ -165,11 +164,13 @@ mkdir -p \
   "${AGENT_HOME}/.claude" \
   "/etc/aquarco"
 
+# /var/run/aquarco is NOT created here — it lives on tmpfs and is managed by
+# systemd RuntimeDirectory= in the supervisor service unit (created on every start).
+
 chown "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}"
 chown -R "${AGENT_USER}:${AGENT_USER}" \
   "${DATA_DIR}" \
   "${LOG_DIR}" \
-  "/var/run/aquarco" \
   "${AGENT_HOME}/repos" \
   "${AGENT_HOME}/config" \
   "${AGENT_HOME}/system" \

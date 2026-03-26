@@ -211,6 +211,58 @@ export const Query = {
     return getClaudeAuthStatus()
   },
 
+  async pipelineDefinitions(_: unknown, __: unknown, ctx: Context) {
+    const result = await ctx.pool.query<Record<string, unknown>>(
+      `SELECT name, version, stages, categories
+       FROM pipeline_definitions
+       WHERE is_active = true
+       ORDER BY name ASC`
+    )
+    return result.rows.map((row) => {
+      const rawStages = (row.stages as Array<Record<string, unknown>>) ?? []
+      return {
+        name: row.name,
+        version: row.version,
+        categories: row.categories ?? {},
+        stages: rawStages.map((s) => {
+          const conditions = (s.conditions as Array<Record<string, unknown>>) ?? []
+          return {
+            name: s.name ?? '',
+            category: s.category as string,
+            required: s.required ?? true,
+            conditions: conditions.map((c) => {
+              if (c.simple !== undefined) {
+                return {
+                  type: 'simple',
+                  expression: String(c.simple),
+                  onYes: c.yes ? String(c.yes) : null,
+                  onNo: c.no ? String(c.no) : null,
+                  maxRepeats: c.maxRepeats ? Number(c.maxRepeats) : null,
+                }
+              }
+              if (c.ai !== undefined) {
+                return {
+                  type: 'ai',
+                  expression: String(c.ai),
+                  onYes: c.yes ? String(c.yes) : null,
+                  onNo: c.no ? String(c.no) : null,
+                  maxRepeats: c.maxRepeats ? Number(c.maxRepeats) : null,
+                }
+              }
+              return {
+                type: 'unknown',
+                expression: JSON.stringify(c),
+                onYes: null,
+                onNo: null,
+                maxRepeats: null,
+              }
+            }),
+          }
+        }),
+      }
+    })
+  },
+
   async dashboardStats(_: unknown, __: unknown, ctx: Context) {
     const [totals, byPipeline, byRepo, agents, tokens] = await Promise.all([
       ctx.pool.query<Record<string, unknown>>(`

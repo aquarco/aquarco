@@ -95,20 +95,29 @@ class CloneWorker:
     def _get_auth_env(self, url: str) -> dict[str, str]:
         """Get extra environment variables for git authentication.
 
-        For HTTPS URLs with a token, returns git config env vars that inject
-        a Bearer Authorization header, plus GIT_ASKPASS and GIT_TERMINAL_PROMPT
-        to suppress interactive prompts.
+        For HTTPS URLs with a token, uses basic auth via GIT_ASKPASS so that
+        both PATs (ghp_) and OAuth tokens (gho_) are accepted by GitHub.
         SSH URLs use deploy-key auth via GIT_SSH_COMMAND and return an empty dict.
         """
         if not self._github_token or url.startswith("git@") or url.startswith("ssh://"):
             return {}
-        # Security note: Token is passed via subprocess env vars (GIT_CONFIG_*),
-        # scoped to the child git process only — not written to disk or global config.
+        # Use basic auth via GIT_ASKPASS (same helper created by _apply_github_env
+        # in main.py at startup). This works for both PATs (ghp_) and OAuth (gho_).
+        import stat
+        import tempfile
+        askpass_path = Path(tempfile.gettempdir()) / "git-askpass-helper.sh"
+        if not askpass_path.exists():
+            askpass_path.write_text(
+                '#!/bin/sh\n'
+                'case "$1" in\n'
+                '  *assword*) echo "$GITHUB_TOKEN" ;;\n'
+                '  *) echo "x-access-token" ;;\n'
+                'esac\n'
+            )
+            askpass_path.chmod(stat.S_IRWXU)
         return {
-            "GIT_CONFIG_COUNT": "1",
-            "GIT_CONFIG_KEY_0": "http.extraheader",
-            "GIT_CONFIG_VALUE_0": f"Authorization: Bearer {self._github_token}",
-            "GIT_ASKPASS": "/bin/echo",
+            "GITHUB_TOKEN": self._github_token,
+            "GIT_ASKPASS": str(askpass_path),
             "GIT_TERMINAL_PROMPT": "0",
         }
 

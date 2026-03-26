@@ -282,10 +282,35 @@ export type MutationUpdateTaskStatusArgs = {
   status: TaskStatus;
 };
 
+export type PipelineCondition = {
+  __typename?: 'PipelineCondition';
+  expression: Scalars['String']['output'];
+  maxRepeats?: Maybe<Scalars['Int']['output']>;
+  onNo?: Maybe<Scalars['String']['output']>;
+  onYes?: Maybe<Scalars['String']['output']>;
+  type: Scalars['String']['output'];
+};
+
 export type PipelineCount = {
   __typename?: 'PipelineCount';
   count: Scalars['Int']['output'];
   pipeline: Scalars['String']['output'];
+};
+
+export type PipelineDefinition = {
+  __typename?: 'PipelineDefinition';
+  categories?: Maybe<Scalars['JSON']['output']>;
+  name: Scalars['String']['output'];
+  stages: Array<PipelineStageDefinition>;
+  version: Scalars['String']['output'];
+};
+
+export type PipelineStageDefinition = {
+  __typename?: 'PipelineStageDefinition';
+  category: Scalars['String']['output'];
+  conditions: Array<PipelineCondition>;
+  name: Scalars['String']['output'];
+  required: Scalars['Boolean']['output'];
 };
 
 export type PipelineStatus = {
@@ -307,6 +332,7 @@ export type Query = {
   githubBranches: Array<Scalars['String']['output']>;
   githubRepositories: Array<GithubRepo>;
   globalAgents: Array<AgentDefinition>;
+  pipelineDefinitions: Array<PipelineDefinition>;
   pipelineStatus?: Maybe<PipelineStatus>;
   repoAgentGroups: Array<RepoAgentGroup>;
   repoAgentScan?: Maybe<RepoAgentScan>;
@@ -614,7 +640,10 @@ export type ResolversTypes = ResolversObject<{
   Int: ResolverTypeWrapper<Scalars['Int']['output']>;
   JSON: ResolverTypeWrapper<Scalars['JSON']['output']>;
   Mutation: ResolverTypeWrapper<{}>;
+  PipelineCondition: ResolverTypeWrapper<PipelineCondition>;
   PipelineCount: ResolverTypeWrapper<PipelineCount>;
+  PipelineDefinition: ResolverTypeWrapper<PipelineDefinition>;
+  PipelineStageDefinition: ResolverTypeWrapper<PipelineStageDefinition>;
   PipelineStatus: ResolverTypeWrapper<PipelineStatus>;
   Query: ResolverTypeWrapper<{}>;
   RegisterRepositoryInput: RegisterRepositoryInput;
@@ -658,7 +687,10 @@ export type ResolversParentTypes = ResolversObject<{
   Int: Scalars['Int']['output'];
   JSON: Scalars['JSON']['output'];
   Mutation: {};
+  PipelineCondition: PipelineCondition;
   PipelineCount: PipelineCount;
+  PipelineDefinition: PipelineDefinition;
+  PipelineStageDefinition: PipelineStageDefinition;
   PipelineStatus: PipelineStatus;
   Query: {};
   RegisterRepositoryInput: RegisterRepositoryInput;
@@ -831,9 +863,34 @@ export type MutationResolvers<ContextType = Context, ParentType extends Resolver
   updateTaskStatus?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationUpdateTaskStatusArgs, 'id' | 'status'>>;
 }>;
 
+export type PipelineConditionResolvers<ContextType = Context, ParentType extends ResolversParentTypes['PipelineCondition'] = ResolversParentTypes['PipelineCondition']> = ResolversObject<{
+  expression?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  maxRepeats?: Resolver<Maybe<ResolversTypes['Int']>, ParentType, ContextType>;
+  onNo?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  onYes?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  type?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
 export type PipelineCountResolvers<ContextType = Context, ParentType extends ResolversParentTypes['PipelineCount'] = ResolversParentTypes['PipelineCount']> = ResolversObject<{
   count?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   pipeline?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
+export type PipelineDefinitionResolvers<ContextType = Context, ParentType extends ResolversParentTypes['PipelineDefinition'] = ResolversParentTypes['PipelineDefinition']> = ResolversObject<{
+  categories?: Resolver<Maybe<ResolversTypes['JSON']>, ParentType, ContextType>;
+  name?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  stages?: Resolver<Array<ResolversTypes['PipelineStageDefinition']>, ParentType, ContextType>;
+  version?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
+export type PipelineStageDefinitionResolvers<ContextType = Context, ParentType extends ResolversParentTypes['PipelineStageDefinition'] = ResolversParentTypes['PipelineStageDefinition']> = ResolversObject<{
+  category?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  conditions?: Resolver<Array<ResolversTypes['PipelineCondition']>, ParentType, ContextType>;
+  name?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  required?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
 
@@ -855,6 +912,7 @@ export type QueryResolvers<ContextType = Context, ParentType extends ResolversPa
   githubBranches?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType, RequireFields<QueryGithubBranchesArgs, 'owner' | 'repo'>>;
   githubRepositories?: Resolver<Array<ResolversTypes['GithubRepo']>, ParentType, ContextType>;
   globalAgents?: Resolver<Array<ResolversTypes['AgentDefinition']>, ParentType, ContextType>;
+  pipelineDefinitions?: Resolver<Array<ResolversTypes['PipelineDefinition']>, ParentType, ContextType>;
   pipelineStatus?: Resolver<Maybe<ResolversTypes['PipelineStatus']>, ParentType, ContextType, RequireFields<QueryPipelineStatusArgs, 'taskId'>>;
   repoAgentGroups?: Resolver<Array<ResolversTypes['RepoAgentGroup']>, ParentType, ContextType>;
   repoAgentScan?: Resolver<Maybe<ResolversTypes['RepoAgentScan']>, ParentType, ContextType, RequireFields<QueryRepoAgentScanArgs, 'repoName'>>;
@@ -1006,7 +1064,10 @@ export type Resolvers<ContextType = Context> = ResolversObject<{
   GithubRepo?: GithubRepoResolvers<ContextType>;
   JSON?: GraphQLScalarType;
   Mutation?: MutationResolvers<ContextType>;
+  PipelineCondition?: PipelineConditionResolvers<ContextType>;
   PipelineCount?: PipelineCountResolvers<ContextType>;
+  PipelineDefinition?: PipelineDefinitionResolvers<ContextType>;
+  PipelineStageDefinition?: PipelineStageDefinitionResolvers<ContextType>;
   PipelineStatus?: PipelineStatusResolvers<ContextType>;
   Query?: QueryResolvers<ContextType>;
   RepoAgentGroup?: RepoAgentGroupResolvers<ContextType>;

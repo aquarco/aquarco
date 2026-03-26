@@ -31,10 +31,10 @@ function validateScope(scope: string): string | null {
 }
 
 const VALID_SPEC_KEYS = new Set([
-  'categories', 'priority', 'promptFile', 'tools', 'resources',
+  'categories', 'priority', 'promptFile', 'promptInline', 'tools', 'resources',
   'environment', 'output', 'outputSchema', 'healthCheck', 'conditions',
 ])
-const REQUIRED_SPEC_KEYS = ['categories', 'promptFile']
+const REQUIRED_SPEC_KEYS = ['categories']
 const MAX_SPEC_SIZE = 100 * 1024
 
 function validateSpec(spec: unknown): string | null {
@@ -43,6 +43,10 @@ function validateSpec(spec: unknown): string | null {
   const keys = Object.keys(spec)
   for (const k of REQUIRED_SPEC_KEYS) { if (!keys.includes(k)) return `Spec missing required key "${k}"` }
   for (const k of keys) { if (!VALID_SPEC_KEYS.has(k)) return `Spec contains unknown key "${k}"` }
+  // Require at least one prompt source
+  if (!keys.includes('promptFile') && !keys.includes('promptInline')) {
+    return 'Spec must contain either "promptFile" or "promptInline"'
+  }
   return null
 }
 

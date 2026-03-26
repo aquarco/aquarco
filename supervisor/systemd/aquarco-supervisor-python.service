@@ -40,7 +40,13 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/home/agent /var/log/aquarco /var/lib/aquarco /var/run/aquarco /tmp
+ReadWritePaths=/home/agent /tmp
+
+# Systemd-managed directories — created automatically on every service start,
+# owned by User=/Group= (agent:agent). Survives /var/run tmpfs wipes on reboot.
+RuntimeDirectory=aquarco
+LogsDirectory=aquarco aquarco/agents
+StateDirectory=aquarco
 
 # Logging: structlog writes JSON to stderr; journalctl -u aquarco-supervisor-python follows.
 StandardOutput=journal

@@ -23,6 +23,9 @@ type Query {
   # Pipeline status
   pipelineStatus(taskId: ID!): PipelineStatus
 
+  # Pipeline definitions
+  pipelineDefinitions: [PipelineDefinition!]!
+
   # GitHub auth
   githubAuthStatus: GithubAuthStatus!
   githubRepositories: [GithubRepo!]!
@@ -381,4 +384,28 @@ type RepoAgentScan {
 type RepoAgentScanPayload {
   scan: RepoAgentScan
   errors: [Error!]
+}
+
+# --- Pipeline Definitions ---
+
+type PipelineDefinition {
+  name: String!
+  version: String!
+  stages: [PipelineStageDefinition!]!
+  categories: JSON
+}
+
+type PipelineStageDefinition {
+  name: String!
+  category: String!
+  required: Boolean!
+  conditions: [PipelineCondition!]!
+}
+
+type PipelineCondition {
+  type: String!
+  expression: String!
+  onYes: String
+  onNo: String
+  maxRepeats: Int
 }
