@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from aquarco_supervisor.config import (
+    get_pipeline_categories,
     get_pipeline_config,
     get_poller_config,
     load_config,
@@ -88,7 +89,7 @@ def test_load_pipelines(tmp_path: Path) -> None:
             {
                 "name": "test-pipeline",
                 "trigger": {"labels": ["test"]},
-                "stages": [{"category": "analyze", "required": True}],
+                "stages": [{"name": "analysis", "category": "analyze", "required": True}],
             }
         ]
     }
@@ -97,6 +98,70 @@ def test_load_pipelines(tmp_path: Path) -> None:
     pipelines = load_pipelines(path)
     assert len(pipelines) == 1
     assert pipelines[0].name == "test-pipeline"
+    assert pipelines[0].stages[0].name == "analysis"
+
+
+def test_load_pipelines_with_categories(tmp_path: Path) -> None:
+    pipelines_data = {
+        "categories": [
+            {"name": "analyze", "outputSchema": {"type": "object", "required": ["risks"]}},
+            {"name": "design", "outputSchema": {"type": "object"}},
+        ],
+        "pipelines": [
+            {
+                "name": "test-pipeline",
+                "trigger": {"labels": ["test"]},
+                "stages": [{"name": "analysis", "category": "analyze", "required": True}],
+            }
+        ],
+    }
+    path = tmp_path / "pipelines.yaml"
+    path.write_text(yaml.dump(pipelines_data))
+    pipelines = load_pipelines(path)
+    assert len(pipelines) == 1
+    assert "analyze" in pipelines[0].categories
+    assert pipelines[0].categories["analyze"]["type"] == "object"
+    assert "design" in pipelines[0].categories
+
+
+def test_load_pipelines_with_structured_conditions(tmp_path: Path) -> None:
+    pipelines_data = {
+        "pipelines": [
+            {
+                "name": "test-pipeline",
+                "trigger": {"labels": ["test"]},
+                "stages": [
+                    {
+                        "name": "review",
+                        "category": "review",
+                        "required": True,
+                        "conditions": [
+                            {"simple": "severity == major_issues", "no": "fix", "maxRepeats": 3},
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+    path = tmp_path / "pipelines.yaml"
+    path.write_text(yaml.dump(pipelines_data))
+    pipelines = load_pipelines(path)
+    stage = pipelines[0].stages[0]
+    assert stage.name == "review"
+    assert len(stage.conditions) == 1
+    assert stage.conditions[0]["simple"] == "severity == major_issues"
+    assert stage.conditions[0]["no"] == "fix"
+
+
+def test_get_pipeline_categories_found(sample_pipelines: list[PipelineConfig]) -> None:
+    categories = get_pipeline_categories(sample_pipelines, "feature-pipeline")
+    # sample_pipelines from conftest don't have categories, so empty dict
+    assert isinstance(categories, dict)
+
+
+def test_get_pipeline_categories_not_found(sample_pipelines: list[PipelineConfig]) -> None:
+    categories = get_pipeline_categories(sample_pipelines, "nonexistent")
+    assert categories == {}
 
 
 def test_load_pipelines_missing_file() -> None:

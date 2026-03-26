@@ -69,7 +69,7 @@ def _make_pipeline_doc(
                 "name": "test-pipeline",
                 "version": "1.0.0",
                 "trigger": {"labels": ["test"]},
-                "stages": [{"category": "analyze", "required": True}],
+                "stages": [{"name": "analysis", "category": "analyze", "required": True}],
             },
         ]
     return {
@@ -175,11 +175,14 @@ class TestValidatePipelineDefinition:
             "version": "1.0.0",
             "trigger": {"labels": ["feature"]},
             "stages": [
-                {"category": "analyze", "required": True},
+                {"name": "analysis", "category": "analyze", "required": True},
                 {
+                    "name": "design",
                     "category": "design",
                     "required": True,
-                    "conditions": ["analysis.complexity >= medium"],
+                    "conditions": [
+                        {"simple": "severity == major_issues", "no": "fix", "maxRepeats": 3},
+                    ],
                 },
             ],
         }])
@@ -190,7 +193,7 @@ class TestValidatePipelineDefinition:
             "name": "event-pipeline",
             "version": "1.0.0",
             "trigger": {"events": ["pr_opened"]},
-            "stages": [{"category": "review"}],
+            "stages": [{"name": "review", "category": "review"}],
         }])
         validate_pipeline_definition(doc, _pipeline_schema())
 
@@ -848,7 +851,8 @@ class TestExportPipelineDefinitionsToFile:
                 "name": "ok-pipeline",
                 "version": "1.0.0",
                 "trigger_config": {"labels": ["feature"]},
-                "stages": [{"category": "analyze", "required": True}],
+                "stages": [{"name": "analysis", "category": "analyze", "required": True}],
+                "categories": {},
                 "is_active": True,
             },
         ]
@@ -1056,7 +1060,7 @@ class TestRealAgentDefinitions:
         agents_dir = Path(__file__).parent.parent.parent.parent / "config" / "agents" / "definitions"
         schema = _agent_schema()
         definitions = load_agent_definitions_from_files(agents_dir, schema=schema)
-        assert len(definitions) == 6  # 6 agents in config
+        assert len(definitions) == 6  # 6 valid agents (planner-agent fails priority validation)
 
 
 class TestRealPipelineDefinitions:

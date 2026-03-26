@@ -247,18 +247,20 @@ async def store_pipeline_definitions(
         # Upsert current version
         await db.execute(
             """INSERT INTO pipeline_definitions
-                   (name, version, trigger_config, stages, is_active)
+                   (name, version, trigger_config, stages, categories, is_active)
                VALUES
-                   (%(name)s, %(version)s, %(trigger_config)s, %(stages)s, true)
+                   (%(name)s, %(version)s, %(trigger_config)s, %(stages)s, %(categories)s, true)
                ON CONFLICT (name, version) DO UPDATE SET
                    trigger_config = EXCLUDED.trigger_config,
                    stages         = EXCLUDED.stages,
+                   categories     = EXCLUDED.categories,
                    is_active      = true""",
             {
                 "name": name,
                 "version": version,
                 "trigger_config": json.dumps(p.get("trigger", {})),
                 "stages": json.dumps(p.get("stages", [])),
+                "categories": json.dumps(p.get("categories", {})),
             },
         )
         count += 1
@@ -429,7 +431,7 @@ async def read_pipeline_definitions_from_db(
     """
     where = "WHERE is_active = true" if active_only else ""
     rows = await db.fetch_all(
-        f"SELECT name, version, trigger_config, stages, is_active "
+        f"SELECT name, version, trigger_config, stages, categories, is_active "
         f"FROM pipeline_definitions {where} ORDER BY name, version"
     )
     return [
@@ -438,6 +440,7 @@ async def read_pipeline_definitions_from_db(
             "version": row["version"],
             "trigger": row["trigger_config"],
             "stages": row["stages"],
+            "categories": row.get("categories", {}),
         }
         for row in rows
     ]
@@ -458,11 +461,27 @@ async def export_pipeline_definitions_to_file(
         log.warning("no_pipeline_definitions_in_db")
         return 0
 
+    # Extract categories from pipeline dicts (stored per-pipeline in DB but
+    # shared at the top level in the YAML format).
+    merged_categories: dict[str, dict[str, Any]] = {}
+    export_pipelines: list[dict[str, Any]] = []
+    for p in pipelines:
+        p_copy = dict(p)
+        cats = p_copy.pop("categories", {})
+        if isinstance(cats, dict):
+            merged_categories.update(cats)
+        export_pipelines.append(p_copy)
+
     doc: dict[str, Any] = {
         "apiVersion": AGENT_API_VERSION,
         "kind": PIPELINE_KIND,
-        "pipelines": pipelines,
+        "pipelines": export_pipelines,
     }
+    if merged_categories:
+        doc["categories"] = [
+            {"name": name, "outputSchema": schema}
+            for name, schema in merged_categories.items()
+        ]
 
     if schema is not None:
         try:

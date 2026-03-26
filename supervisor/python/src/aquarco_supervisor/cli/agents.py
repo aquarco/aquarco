@@ -173,16 +173,7 @@ def validate_definition(
                 f"'{prompt_file}' not found at {prompt_path}",
             ))
 
-    # 8. spec.output.format
-    output_section: dict[str, Any] = spec.get("output") or {}
-    output_format: str = output_section.get("format") or ""
-    if not output_format:
-        errors.append(ValidationError("spec.output.format", "is required"))
-    elif output_format not in VALID_OUTPUT_FORMATS:
-        errors.append(ValidationError(
-            "spec.output.format",
-            f"'{output_format}' is not valid (allowed: {', '.join(sorted(VALID_OUTPUT_FORMATS))})",
-        ))
+    # 8. spec.output.format (optional — no longer required; schema moved to pipeline categories)
 
     # 9. spec.priority (optional, integer 1-100)
     raw_priority = spec.get("priority")
@@ -209,7 +200,6 @@ def validate_definition(
         "definitionFile": file.name,
         "categories": [str(c) for c in categories],
         "priority": priority,
-        "outputFormat": output_format,
         "triggers": {
             "produces": list(triggers.get("produces") or []),
             "consumes": list(triggers.get("consumes") or []),
@@ -497,16 +487,13 @@ def _print_verbose_validation(file: Path, prompts_dir: Path, basename: str) -> N
             else:
                 fail(f"spec.promptFile '{prompt_file}' not found at {prompt_path}")
 
-    # 8. spec.output.format
+    # 8. spec.output.format (optional — no longer required)
     output_section: dict[str, Any] = spec.get("output") or {}
     output_format: str = output_section.get("format") or ""
-    if not output_format:
-        fail("spec.output.format is required")
-    elif output_format in VALID_OUTPUT_FORMATS:
-        ok(f"spec.output.format = {output_format}")
+    if output_format:
+        ok(f"spec.output.format = {output_format} (optional, present)")
     else:
-        fail(f"spec.output.format '{output_format}' is not valid "
-             f"(allowed: {', '.join(sorted(VALID_OUTPUT_FORMATS))})")
+        ok("spec.output.format not set (optional)")
 
     # 9. spec.priority (optional)
     raw_priority = spec.get("priority")

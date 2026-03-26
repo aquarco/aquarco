@@ -14,7 +14,6 @@ from aquarco_supervisor.cli.agents import (
     REQUIRED_KIND,
     SEMVER_RE,
     VALID_CATEGORIES,
-    VALID_OUTPUT_FORMATS,
     ValidationError,
     _build_registry,
     _get_field,
@@ -146,7 +145,6 @@ class TestValidateDefinitionHappyPath:
         assert record["name"] == "my-agent"
         assert record["version"] == "1.0.0"
         assert record["categories"] == ["review"]
-        assert record["outputFormat"] == "task-file"
         assert record["priority"] == 50  # default
 
     def test_explicit_priority_returned(self, tmp_path: Path) -> None:
@@ -213,18 +211,19 @@ class TestValidateDefinitionHappyPath:
         errors, record = validate_definition(f, prompts_dir)
         assert errors == []
 
-    def test_all_valid_output_formats_accepted(self, tmp_path: Path) -> None:
+    def test_valid_without_output_section(self, tmp_path: Path) -> None:
+        """Agents without spec.output should now pass validation."""
         prompts_dir = tmp_path / "prompts"
         prompts_dir.mkdir()
         defs_dir = tmp_path / "defs"
         defs_dir.mkdir()
 
-        for fmt in VALID_OUTPUT_FORMATS:
-            data = _minimal_valid(prompts_dir)
-            data["spec"]["output"]["format"] = fmt
-            f = _write_definition(defs_dir, data, f"agent-{fmt}.yaml")
-            errors, record = validate_definition(f, prompts_dir)
-            assert errors == [], f"Expected no errors for format '{fmt}'"
+        data = _minimal_valid(prompts_dir)
+        del data["spec"]["output"]
+        f = _write_definition(defs_dir, data)
+        errors, record = validate_definition(f, prompts_dir)
+        assert errors == []
+        assert record is not None
 
 
 # ---------------------------------------------------------------------------
@@ -581,7 +580,8 @@ class TestValidateDefinitionPromptFile:
 
 
 class TestValidateDefinitionOutputFormat:
-    def test_missing_output_section(self, tmp_path: Path) -> None:
+    def test_missing_output_section_is_ok(self, tmp_path: Path) -> None:
+        """spec.output is no longer required — schemas moved to pipeline categories."""
         prompts_dir = tmp_path / "prompts"
         prompts_dir.mkdir()
         defs_dir = tmp_path / "defs"
@@ -592,20 +592,22 @@ class TestValidateDefinitionOutputFormat:
         f = _write_definition(defs_dir, data)
 
         errors, record = validate_definition(f, prompts_dir)
-        assert any(e.field == "spec.output.format" for e in errors)
+        # No output.format errors expected
+        output_errors = [e for e in errors if "output" in e.field]
+        assert output_errors == []
 
-    def test_invalid_output_format(self, tmp_path: Path) -> None:
+    def test_output_format_still_accepted(self, tmp_path: Path) -> None:
+        """Having spec.output.format is still valid (backward compat)."""
         prompts_dir = tmp_path / "prompts"
         prompts_dir.mkdir()
         defs_dir = tmp_path / "defs"
         defs_dir.mkdir()
 
         data = _minimal_valid(prompts_dir)
-        data["spec"]["output"]["format"] = "telegram-message"
         f = _write_definition(defs_dir, data)
 
         errors, record = validate_definition(f, prompts_dir)
-        assert any(e.field == "spec.output.format" for e in errors)
+        assert errors == []
 
 
 # ---------------------------------------------------------------------------
@@ -716,7 +718,7 @@ class TestValidateDefinitionMultipleErrors:
 
         errors, record = validate_definition(f, prompts_dir)
 
-        assert len(errors) >= 5
+        assert len(errors) >= 4
         assert record is None
         fields = {e.field for e in errors}
         assert "apiVersion" in fields
@@ -745,7 +747,6 @@ class TestBuildRegistry:
             "definitionFile": f"{name}.yaml",
             "categories": categories,
             "priority": priority,
-            "outputFormat": "task-file",
             "triggers": {"produces": [], "consumes": []},
             "capabilities": {},
             "resources": {},

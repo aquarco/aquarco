@@ -34,7 +34,7 @@ const VALID_SPEC_KEYS = new Set([
   'categories', 'priority', 'promptFile', 'tools', 'resources',
   'environment', 'output', 'outputSchema', 'healthCheck', 'conditions',
 ])
-const REQUIRED_SPEC_KEYS = ['categories', 'promptFile', 'output']
+const REQUIRED_SPEC_KEYS = ['categories', 'promptFile']
 const MAX_SPEC_SIZE = 100 * 1024
 
 function validateSpec(spec: unknown): string | null {

@@ -11,13 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from ..cli.claude import execute_claude
-from ..config import get_pipeline_config
+from ..config import get_pipeline_categories, get_pipeline_config
 from ..config_overlay import (
     ResolvedConfig,
     ScopedAgentView,
     load_overlay,
     resolve_config,
 )
+from .conditions import ConditionResult, evaluate_conditions
 from ..database import Database
 from ..exceptions import NoAvailableAgentError, PipelineError, RateLimitError, StageError
 from ..logging import get_logger
@@ -66,7 +67,7 @@ class PipelineExecutor:
         # Layer 1: defaults from registry
         default_agents = self._registry.get_default_agents()
         default_pipelines = [
-            {"name": p.name, "version": p.version, "trigger": p.trigger.model_dump(), "stages": [s.model_dump() for s in p.stages]}
+            {"name": p.name, "version": p.version, "trigger": p.trigger.model_dump(), "stages": [s.model_dump() for s in p.stages], "categories": p.categories}
             for p in self._pipelines
         ]
         default_prompts_dir = self._registry.get_default_prompts_dir()
@@ -229,6 +230,7 @@ class PipelineExecutor:
                 task_id, planned_stages, stages, work_dir, branch_name,
                 start_stage=start_stage,
                 scoped_view=scoped_view,
+                pipeline_name=pipeline_name,
             )
         finally:
             if scoped_view:
@@ -365,16 +367,35 @@ class PipelineExecutor:
         *,
         start_stage: int = 0,
         scoped_view: ScopedAgentView | None = None,
+        pipeline_name: str = "",
     ) -> bool:
-        """Execute planned stages with validation-driven iteration loops.
+        """Execute planned stages with condition-driven exit gates and named jumps.
 
         Returns True if the pipeline failed and should not continue.
         """
+        # Build name-indexed lookups for named-stage jumps
+        stage_order: list[str] = []  # ordered stage names/indices
+        stages_by_name: dict[str, int] = {}  # name -> index in planned_stages
+
+        for idx, sdef in enumerate(stage_defs):
+            name = sdef.get("name", "")
+            if name:
+                stage_order.append(name)
+                stages_by_name[name] = idx
+            else:
+                stage_order.append(str(idx))
+
+        # Track outputs per stage name for cross-stage condition references
+        stage_outputs: dict[str, dict[str, Any]] = {}
+        # Track repeat counts per stage for maxRepeats enforcement
+        repeat_counts: dict[str, int] = {}
+
+        current_idx = start_stage
         previous_output: dict[str, Any] = {}
 
-        for stage_num, plan in enumerate(planned_stages):
-            if stage_num < start_stage:
-                continue
+        while current_idx < len(planned_stages):
+            stage_num = current_idx
+            plan = planned_stages[stage_num]
 
             category = plan["category"]
             agents = plan.get("agents", [])
@@ -386,16 +407,10 @@ class PipelineExecutor:
             )
             required = stage_def.get("required", True)
             conditions = stage_def.get("conditions", [])
+            stage_name = stage_def.get("name", str(stage_num))
 
-            # Check conditions
-            if conditions and not check_conditions(conditions, previous_output):
-                log.info("stage_skipped_conditions", task_id=task_id, stage=stage_num)
-                for agent_name in agents:
-                    sk = f"{stage_num}:{category}:{agent_name}"
-                    await self._tq.record_stage_skipped(
-                        task_id, stage_num, category, stage_key=sk,
-                    )
-                continue
+            # Track repeat count
+            repeat_counts[stage_name] = repeat_counts.get(stage_name, 0) + 1
 
             # Ensure we're on the right branch
             await _git_checkout(clone_dir, branch_name)
@@ -424,6 +439,7 @@ class PipelineExecutor:
                         stage_output.update(out)
 
                 previous_output = stage_output
+                stage_outputs[stage_name] = stage_output
 
                 # Process validation items from agent output
                 for agent_name in agents:
@@ -473,18 +489,40 @@ class PipelineExecutor:
                         await self._process_validation_items(task_id, sk, out)
 
                     previous_output = stage_output
+                    stage_outputs[stage_name] = stage_output
 
                 # Checkpoint and auto-commit
                 await self._tq.checkpoint_pipeline(task_id, stage_num)
                 await _auto_commit(clone_dir, task_id, stage_num, category)
 
+                # --- Exit gate: evaluate structured conditions ---
+                if conditions:
+                    cond_result = evaluate_conditions(
+                        conditions,
+                        stage_outputs,
+                        stage_output,
+                        repeat_counts,
+                        ai_evaluator=None,  # TODO: wire up AI evaluator
+                    )
+                    if cond_result.jump_to and cond_result.jump_to in stages_by_name:
+                        target_idx = stages_by_name[cond_result.jump_to]
+                        log.info(
+                            "condition_jump",
+                            task_id=task_id,
+                            from_stage=stage_name,
+                            to_stage=cond_result.jump_to,
+                            target_idx=target_idx,
+                        )
+                        current_idx = target_idx
+                        continue
+
+                # Default: advance to next stage
+                current_idx += 1
+
             except RateLimitError as e:
-                # Rate limited — checkpoint the last *completed* stage (not stage_num - 1,
-                # which might not have completed). Use last_completed_stage to be safe.
                 last_completed = stage_num - 1 if stage_num > 0 else 0
                 await self._tq.checkpoint_pipeline(task_id, last_completed)
                 await self._tq.rate_limit_task(task_id, str(e))
-                # Mark the latest run of each agent's stage as rate_limited.
                 for agent_name in agents:
                     sk = f"{stage_num}:{category}:{agent_name}"
                     await self._db.execute(
@@ -518,6 +556,7 @@ class PipelineExecutor:
                         await self._tq.record_stage_skipped(
                             task_id, stage_num, category, stage_key=sk,
                         )
+                    current_idx += 1
 
         return False
 
@@ -806,6 +845,25 @@ class PipelineExecutor:
         finally:
             await self._registry.decrement_agent_instances(agent_name)
 
+    def _get_output_schema_for_stage(
+        self,
+        pipeline_name: str,
+        category: str,
+        agent_name: str,
+        scoped_view: ScopedAgentView | None = None,
+    ) -> dict[str, Any] | None:
+        """Resolve output schema: pipeline categories first, then agent spec fallback."""
+        # Try pipeline-level categories
+        categories = get_pipeline_categories(self._pipelines, pipeline_name)
+        if categories and category in categories:
+            schema = categories[category]
+            if schema:
+                return schema
+
+        # Fallback: agent-level outputSchema
+        cfg = scoped_view or self._registry
+        return cfg.get_agent_output_schema(agent_name)
+
     async def _execute_agent(
         self,
         agent_name: str,
@@ -816,6 +874,8 @@ class PipelineExecutor:
         work_dir: str | None = None,
         scoped_view: ScopedAgentView | None = None,
         on_live_output: Callable[[str], Awaitable[None]] | None = None,
+        pipeline_name: str = "",
+        category: str = "",
     ) -> dict[str, Any]:
         """Invoke the Claude CLI for an agent, with automatic continuation.
 
@@ -854,7 +914,9 @@ class PipelineExecutor:
                 task_id=task_id,
                 stage_num=stage_num,
                 extra_env=cfg.get_agent_environment(agent_name),
-                output_schema=cfg.get_agent_output_schema(agent_name),
+                output_schema=self._get_output_schema_for_stage(
+                    pipeline_name, category, agent_name, scoped_view,
+                ) if pipeline_name and category else cfg.get_agent_output_schema(agent_name),
                 max_turns=max_turns,
                 resume_session_id=resume_session_id,
                 on_live_output=on_live_output,
@@ -1124,14 +1186,29 @@ class PipelineExecutor:
 
 
 def check_conditions(
-    conditions: list[str], previous_output: dict[str, Any]
+    conditions: list[str] | list[dict[str, Any]], previous_output: dict[str, Any]
 ) -> bool:
     """Evaluate stage conditions against previous output.
 
-    Condition format: "field operator value"
-    Supports: ==, !=, >=, >, <=, <
+    Supports both legacy string format ("field operator value") and
+    new structured format (list of condition dicts with simple/ai keys).
     """
+    if not conditions:
+        return True
+
+    # Detect format: if first item is a dict, use new structured evaluation
+    if conditions and isinstance(conditions[0], dict):
+        result = evaluate_conditions(
+            conditions, {}, previous_output, {},
+        )
+        # In the old API, True means "proceed" (conditions met).
+        # With structured conditions, if no jump is produced, proceed.
+        return not result.matched or result.jump_to is None
+
+    # Legacy string-based format
     for condition in conditions:
+        if not isinstance(condition, str):
+            continue
         parts = condition.split()
         if len(parts) < 3:
             continue

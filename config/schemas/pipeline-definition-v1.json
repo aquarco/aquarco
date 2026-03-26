@@ -17,6 +17,13 @@
       "const": "PipelineDefinition",
       "description": "Resource kind — must be exactly PipelineDefinition"
     },
+    "categories": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Category"
+      },
+      "description": "Category definitions with output schemas"
+    },
     "pipelines": {
       "type": "array",
       "minItems": 1,
@@ -27,6 +34,21 @@
     }
   },
   "$defs": {
+    "Category": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Category name (e.g., analyze, design, implementation)"
+        },
+        "outputSchema": {
+          "type": "object",
+          "description": "JSON Schema defining the structured output for this category"
+        }
+      }
+    },
     "Pipeline": {
       "type": "object",
       "required": ["name", "version", "trigger", "stages"],
@@ -75,12 +97,15 @@
     },
     "Stage": {
       "type": "object",
-      "required": ["category"],
+      "required": ["name", "category"],
       "additionalProperties": false,
       "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique stage name within the pipeline (used for condition jumps)"
+        },
         "category": {
           "type": "string",
-          "enum": ["review", "implementation", "test", "design", "docs", "analyze"],
           "description": "Agent category for this stage"
         },
         "required": {
@@ -90,8 +115,41 @@
         },
         "conditions": {
           "type": "array",
-          "items": { "type": "string" },
-          "description": "Conditions that must be met for this stage to run"
+          "items": {
+            "$ref": "#/$defs/Condition"
+          },
+          "description": "Exit-gate conditions evaluated after stage completion"
+        }
+      }
+    },
+    "Condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["simple"] },
+        { "required": ["ai"] }
+      ],
+      "properties": {
+        "simple": {
+          "type": ["string", "boolean"],
+          "description": "Expression evaluated against stage outputs (supports ==, !=, >=, >, <=, <, &&, ||, parentheses). Boolean true means always-true."
+        },
+        "ai": {
+          "type": "string",
+          "description": "Natural-language condition evaluated by Claude CLI"
+        },
+        "yes": {
+          "type": "string",
+          "description": "Stage name to jump to when condition evaluates to true"
+        },
+        "no": {
+          "type": "string",
+          "description": "Stage name to jump to when condition evaluates to false"
+        },
+        "maxRepeats": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of times the target stage can be revisited via this condition"
         }
       }
     }
