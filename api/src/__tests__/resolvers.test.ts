@@ -579,3 +579,274 @@ describe('Query.agentInstances', () => {
     expect(result).toHaveLength(0)
   })
 })
+
+// ── Query.pipelineDefinitions (new in 590a8137) ───────────────────────────────
+
+describe('Query.pipelineDefinitions', () => {
+  it('should return empty array when no active pipelines exist', async () => {
+    const pool = mockPool([{ rows: [] }])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    expect(result).toHaveLength(0)
+  })
+
+  it('should query only active pipelines ordered by name', async () => {
+    const pool = mockPool([{ rows: [] }])
+    const ctx = makeCtx(pool)
+    await Query.pipelineDefinitions(null, null, ctx)
+    const sql = (pool.query.mock.calls[0][0] as string).replace(/\s+/g, ' ').trim()
+    expect(sql).toMatch(/is_active\s*=\s*true/i)
+    expect(sql).toMatch(/ORDER BY name/i)
+  })
+
+  it('should map pipeline name and version from db row', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          {
+            name: 'pr-review-pipeline',
+            version: '2',
+            stages: [],
+            categories: {},
+          },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    expect(result).toHaveLength(1)
+    expect(result[0].name).toBe('pr-review-pipeline')
+    expect(result[0].version).toBe('2')
+  })
+
+  it('should default categories to empty object when null', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          {
+            name: 'pipeline-a',
+            version: '1',
+            stages: [],
+            categories: null,
+          },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    expect(result[0].categories).toEqual({})
+  })
+
+  it('should map a simple-type condition with yes/no/maxRepeats', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          {
+            name: 'pipeline-a',
+            version: '1',
+            categories: {},
+            stages: [
+              {
+                name: 'review',
+                category: 'review',
+                required: true,
+                conditions: [
+                  {
+                    simple: 'severity == critical',
+                    yes: 'fix-stage',
+                    no: null,
+                    maxRepeats: 3,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    const cond = result[0].stages[0].conditions[0]
+    expect(cond.type).toBe('simple')
+    expect(cond.expression).toBe('severity == critical')
+    expect(cond.onYes).toBe('fix-stage')
+    expect(cond.onNo).toBeNull()
+    expect(cond.maxRepeats).toBe(3)
+  })
+
+  it('should map an ai-type condition', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          {
+            name: 'pipeline-b',
+            version: '1',
+            categories: {},
+            stages: [
+              {
+                name: 'test',
+                category: 'test',
+                required: false,
+                conditions: [
+                  {
+                    ai: 'Did all tests pass?',
+                    yes: 'deploy',
+                    no: 'fix',
+                    maxRepeats: null,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    const cond = result[0].stages[0].conditions[0]
+    expect(cond.type).toBe('ai')
+    expect(cond.expression).toBe('Did all tests pass?')
+    expect(cond.onYes).toBe('deploy')
+    expect(cond.onNo).toBe('fix')
+    expect(cond.maxRepeats).toBeNull()
+  })
+
+  it('should map an unknown condition type by JSON-stringifying it', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          {
+            name: 'pipeline-c',
+            version: '1',
+            categories: {},
+            stages: [
+              {
+                name: 'build',
+                category: 'build',
+                required: true,
+                conditions: [
+                  { customKey: 'some value', extra: 42 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    const cond = result[0].stages[0].conditions[0]
+    expect(cond.type).toBe('unknown')
+    expect(cond.expression).toBe(JSON.stringify({ customKey: 'some value', extra: 42 }))
+    expect(cond.onYes).toBeNull()
+    expect(cond.onNo).toBeNull()
+    expect(cond.maxRepeats).toBeNull()
+  })
+
+  it('should default stage name to empty string when missing', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          {
+            name: 'pipeline-d',
+            version: '1',
+            categories: {},
+            stages: [
+              {
+                category: 'review',
+                required: true,
+                conditions: [],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    expect(result[0].stages[0].name).toBe('')
+  })
+
+  it('should default stage required to true when missing', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          {
+            name: 'pipeline-e',
+            version: '1',
+            categories: {},
+            stages: [
+              {
+                name: 'optional-stage',
+                category: 'test',
+                conditions: [],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    expect(result[0].stages[0].required).toBe(true)
+  })
+
+  it('should handle a stage with no conditions', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          {
+            name: 'pipeline-f',
+            version: '1',
+            categories: {},
+            stages: [
+              {
+                name: 'deploy',
+                category: 'deploy',
+                required: true,
+                conditions: [],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    expect(result[0].stages[0].conditions).toHaveLength(0)
+  })
+
+  it('should handle null stages array in db row', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          {
+            name: 'pipeline-g',
+            version: '1',
+            categories: {},
+            stages: null,
+          },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    expect(result[0].stages).toHaveLength(0)
+  })
+
+  it('should return multiple pipelines in order from db', async () => {
+    const pool = mockPool([
+      {
+        rows: [
+          { name: 'alpha', version: '1', stages: [], categories: {} },
+          { name: 'beta', version: '1', stages: [], categories: {} },
+        ],
+      },
+    ])
+    const ctx = makeCtx(pool)
+    const result = await Query.pipelineDefinitions(null, null, ctx)
+    expect(result).toHaveLength(2)
+    expect(result[0].name).toBe('alpha')
+    expect(result[1].name).toBe('beta')
+  })
+})
