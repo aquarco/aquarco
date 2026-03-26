@@ -13,7 +13,7 @@ Tests in this module cover:
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -100,100 +100,112 @@ class TestAcceptanceCriteriaExpressions:
 class TestEvaluateConditionsRouting:
     """Tests for evaluate_conditions yes/no routing and jump logic."""
 
-    def test_jump_to_implementation_on_false(self) -> None:
+    @pytest.mark.asyncio
+    async def test_jump_to_implementation_on_false(self) -> None:
         """When condition is False and 'no' is 'implementation', jump there."""
         conditions = [
             {"simple": "severity == blocking", "no": "implementation", "maxRepeats": 5}
         ]
-        result = evaluate_conditions(conditions, {}, {"severity": "minor"}, {})
+        result = await evaluate_conditions(conditions, {}, {"severity": "minor"}, {})
         assert result.jump_to == "implementation"
         assert result.matched is True
 
-    def test_no_jump_when_no_conditions(self) -> None:
+    @pytest.mark.asyncio
+    async def test_no_jump_when_no_conditions(self) -> None:
         """Empty conditions => no jump."""
-        result = evaluate_conditions([], {}, {}, {})
+        result = await evaluate_conditions([], {}, {}, {})
         assert result.jump_to is None
         assert result.matched is False
 
-    def test_no_jump_when_all_conditions_pass_without_yes(self) -> None:
+    @pytest.mark.asyncio
+    async def test_no_jump_when_all_conditions_pass_without_yes(self) -> None:
         """When all conditions are True but no 'yes' field, no jump."""
         conditions = [{"simple": "true"}]
-        result = evaluate_conditions(conditions, {}, {}, {})
+        result = await evaluate_conditions(conditions, {}, {}, {})
         assert result.jump_to is None
         assert result.matched is False
 
-    def test_max_repeats_exceeded_skips_condition(self) -> None:
+    @pytest.mark.asyncio
+    async def test_max_repeats_exceeded_skips_condition(self) -> None:
         """When maxRepeats exceeded for target, skip and fall through."""
         conditions = [
             {"simple": "true", "yes": "implementation", "maxRepeats": 3}
         ]
-        result = evaluate_conditions(conditions, {}, {}, {"implementation": 3})
+        result = await evaluate_conditions(conditions, {}, {}, {"implementation": 3})
         assert result.jump_to is None
         assert result.matched is False
 
-    def test_max_repeats_not_exceeded_allows_jump(self) -> None:
+    @pytest.mark.asyncio
+    async def test_max_repeats_not_exceeded_allows_jump(self) -> None:
         conditions = [
             {"simple": "true", "yes": "implementation", "maxRepeats": 3}
         ]
-        result = evaluate_conditions(conditions, {}, {}, {"implementation": 2})
+        result = await evaluate_conditions(conditions, {}, {}, {"implementation": 2})
         assert result.jump_to == "implementation"
         assert result.matched is True
 
-    def test_max_repeats_zero_means_unlimited(self) -> None:
+    @pytest.mark.asyncio
+    async def test_max_repeats_zero_means_unlimited(self) -> None:
         """maxRepeats=0 means no limit."""
         conditions = [
             {"simple": "true", "yes": "review", "maxRepeats": 0}
         ]
-        result = evaluate_conditions(conditions, {}, {}, {"review": 1000})
+        result = await evaluate_conditions(conditions, {}, {}, {"review": 1000})
         assert result.jump_to == "review"
         assert result.matched is True
 
-    def test_max_repeats_not_specified_means_unlimited(self) -> None:
+    @pytest.mark.asyncio
+    async def test_max_repeats_not_specified_means_unlimited(self) -> None:
         """No maxRepeats key means no limit."""
         conditions = [
             {"simple": "true", "yes": "review"}
         ]
-        result = evaluate_conditions(conditions, {}, {}, {"review": 999})
+        result = await evaluate_conditions(conditions, {}, {}, {"review": 999})
         assert result.jump_to == "review"
         assert result.matched is True
 
-    def test_multiple_conditions_first_match_wins(self) -> None:
+    @pytest.mark.asyncio
+    async def test_multiple_conditions_first_match_wins(self) -> None:
         """First condition with a matching jump target wins."""
         conditions = [
             {"simple": "x == 1", "yes": "first_target"},
             {"simple": "x == 1", "yes": "second_target"},
         ]
-        result = evaluate_conditions(conditions, {}, {"x": 1}, {})
+        result = await evaluate_conditions(conditions, {}, {"x": 1}, {})
         assert result.jump_to == "first_target"
 
-    def test_fallthrough_to_second_condition(self) -> None:
+    @pytest.mark.asyncio
+    async def test_fallthrough_to_second_condition(self) -> None:
         """First condition has no matching branch, second matches."""
         conditions = [
             {"simple": "x == 99", "yes": "first_target"},  # False, no "no" -> skip
             {"simple": "true", "yes": "second_target"},
         ]
-        result = evaluate_conditions(conditions, {}, {"x": 1}, {})
+        result = await evaluate_conditions(conditions, {}, {"x": 1}, {})
         assert result.jump_to == "second_target"
 
-    def test_boolean_yaml_keys_true_false(self) -> None:
+    @pytest.mark.asyncio
+    async def test_boolean_yaml_keys_true_false(self) -> None:
         """YAML may parse unquoted yes/no as True/False boolean keys."""
         conditions = [
             {"simple": "true", True: "target_stage"}  # True key instead of "yes"
         ]
-        result = evaluate_conditions(conditions, {}, {}, {})
+        result = await evaluate_conditions(conditions, {}, {}, {})
         assert result.jump_to == "target_stage"
 
-    def test_boolean_yaml_key_false_branch(self) -> None:
+    @pytest.mark.asyncio
+    async def test_boolean_yaml_key_false_branch(self) -> None:
         conditions = [
             {"simple": "false", False: "fallback_stage"}  # False key instead of "no"
         ]
-        result = evaluate_conditions(conditions, {}, {}, {})
+        result = await evaluate_conditions(conditions, {}, {}, {})
         assert result.jump_to == "fallback_stage"
 
-    def test_non_dict_conditions_are_skipped(self) -> None:
+    @pytest.mark.asyncio
+    async def test_non_dict_conditions_are_skipped(self) -> None:
         """Non-dict items in conditions list are skipped."""
         conditions: list[Any] = ["legacy_string", 42, None, {"simple": "true", "yes": "target"}]
-        result = evaluate_conditions(conditions, {}, {}, {})
+        result = await evaluate_conditions(conditions, {}, {}, {})
         assert result.jump_to == "target"
 
 
@@ -203,48 +215,53 @@ class TestEvaluateConditionsRouting:
 
 
 class TestAIConditions:
-    def test_ai_evaluator_true_routes_to_yes(self) -> None:
-        ai_evaluator = MagicMock(return_value=True)
+    @pytest.mark.asyncio
+    async def test_ai_evaluator_true_routes_to_yes(self) -> None:
+        ai_evaluator = AsyncMock(return_value=True)
         conditions = [{"ai": "Is the code safe?", "yes": "deploy", "no": "fix"}]
-        result = evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=ai_evaluator)
+        result = await evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=ai_evaluator)
         assert result.jump_to == "deploy"
         ai_evaluator.assert_called_once()
 
-    def test_ai_evaluator_false_routes_to_no(self) -> None:
-        ai_evaluator = MagicMock(return_value=False)
+    @pytest.mark.asyncio
+    async def test_ai_evaluator_false_routes_to_no(self) -> None:
+        ai_evaluator = AsyncMock(return_value=False)
         conditions = [{"ai": "Is the code safe?", "yes": "deploy", "no": "fix"}]
-        result = evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=ai_evaluator)
+        result = await evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=ai_evaluator)
         assert result.jump_to == "fix"
 
-    def test_ai_evaluator_none_skips(self) -> None:
+    @pytest.mark.asyncio
+    async def test_ai_evaluator_none_skips(self) -> None:
         """No evaluator provided => AI condition is skipped."""
         conditions = [{"ai": "Check something", "yes": "next", "no": "prev"}]
-        result = evaluate_conditions(conditions, {}, {}, {})
+        result = await evaluate_conditions(conditions, {}, {}, {})
         assert result.jump_to is None
 
-    def test_ai_evaluator_exception_skips(self) -> None:
+    @pytest.mark.asyncio
+    async def test_ai_evaluator_exception_skips(self) -> None:
         """AI evaluator that raises => condition is skipped."""
 
-        def failing_evaluator(prompt: str, context: dict) -> bool:
+        async def failing_evaluator(prompt: str, context: dict) -> bool:
             raise RuntimeError("Claude CLI failed")
 
         conditions = [{"ai": "Check something", "yes": "next", "no": "prev"}]
-        result = evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=failing_evaluator)
+        result = await evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=failing_evaluator)
         assert result.jump_to is None
         assert result.matched is False
 
-    def test_ai_evaluator_receives_correct_context(self) -> None:
+    @pytest.mark.asyncio
+    async def test_ai_evaluator_receives_correct_context(self) -> None:
         """AI evaluator receives merged context from stage_outputs + current_output."""
         captured_args: list[Any] = []
 
-        def capturing_evaluator(prompt: str, context: dict) -> bool:
+        async def capturing_evaluator(prompt: str, context: dict) -> bool:
             captured_args.append((prompt, context))
             return True
 
         stage_outputs = {"analysis": {"risk_level": "high"}}
         current_output = {"tests_passed": 42}
         conditions = [{"ai": "Are risks mitigated?", "yes": "deploy"}]
-        evaluate_conditions(
+        await evaluate_conditions(
             conditions, stage_outputs, current_output, {},
             ai_evaluator=capturing_evaluator,
         )
@@ -474,17 +491,19 @@ class TestHelpers:
 
 
 class TestBooleanSimpleValue:
-    def test_simple_bool_true(self) -> None:
+    @pytest.mark.asyncio
+    async def test_simple_bool_true(self) -> None:
         """YAML `simple: true` (parsed as bool) should evaluate to True."""
         conditions = [{"simple": True, "yes": "next_stage"}]
-        result = evaluate_conditions(conditions, {}, {}, {})
+        result = await evaluate_conditions(conditions, {}, {}, {})
         assert result.jump_to == "next_stage"
         assert result.matched is True
 
-    def test_simple_bool_false(self) -> None:
+    @pytest.mark.asyncio
+    async def test_simple_bool_false(self) -> None:
         """YAML `simple: false` (parsed as bool) should evaluate to False."""
         conditions = [{"simple": False, "no": "fallback_stage"}]
-        result = evaluate_conditions(conditions, {}, {}, {})
+        result = await evaluate_conditions(conditions, {}, {}, {})
         assert result.jump_to == "fallback_stage"
         assert result.matched is True
 
@@ -495,29 +514,32 @@ class TestBooleanSimpleValue:
 
 
 class TestCrossStageReferences:
-    def test_reference_previous_stage_output_in_condition(self) -> None:
+    @pytest.mark.asyncio
+    async def test_reference_previous_stage_output_in_condition(self) -> None:
         """analysis.estimated_complexity from stage_outputs used in condition."""
         conditions = [
             {"simple": "analysis.estimated_complexity == high", "yes": "design"}
         ]
         stage_outputs = {"analysis": {"estimated_complexity": "high"}}
-        result = evaluate_conditions(conditions, stage_outputs, {}, {})
+        result = await evaluate_conditions(conditions, stage_outputs, {}, {})
         assert result.jump_to == "design"
 
-    def test_current_output_takes_precedence(self) -> None:
+    @pytest.mark.asyncio
+    async def test_current_output_takes_precedence(self) -> None:
         """Current output fields override stage_outputs at top level."""
         conditions = [
             {"simple": "severity == critical", "yes": "fix"}
         ]
         stage_outputs = {"analysis": {"severity": "low"}}
         current_output = {"severity": "critical"}
-        result = evaluate_conditions(conditions, stage_outputs, current_output, {})
+        result = await evaluate_conditions(conditions, stage_outputs, current_output, {})
         assert result.jump_to == "fix"
 
-    def test_numeric_cross_stage_comparison(self) -> None:
+    @pytest.mark.asyncio
+    async def test_numeric_cross_stage_comparison(self) -> None:
         conditions = [
             {"simple": "test.coverage_percent >= 80", "yes": "deploy"}
         ]
         stage_outputs = {"test": {"coverage_percent": 92}}
-        result = evaluate_conditions(conditions, stage_outputs, {}, {})
+        result = await evaluate_conditions(conditions, stage_outputs, {}, {})
         assert result.jump_to == "deploy"

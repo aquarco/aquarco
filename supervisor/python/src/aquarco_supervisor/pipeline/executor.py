@@ -18,7 +18,7 @@ from ..config_overlay import (
     load_overlay,
     resolve_config,
 )
-from .conditions import ConditionResult, evaluate_conditions
+from .conditions import ConditionResult, evaluate_ai_condition, evaluate_conditions
 from ..database import Database
 from ..exceptions import NoAvailableAgentError, PipelineError, RateLimitError, StageError
 from ..logging import get_logger
@@ -500,12 +500,20 @@ class PipelineExecutor:
 
                 # --- Exit gate: evaluate structured conditions ---
                 if conditions:
-                    cond_result = evaluate_conditions(
+                    async def _ai_eval(prompt: str, ctx: dict[str, Any]) -> bool:
+                        return await evaluate_ai_condition(
+                            prompt, ctx,
+                            work_dir=clone_dir,
+                            task_id=task_id,
+                            stage_num=stage_num,
+                        )
+
+                    cond_result = await evaluate_conditions(
                         conditions,
                         stage_outputs,
                         stage_output,
                         repeat_counts,
-                        ai_evaluator=None,  # TODO: wire up AI evaluator
+                        ai_evaluator=_ai_eval,
                     )
                     if cond_result.jump_to and cond_result.jump_to in stages_by_name:
                         target_idx = stages_by_name[cond_result.jump_to]
@@ -1196,22 +1204,31 @@ class PipelineExecutor:
 def check_conditions(
     conditions: list[str] | list[dict[str, Any]], previous_output: dict[str, Any]
 ) -> bool:
-    """Evaluate stage conditions against previous output.
+    """Evaluate stage conditions against previous output (sync bridge).
 
     Supports both legacy string format ("field operator value") and
     new structured format (list of condition dicts with simple/ai keys).
+
+    Note: ai: conditions are skipped in this sync bridge. Use
+    evaluate_conditions() directly for full async AI support.
     """
     if not conditions:
         return True
 
     # Detect format: if first item is a dict, use new structured evaluation
     if conditions and isinstance(conditions[0], dict):
-        result = evaluate_conditions(
-            conditions, {}, previous_output, {},
-        )
-        # In the old API, True means "proceed" (conditions met).
-        # With structured conditions, if no jump is produced, proceed.
-        return not result.matched or result.jump_to is None
+        from .conditions import evaluate_simple_expression, _build_eval_context
+        context = _build_eval_context({}, previous_output)
+        for cond in conditions:
+            if not isinstance(cond, dict):
+                continue
+            if "simple" in cond:
+                raw = cond["simple"]
+                val = raw if isinstance(raw, bool) else evaluate_simple_expression(str(raw), context)
+                jump = cond.get("yes" if val else "no") or cond.get(True if val else False)
+                if jump is not None:
+                    return False  # jump means "don't proceed linearly"
+        return True
 
     # Legacy string-based format
     for condition in conditions:

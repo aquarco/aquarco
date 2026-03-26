@@ -10,7 +10,12 @@ and maxRepeats to limit how many times a jump target can be visited.
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
 import re
+import tempfile
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,12 +37,12 @@ class ConditionResult:
 # ---------------------------------------------------------------------------
 
 
-def evaluate_conditions(
+async def evaluate_conditions(
     conditions: list[dict[str, Any]],
     stage_outputs: dict[str, dict[str, Any]],
     current_output: dict[str, Any],
     repeat_counts: dict[str, int],
-    ai_evaluator: Any | None = None,
+    ai_evaluator: Callable[[str, dict[str, Any]], Awaitable[bool]] | None = None,
 ) -> ConditionResult:
     """Evaluate a list of structured conditions as exit gates.
 
@@ -46,7 +51,7 @@ def evaluate_conditions(
         stage_outputs: Map of stage_name -> output for all completed stages.
         current_output: Output of the current stage.
         repeat_counts: Map of stage_name -> times visited.
-        ai_evaluator: Callable for AI conditions (prompt, context) -> bool.
+        ai_evaluator: Async callable for AI conditions (prompt, context) -> bool.
 
     Returns:
         ConditionResult with jump_to stage name or None.
@@ -63,7 +68,7 @@ def evaluate_conditions(
         if not isinstance(cond, dict):
             continue
 
-        result = _evaluate_single_condition(cond, context, ai_evaluator)
+        result = await _evaluate_single_condition(cond, context, ai_evaluator)
         if result is None:
             # Condition couldn't be evaluated; skip
             continue
@@ -103,10 +108,10 @@ def evaluate_conditions(
 # ---------------------------------------------------------------------------
 
 
-def _evaluate_single_condition(
+async def _evaluate_single_condition(
     cond: dict[str, Any],
     context: dict[str, Any],
-    ai_evaluator: Any | None,
+    ai_evaluator: Callable[[str, dict[str, Any]], Awaitable[bool]] | None,
 ) -> bool | None:
     """Evaluate a single condition. Returns True/False or None if unevaluable."""
     if "simple" in cond:
@@ -127,7 +132,7 @@ def _evaluate_single_condition(
             log.warning("ai_condition_no_evaluator", prompt=prompt)
             return None
         try:
-            return ai_evaluator(prompt, context)
+            return await ai_evaluator(prompt, context)
         except Exception as e:
             log.warning("ai_condition_eval_error", prompt=prompt, error=str(e))
             return None
@@ -400,3 +405,161 @@ def _compare(left: Any, op: str, right: Any) -> bool:
         return left_str < right_str
 
     return False
+
+
+# ---------------------------------------------------------------------------
+# AI condition evaluator (Claude CLI)
+# ---------------------------------------------------------------------------
+
+_AI_CONDITION_SCHEMA = {
+    "type": "object",
+    "required": ["answer"],
+    "properties": {
+        "answer": {
+            "type": "boolean",
+            "description": "true if the condition is met, false otherwise",
+        },
+        "reasoning": {
+            "type": "string",
+            "description": "Brief explanation of why the condition is or is not met",
+        },
+    },
+}
+
+
+async def evaluate_ai_condition(
+    prompt: str,
+    context: dict[str, Any],
+    *,
+    work_dir: str = "/tmp",
+    task_id: str = "",
+    stage_num: int = 0,
+    timeout_seconds: int = 120,
+    extra_env: dict[str, str] | None = None,
+) -> bool:
+    """Evaluate an AI condition by asking Claude CLI a yes/no question.
+
+    Constructs a minimal prompt with the condition question and accumulated
+    pipeline context, then invokes Claude CLI with --max-turns 1 (no tools)
+    and a boolean output schema.
+
+    Returns True if the condition is met, False otherwise.
+    """
+    context_json = json.dumps(context, indent=2, default=str)
+
+    system_prompt = (
+        "You are a pipeline condition evaluator. You will be given a question "
+        "about pipeline stage outputs and must answer with a JSON object "
+        "containing an 'answer' boolean field.\n\n"
+        "Evaluate the condition based ONLY on the provided context data. "
+        "If the context does not contain enough information to evaluate the "
+        "condition, answer false.\n\n"
+        "## Output Format\n\n"
+        "You MUST respond with a JSON object conforming to this schema:\n\n"
+        "```json\n"
+        f"{json.dumps(_AI_CONDITION_SCHEMA, indent=2)}\n"
+        "```"
+    )
+
+    stdin_content = (
+        f"## Condition to evaluate\n\n{prompt}\n\n"
+        f"## Pipeline context\n\n```json\n{context_json}\n```"
+    )
+
+    # Write system prompt and stdin to temp files
+    fd_sys, sys_path = tempfile.mkstemp(suffix=".md", prefix="ai-cond-sys-")
+    fd_in, in_path = tempfile.mkstemp(suffix=".txt", prefix="ai-cond-in-")
+    try:
+        with os.fdopen(fd_sys, "w") as f:
+            f.write(system_prompt)
+        with os.fdopen(fd_in, "w") as f:
+            f.write(stdin_content)
+
+        safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id) if task_id else "cond"
+        args = [
+            "claude",
+            "--print",
+            "--dangerously-skip-permissions",
+            "--output-format", "json",
+            "--max-turns", "1",
+            "--system-prompt-file", sys_path,
+            "--json-schema", json.dumps(_AI_CONDITION_SCHEMA),
+        ]
+
+        proc_env: dict[str, str] | None = None
+        if extra_env:
+            proc_env = {**os.environ, **extra_env}
+
+        log.info(
+            "ai_condition_evaluating",
+            task_id=task_id,
+            stage=stage_num,
+            prompt=prompt[:100],
+        )
+
+        with open(in_path) as stdin_f:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdin=stdin_f,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=work_dir,
+                env=proc_env,
+            )
+
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(), timeout=timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.communicate()
+                log.warning("ai_condition_timeout", task_id=task_id, prompt=prompt[:100])
+                return False
+
+        if proc.returncode != 0:
+            stderr_text = stderr_bytes.decode("utf-8", errors="replace")[:500]
+            log.warning(
+                "ai_condition_cli_error",
+                task_id=task_id,
+                returncode=proc.returncode,
+                stderr=stderr_text,
+            )
+            return False
+
+        # Parse Claude CLI JSON output
+        stdout_text = stdout_bytes.decode("utf-8", errors="replace")
+        try:
+            output = json.loads(stdout_text)
+        except json.JSONDecodeError:
+            # Claude CLI wraps output in a result array
+            # Try extracting from the last JSON object in output
+            log.warning("ai_condition_json_parse_error", task_id=task_id, raw=stdout_text[:200])
+            return False
+
+        # Handle Claude CLI output format: may be a dict with "result" key
+        # or the structured output directly
+        if isinstance(output, dict):
+            answer = output.get("answer")
+            if answer is None and "result" in output:
+                answer = output["result"].get("answer") if isinstance(output["result"], dict) else None
+        else:
+            answer = False
+
+        result = bool(answer)
+        reasoning = output.get("reasoning", "") if isinstance(output, dict) else ""
+        log.info(
+            "ai_condition_result",
+            task_id=task_id,
+            prompt=prompt[:100],
+            answer=result,
+            reasoning=reasoning[:200],
+        )
+        return result
+
+    finally:
+        for p in (sys_path, in_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass

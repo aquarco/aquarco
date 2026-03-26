@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from aquarco_supervisor.pipeline.executor import check_conditions
 from aquarco_supervisor.pipeline.conditions import (
     ConditionResult,
@@ -133,116 +135,127 @@ def test_simple_empty_expression() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_evaluate_conditions_simple_true_with_yes() -> None:
+@pytest.mark.asyncio
+async def test_evaluate_conditions_simple_true_with_yes() -> None:
     """'simple: true' with 'yes: review' should jump to review."""
     conditions = [{"simple": "true", "yes": "review", "maxRepeats": 5}]
-    result = evaluate_conditions(conditions, {}, {}, {})
+    result = await evaluate_conditions(conditions, {}, {}, {})
     assert result.jump_to == "review"
     assert result.matched is True
 
 
-def test_evaluate_conditions_simple_false_with_no() -> None:
+@pytest.mark.asyncio
+async def test_evaluate_conditions_simple_false_with_no() -> None:
     """When condition evaluates to False, use the 'no' target."""
     conditions = [
         {"simple": "severity == major_issues || severity == blocking", "no": "test", "maxRepeats": 5}
     ]
     current_output = {"severity": "minor_issues"}
-    result = evaluate_conditions(conditions, {}, current_output, {})
+    result = await evaluate_conditions(conditions, {}, current_output, {})
     assert result.jump_to == "test"
     assert result.matched is True
 
 
-def test_evaluate_conditions_no_jump_when_true_but_no_yes_field() -> None:
+@pytest.mark.asyncio
+async def test_evaluate_conditions_no_jump_when_true_but_no_yes_field() -> None:
     """When condition is True but has no 'yes' field, skip to next condition."""
     conditions = [
         {"simple": "severity == major_issues", "no": "implementation"},
     ]
     current_output = {"severity": "major_issues"}
-    result = evaluate_conditions(conditions, {}, current_output, {})
+    result = await evaluate_conditions(conditions, {}, current_output, {})
     # True but no yes field -> skip; no more conditions -> no jump
     assert result.jump_to is None
     assert result.matched is False
 
 
-def test_evaluate_conditions_max_repeats_exceeded() -> None:
+@pytest.mark.asyncio
+async def test_evaluate_conditions_max_repeats_exceeded() -> None:
     """When maxRepeats is exceeded, condition should be skipped."""
     conditions = [
         {"simple": "true", "yes": "review", "maxRepeats": 3}
     ]
     repeat_counts = {"review": 3}  # Already visited 3 times
-    result = evaluate_conditions(conditions, {}, {}, repeat_counts)
+    result = await evaluate_conditions(conditions, {}, {}, repeat_counts)
     assert result.jump_to is None
     assert result.matched is False
 
 
-def test_evaluate_conditions_max_repeats_not_exceeded() -> None:
+@pytest.mark.asyncio
+async def test_evaluate_conditions_max_repeats_not_exceeded() -> None:
     conditions = [
         {"simple": "true", "yes": "review", "maxRepeats": 3}
     ]
     repeat_counts = {"review": 2}
-    result = evaluate_conditions(conditions, {}, {}, repeat_counts)
+    result = await evaluate_conditions(conditions, {}, {}, repeat_counts)
     assert result.jump_to == "review"
     assert result.matched is True
 
 
-def test_evaluate_conditions_cross_stage_reference() -> None:
+@pytest.mark.asyncio
+async def test_evaluate_conditions_cross_stage_reference() -> None:
     """Cross-stage references like analysis.risks should resolve."""
     conditions = [
         {"simple": "analysis.estimated_complexity == high", "yes": "design"}
     ]
     stage_outputs = {"analysis": {"estimated_complexity": "high"}}
-    result = evaluate_conditions(conditions, stage_outputs, {}, {})
+    result = await evaluate_conditions(conditions, stage_outputs, {}, {})
     assert result.jump_to == "design"
 
 
-def test_evaluate_conditions_empty() -> None:
-    result = evaluate_conditions([], {}, {}, {})
+@pytest.mark.asyncio
+async def test_evaluate_conditions_empty() -> None:
+    result = await evaluate_conditions([], {}, {}, {})
     assert result.jump_to is None
     assert result.matched is False
 
 
-def test_evaluate_conditions_multiple_fallthrough() -> None:
+@pytest.mark.asyncio
+async def test_evaluate_conditions_multiple_fallthrough() -> None:
     """Multiple conditions: first match wins."""
     conditions = [
         {"simple": "severity == blocking", "no": "fix"},
         {"simple": "severity == major_issues", "no": "test"},
     ]
     current_output = {"severity": "minor_issues"}
-    result = evaluate_conditions(conditions, {}, current_output, {})
+    result = await evaluate_conditions(conditions, {}, current_output, {})
     # First condition: severity != blocking -> no: "fix"
     assert result.jump_to == "fix"
 
 
-def test_evaluate_conditions_ai_without_evaluator() -> None:
+@pytest.mark.asyncio
+async def test_evaluate_conditions_ai_without_evaluator() -> None:
     """AI conditions without an evaluator should be skipped."""
     conditions = [
         {"ai": "Is the code safe?", "yes": "deploy", "no": "fix"}
     ]
-    result = evaluate_conditions(conditions, {}, {}, {})
+    result = await evaluate_conditions(conditions, {}, {}, {})
     assert result.jump_to is None
     assert result.matched is False
 
 
-def test_evaluate_conditions_ai_with_evaluator() -> None:
+@pytest.mark.asyncio
+async def test_evaluate_conditions_ai_with_evaluator() -> None:
     """AI conditions with evaluator should use the result."""
-    def mock_ai_evaluator(prompt: str, context: dict) -> bool:
+    async def mock_ai_evaluator(prompt: str, context: dict) -> bool:
         return True
 
     conditions = [
         {"ai": "Is the code safe?", "yes": "deploy", "no": "fix"}
     ]
-    result = evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=mock_ai_evaluator)
+    result = await evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=mock_ai_evaluator)
     assert result.jump_to == "deploy"
     assert result.matched is True
 
 
-def test_evaluate_conditions_ai_evaluator_returns_false() -> None:
-    def mock_ai_evaluator(prompt: str, context: dict) -> bool:
+@pytest.mark.asyncio
+async def test_evaluate_conditions_ai_evaluator_returns_false() -> None:
+    async def mock_ai_evaluator(prompt: str, context: dict) -> bool:
         return False
 
     conditions = [
         {"ai": "Is the code safe?", "yes": "deploy", "no": "fix"}
     ]
-    result = evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=mock_ai_evaluator)
+    result = await evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=mock_ai_evaluator)
     assert result.jump_to == "fix"
     assert result.matched is True
