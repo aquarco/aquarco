@@ -43,5 +43,3 @@ COMMENT ON TABLE agent_overrides IS
     'A FK is not possible because agent_definitions PK is (name, version) '
     'and the partial unique index on (name) WHERE is_active cannot serve as a FK target. '
     'Orphans are cleaned up by periodic application-level queries.';
-
-

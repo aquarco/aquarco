@@ -24,5 +24,3 @@ ALTER TABLE stages ADD CONSTRAINT valid_stage_status CHECK (
 
 -- Counter for how many times a task has been rate-limited (max 24 = ~1 day of retries)
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS rate_limit_count INTEGER NOT NULL DEFAULT 0;
-
-

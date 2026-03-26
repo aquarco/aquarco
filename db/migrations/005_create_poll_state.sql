@@ -36,5 +36,3 @@ COMMENT ON TABLE  poll_state                    IS 'Per-poller cursor and metada
 COMMENT ON COLUMN poll_state.poller_name        IS 'Must match an entry in repositories.pollers[].';
 COMMENT ON COLUMN poll_state.cursor             IS 'Opaque poller-specific resume cursor (timestamp, event ID, etc.).';
 COMMENT ON COLUMN poll_state.state_data         IS 'Arbitrary poller state: rate-limit windows, backoff counters, pagination tokens.';
-
-

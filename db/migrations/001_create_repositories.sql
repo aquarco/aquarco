@@ -48,5 +48,3 @@ COMMENT ON COLUMN repositories.clone_dir        IS 'Absolute filesystem path of 
 COMMENT ON COLUMN repositories.pollers          IS 'Array of poller names that watch this repository.';
 COMMENT ON COLUMN repositories.clone_status     IS 'Lifecycle state of the local clone: pending → cloning → ready | error.';
 COMMENT ON COLUMN repositories.head_sha         IS 'Full SHA of HEAD after the most recent pull.';
-
-

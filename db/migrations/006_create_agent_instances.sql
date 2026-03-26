@@ -40,5 +40,3 @@ COMMENT ON TABLE  agent_instances                   IS 'Per-agent concurrency co
 COMMENT ON COLUMN agent_instances.agent_name        IS 'Must match metadata.name in the agent definition YAML.';
 COMMENT ON COLUMN agent_instances.active_count      IS 'Currently running instances; supervisor enforces maxConcurrent against this.';
 COMMENT ON COLUMN agent_instances.total_tokens_used IS 'Cumulative token usage for cost-awareness dashboards (Claude Code Max sessions).';
-
-

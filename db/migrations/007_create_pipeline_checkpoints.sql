@@ -37,5 +37,3 @@ CREATE TABLE IF NOT EXISTS pipeline_checkpoints (
 COMMENT ON TABLE  pipeline_checkpoints                      IS 'Per-task resume checkpoint; enables the executor to restart cleanly after a crash.';
 COMMENT ON COLUMN pipeline_checkpoints.last_completed_stage IS '0-based index of the last successfully completed stage.';
 COMMENT ON COLUMN pipeline_checkpoints.checkpoint_data      IS 'Executor state needed on resume: branch, workspace, env vars, etc.';
-
-

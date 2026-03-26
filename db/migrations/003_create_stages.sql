@@ -86,5 +86,3 @@ CREATE INDEX IF NOT EXISTS idx_stages_task_id
 CREATE INDEX IF NOT EXISTS idx_stages_status
     ON stages(status)
     WHERE status IN ('executing', 'failed');
-
-

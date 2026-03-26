@@ -246,5 +246,3 @@ COMMENT ON FUNCTION get_task_context(TEXT) IS
     'all stage records (incl. stage_key/iteration/input/validation items), '
     'accumulated context entries, and all validation items for the given task_id. '
     'Returns NULL if the task does not exist.';
-
-

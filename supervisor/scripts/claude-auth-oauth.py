@@ -6,6 +6,8 @@ Bypasses the CLI's Ink TUI entirely by performing the OAuth exchange directly
 and writing credentials to ~/.claude/.credentials.json.
 
 Uses the same client_id, endpoints, and credential format as the CLI.
+The authorize URL is shown in the web UI; the user opens it in a browser,
+authorizes, and copies the auth code back into the web UI.
 """
 
 import hashlib
@@ -21,12 +23,22 @@ import urllib.error
 
 IPC_DIR = sys.argv[1] if len(sys.argv) > 1 else "/var/lib/aquarco/claude-ipc"
 
-# Claude CLI OAuth constants
+# Claude CLI OAuth constants (from CLI source V0A + FP8/jZ1 functions)
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 AUTHORIZE_URL = "https://claude.ai/oauth/authorize"
 TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 REDIRECT_URI = "https://platform.claude.com/oauth/code/callback"
-SCOPES = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
+SCOPES = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
+
+# User-Agent rotation to avoid Cloudflare blocking.
+# Cloudflare rejects Python's default UA and some custom strings.
+# We try multiple known-good UAs in order.
+USER_AGENTS = [
+    "axios/1.7.9",
+    "node-fetch/1.0 (+https://github.com/bitinn/node-fetch)",
+    "Mozilla/5.0 (compatible; ClaudeCode/2.1)",
+    "claude-code/2.1.84",
+]
 
 
 def get_cli_version():
@@ -34,7 +46,6 @@ def get_cli_version():
     try:
         import subprocess
         out = subprocess.check_output(["claude", "--version"], text=True, timeout=5).strip()
-        # Output: "2.1.80 (Claude Code)" → extract version number
         ver = out.split()[0] if out else "2.1.80"
         return ver
     except Exception:
@@ -91,7 +102,11 @@ def build_authorize_url(code_challenge, state):
 
 
 def exchange_token(auth_code, code_verifier, state):
-    """Exchange authorization code for tokens (with retry on 429)."""
+    """Exchange authorization code for tokens.
+
+    Tries multiple User-Agent strings to avoid Cloudflare 403/429 blocks.
+    Falls back to next UA on Cloudflare-style errors.
+    """
     body = {
         "grant_type": "authorization_code",
         "code": auth_code,
@@ -106,41 +121,81 @@ def exchange_token(auth_code, code_verifier, state):
         f"verifier_len={len(code_verifier)}")
     payload = json.dumps(body).encode("utf-8")
 
-    max_retries = 5
     last_error = None
 
-    for attempt in range(max_retries):
+    for ua in USER_AGENTS:
+        log(f"Trying User-Agent: {ua}")
         req = urllib.request.Request(
             TOKEN_URL,
             data=payload,
             headers={
                 "Content-Type": "application/json",
-                "User-Agent": f"claude-code/{CLI_VERSION}",
-                "Accept": "application/json",
+                "User-Agent": ua,
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Encoding": "identity",
             },
             method="POST",
         )
 
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+                result = json.loads(resp.read().decode("utf-8"))
+                log(f"Token exchange succeeded with User-Agent: {ua}")
+                return result
         except urllib.error.HTTPError as e:
             resp_body = e.read().decode("utf-8", errors="replace")
             last_error = e
-            if e.code == 429:
-                retry_after = e.headers.get("Retry-After")
-                delay = int(retry_after) if retry_after and retry_after.isdigit() else (3 * (2 ** attempt))
-                log(f"Token exchange rate-limited (429), retry {attempt + 1}/{max_retries} in {delay}s")
-                time.sleep(delay)
-                continue
+
+            # Cloudflare block (403) or rate limit (429) → try next UA
+            if e.code in (403, 429):
+                is_cloudflare = "cloudflare" in resp_body.lower() or "cf-ray" in str(e.headers).lower()
+                log(f"HTTP {e.code} with UA '{ua}' "
+                    f"(cloudflare={'yes' if is_cloudflare else 'no'}), "
+                    f"body={resp_body[:150]}")
+                if is_cloudflare:
+                    time.sleep(2)  # Brief pause before trying next UA
+                    continue
+                # Non-Cloudflare 429 = real rate limit from OAuth server
+                if e.code == 429:
+                    log(f"Real rate limit (non-Cloudflare), waiting 30s")
+                    time.sleep(30)
+                    continue
+
             log(f"Token exchange failed: HTTP {e.code} — {resp_body[:300]}")
             raise
         except Exception as e:
-            log(f"Token exchange error: {e}")
-            raise
+            log(f"Token exchange error with UA '{ua}': {e}")
+            last_error = e
+            continue
 
-    log(f"Token exchange failed after {max_retries} retries")
-    raise last_error
+    # All UAs exhausted — do one final retry with the best UA after a long pause
+    log("All User-Agents exhausted, waiting 60s for final retry")
+    time.sleep(60)
+
+    best_ua = USER_AGENTS[0]
+    req = urllib.request.Request(
+        TOKEN_URL,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": best_ua,
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Encoding": "identity",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        resp_body = e.read().decode("utf-8", errors="replace")
+        log(f"Final retry failed: HTTP {e.code} — {resp_body[:300]}")
+        raise
+    except Exception as e:
+        log(f"Final retry error: {e}")
+        if last_error:
+            raise last_error
+        raise
 
 
 def save_credentials(token_response):

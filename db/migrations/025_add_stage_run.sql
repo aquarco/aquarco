@@ -163,5 +163,3 @@ COMMENT ON FUNCTION get_task_context(TEXT) IS
     'accumulated context entries, and all validation items for the given task_id. '
     'Returns NULL if the task does not exist. '
     'Only the latest run per (stage_key, iteration) is included — older runs are preserved in the table.';
-
-

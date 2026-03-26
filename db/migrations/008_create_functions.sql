@@ -168,5 +168,3 @@ COMMENT ON FUNCTION get_task_context(TEXT) IS
     'and all accumulated context entries for the given task_id. '
     'Returns NULL if the task does not exist. '
     'Used by the pipeline executor to assemble an agent context window.';
-
-

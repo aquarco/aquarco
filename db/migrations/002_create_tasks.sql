@@ -109,5 +109,3 @@ CREATE INDEX IF NOT EXISTS idx_tasks_created
 CREATE INDEX IF NOT EXISTS idx_tasks_status_priority
     ON tasks(status, priority)
     WHERE status IN ('pending', 'queued');
-
-

@@ -66,8 +66,3 @@ COMMENT ON COLUMN context.value_file_ref IS 'Relative path to a blob on disk, e.
 -- Efficient lookup of all context entries for a task (primary access pattern).
 CREATE INDEX IF NOT EXISTS idx_context_task_id
     ON context(task_id);
-
--- Note: the UNIQUE (task_id, key) constraint already creates an index on
--- (task_id, key); no additional explicit index is needed for that access pattern.
-
-
