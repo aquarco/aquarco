@@ -989,3 +989,97 @@ async def test_system_agents_never_compete_for_pipeline_slots_in_structured_scan
     assert "review-agent-alt" in candidates
     # Sorted by priority ascending: alt (30) < review (50) → review-agent-alt first
     assert candidates[0] == "review-agent-alt"
+
+
+# ---------------------------------------------------------------------------
+# dict() shallow-copy isolation tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_discover_agents_from_dir_spec_is_shallow_copy(
+    mock_db: AsyncMock, tmp_path: Path
+) -> None:
+    """Mutating a spec in _agents must not affect the on-disk YAML content.
+
+    The ``dict(raw.get("spec", raw))`` shallow copy introduced in
+    _discover_agents_from_dir ensures the registry's spec dict is isolated
+    from the raw YAML-parsed object so that in-memory mutations do not
+    propagate back to re-reads of the file.
+    """
+    # Arrange: write a valid pipeline agent YAML file
+    agents_dir = tmp_path / "pipeline"
+    agents_dir.mkdir(parents=True)
+    agent_defn = {
+        "kind": "AgentDefinition",
+        "metadata": {"name": "canary-agent"},
+        "spec": {
+            "categories": ["canary"],
+            "priority": 5,
+            "promptFile": "canary-agent.md",
+        },
+    }
+    yaml_file = agents_dir / "canary-agent.yaml"
+    yaml_file.write_text(yaml.dump(agent_defn))
+
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+
+    # Act: load via _discover_agents_from_dir
+    reg._discover_agents_from_dir(agents_dir, group="pipeline")
+
+    # Assert: the agent was loaded
+    assert "canary-agent" in reg._agents
+
+    # Mutate the in-registry spec dict
+    reg._agents["canary-agent"]["categories"] = ["mutated"]
+    reg._agents["canary-agent"]["_injected_key"] = "should_not_appear_on_disk"
+
+    # Re-read the YAML file from disk — it must be unchanged
+    reloaded = yaml.safe_load(yaml_file.read_text())
+    assert reloaded["spec"]["categories"] == ["canary"]
+    assert "_injected_key" not in reloaded["spec"]
+
+
+@pytest.mark.asyncio
+async def test_discover_agents_flat_scan_spec_is_shallow_copy(
+    mock_db: AsyncMock, tmp_path: Path
+) -> None:
+    """Flat-scan path also isolates registry spec from the raw YAML parse tree.
+
+    The flat scan in ``_discover_agents`` (used when system/ and pipeline/
+    subdirectories do NOT exist) applies the same ``dict()`` shallow copy.
+    """
+    # Arrange: write a YAML agent directly in agents_dir (flat layout)
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir(parents=True)
+    agent_defn = {
+        "kind": "AgentDefinition",
+        "metadata": {"name": "flat-agent"},
+        "spec": {
+            "categories": ["flat"],
+            "priority": 1,
+        },
+    }
+    yaml_file = agents_dir / "flat-agent.yaml"
+    yaml_file.write_text(yaml.dump(agent_defn))
+
+    mock_db.fetch_all.return_value = []
+    mock_db.execute.return_value = None
+
+    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+
+    # Use a non-existent registry file so load() falls through to _discover_agents
+    non_existent = str(tmp_path / "no-registry.json")
+    await reg.load(non_existent)
+
+    # Assert: agent was loaded
+    assert "flat-agent" in reg._agents
+
+    # Mutate in-registry spec
+    reg._agents["flat-agent"]["categories"] = ["mutated"]
+    reg._agents["flat-agent"]["_injected_key"] = "should_not_appear_on_disk"
+
+    # Re-read YAML from disk — must be unchanged
+    reloaded = yaml.safe_load(yaml_file.read_text())
+    assert reloaded["spec"]["categories"] == ["flat"]
+    assert "_injected_key" not in reloaded["spec"]

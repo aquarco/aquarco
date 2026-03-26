@@ -307,3 +307,92 @@ async def test_fetch_val_raises_query_error_on_psycopg_error() -> None:
 
     with pytest.raises(QueryError):
         await db.fetch_val("SELECT 1")
+
+
+# ---------------------------------------------------------------------------
+# transaction() tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_transaction_yields_connection_inside_transaction_block() -> None:
+    """transaction() acquires a connection and wraps it in conn.transaction()."""
+    from contextlib import asynccontextmanager
+
+    db = Database("postgresql://test:test@localhost/test")
+
+    mock_conn = AsyncMock()
+
+    # conn.transaction() must be an async context manager
+    mock_txn = AsyncMock()
+    mock_txn.__aenter__ = AsyncMock(return_value=None)
+    mock_txn.__aexit__ = AsyncMock(return_value=False)
+    mock_conn.transaction = lambda: mock_txn
+
+    @asynccontextmanager
+    async def _fake_acquire():
+        yield mock_conn
+
+    db.acquire = _fake_acquire  # type: ignore[method-assign]
+
+    # Arrange & Act
+    yielded_conn = None
+    async with db.transaction() as conn:
+        yielded_conn = conn
+
+    # Assert: the connection was yielded and the transaction block was entered
+    assert yielded_conn is mock_conn
+    mock_txn.__aenter__.assert_awaited_once()
+    mock_txn.__aexit__.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_transaction_rolls_back_on_exception() -> None:
+    """transaction() propagates exceptions so conn.transaction() can roll back."""
+    from contextlib import asynccontextmanager
+
+    db = Database("postgresql://test:test@localhost/test")
+
+    mock_conn = AsyncMock()
+
+    # Simulate a real async context manager that re-raises exceptions
+    entered = False
+    exited_with_exc = False
+
+    @asynccontextmanager
+    async def _real_txn():
+        nonlocal entered, exited_with_exc
+        entered = True
+        try:
+            yield
+        except Exception:
+            exited_with_exc = True
+            raise
+
+    mock_conn.transaction = _real_txn
+
+    @asynccontextmanager
+    async def _fake_acquire():
+        yield mock_conn
+
+    db.acquire = _fake_acquire  # type: ignore[method-assign]
+
+    # Act: raise an exception inside the transaction block
+    with pytest.raises(RuntimeError, match="boom"):
+        async with db.transaction():
+            raise RuntimeError("boom")
+
+    # Assert: the transaction block was entered and exited with the exception
+    assert entered is True
+    assert exited_with_exc is True
+
+
+@pytest.mark.asyncio
+async def test_transaction_without_connect_raises_connection_pool_error() -> None:
+    """transaction() raises ConnectionPoolError when the pool is not initialized."""
+    db = Database("postgresql://test:test@localhost/test")
+    # _pool is None by default
+
+    with pytest.raises(ConnectionPoolError, match="not initialized"):
+        async with db.transaction():
+            pass
