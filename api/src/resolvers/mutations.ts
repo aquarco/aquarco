@@ -570,7 +570,7 @@ export const Mutation = {
       // Write IPC command file to trigger supervisor to process the scan
       const fs = await import('node:fs/promises')
       const path = await import('node:path')
-      const ipcDir = process.env.IPC_DIR ?? '/var/lib/aquarco/claude-ipc'
+      const ipcDir = process.env.IPC_DIR ?? '/claude-ipc'
       await fs.mkdir(ipcDir, { recursive: true })
       const cmdFile = path.join(ipcDir, `agent-scan-${args.repoName}-${Date.now()}.json`)
       await fs.writeFile(cmdFile, JSON.stringify({

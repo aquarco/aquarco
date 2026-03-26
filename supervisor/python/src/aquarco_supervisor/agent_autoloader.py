@@ -16,6 +16,7 @@ from typing import Any, Callable, Coroutine
 
 import yaml
 
+from .config_store import deactivate_autoloaded_agents
 from .database import Database
 from .logging import get_logger
 from .models import RepoAgentScanStatus
@@ -137,11 +138,11 @@ def _infer_tools(content: str) -> list[str]:
     tools = list(DEFAULT_TOOLS)
 
     tool_hints = {
-        "Bash": ["bash", "shell", "command", "npm", "pip", "docker"],
-        "Write": ["write", "create file", "generate"],
-        "Edit": ["edit", "modify", "update file"],
-        "WebSearch": ["search", "web search", "lookup"],
-        "WebFetch": ["fetch", "download", "http"],
+        "Bash": ["bash", "shell command", "run command", "npm ", "pip ", "docker"],
+        "Write": ["write file", "create file", "write new", "generate file"],
+        "Edit": ["edit file", "modify file", "update file"],
+        "WebSearch": ["web search", "search the web"],
+        "WebFetch": ["web fetch", "fetch url", "download url", "http request"],
     }
 
     for tool, hints in tool_hints.items():
@@ -299,7 +300,7 @@ async def check_rate_limit(db: Database, repo_name: str) -> bool:
     row = await db.fetch_one(
         """SELECT id FROM repo_agent_scans
            WHERE repo_name = %(repo_name)s
-             AND created_at > NOW() - INTERVAL '%(seconds)s seconds'
+             AND created_at > NOW() - make_interval(secs => %(seconds)s)
              AND status IN ('completed', 'failed')
            LIMIT 1""",
         {"repo_name": repo_name, "seconds": RATE_LIMIT_SECONDS},
@@ -308,23 +309,6 @@ async def check_rate_limit(db: Database, repo_name: str) -> bool:
 
 
 # --- Agent definition DB helpers ---
-
-
-async def deactivate_autoloaded_agents(db: Database, repo_name: str) -> int:
-    """Deactivate all previously autoloaded agents for a repository.
-
-    Returns the number of agents deactivated.
-    """
-    result = await db.fetch_one(
-        """UPDATE agent_definitions
-           SET is_active = false
-           WHERE source = %(source)s AND is_active = true
-           RETURNING COUNT(*) OVER() as count""",
-        {"source": f"autoload:{repo_name}"},
-    )
-    count = result["count"] if result else 0
-    log.info("autoloaded_agents_deactivated", repo_name=repo_name, count=count)
-    return count
 
 
 async def store_autoloaded_agents(

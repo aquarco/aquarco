@@ -47,7 +47,7 @@ import Checkbox from '@mui/material/Checkbox'
 import SettingsIcon from '@mui/icons-material/Settings'
 import Snackbar from '@mui/material/Snackbar'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
-import { GET_REPOSITORIES, REGISTER_REPOSITORY, REMOVE_REPOSITORY, RETRY_CLONE, SET_CONFIG_REPO, GITHUB_AUTH_STATUS, GITHUB_LOGIN_START, GITHUB_LOGIN_POLL, GITHUB_LOGOUT, GITHUB_REPOSITORIES, RELOAD_REPO_AGENTS, GET_REPO_AGENT_SCAN } from '@/lib/graphql/queries'
+import { GET_REPOSITORIES, REGISTER_REPOSITORY, REMOVE_REPOSITORY, RETRY_CLONE, SET_CONFIG_REPO, GITHUB_AUTH_STATUS, GITHUB_LOGIN_START, GITHUB_LOGIN_POLL, GITHUB_LOGOUT, GITHUB_REPOSITORIES, RELOAD_REPO_AGENTS } from '@/lib/graphql/queries'
 import { formatDate } from '@/lib/format'
 
 interface RepoAgentScanInfo {
@@ -238,6 +238,15 @@ export default function ReposPage() {
 
   const [snackbarMsg, setSnackbarMsg] = useState<string | null>(null)
   const [scanningRepos, setScanningRepos] = useState<Set<string>>(new Set())
+  const scanPollRefs = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
+
+  // Cleanup all scan polling intervals on unmount
+  useEffect(() => {
+    return () => {
+      scanPollRefs.current.forEach((id) => clearInterval(id))
+      scanPollRefs.current.clear()
+    }
+  }, [])
 
   const [reloadRepoAgents] = useMutation(RELOAD_REPO_AGENTS, {
     onCompleted: (result) => {
@@ -250,6 +259,11 @@ export default function ReposPage() {
       if (scan) {
         setSnackbarMsg(`Agent scan started for ${scan.repoName}`)
         setScanningRepos((prev) => new Set([...prev, scan.repoName]))
+
+        // Clear any existing poll for this repo
+        const existing = scanPollRefs.current.get(scan.repoName)
+        if (existing) clearInterval(existing)
+
         // Poll for scan completion
         const pollInterval = setInterval(async () => {
           const { data: scanData } = await refetch()
@@ -257,6 +271,7 @@ export default function ReposPage() {
           const latestScan = repo?.lastAgentScan
           if (latestScan && (latestScan.status === 'COMPLETED' || latestScan.status === 'FAILED')) {
             clearInterval(pollInterval)
+            scanPollRefs.current.delete(scan.repoName)
             setScanningRepos((prev) => {
               const next = new Set(prev)
               next.delete(scan.repoName)
@@ -269,8 +284,12 @@ export default function ReposPage() {
             }
           }
         }, 2000)
+        scanPollRefs.current.set(scan.repoName, pollInterval)
         // Auto-cleanup after 2 minutes
-        setTimeout(() => clearInterval(pollInterval), 120_000)
+        setTimeout(() => {
+          clearInterval(pollInterval)
+          scanPollRefs.current.delete(scan.repoName)
+        }, 120_000)
       }
     },
     onError: (err) => {

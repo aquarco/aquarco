@@ -250,22 +250,22 @@ def test_analyze_agent_prompt_default_tools():
 
 
 def test_analyze_agent_prompt_infers_bash_tool():
-    """Agent mentioning bash/shell gets Bash tool."""
-    content = "This agent runs bash commands to build the project."
+    """Agent mentioning bash gets Bash tool."""
+    content = "This agent runs bash scripts to build the project."
     result = analyze_agent_prompt(content, "builder.md")
     assert "Bash" in result["tools"]
 
 
 def test_analyze_agent_prompt_infers_write_tool():
-    """Agent mentioning write/create gets Write tool."""
-    content = "This agent writes new files and generates code."
+    """Agent mentioning write file gets Write tool."""
+    content = "This agent can write file outputs and generate file artifacts."
     result = analyze_agent_prompt(content, "writer.md")
     assert "Write" in result["tools"]
 
 
 def test_analyze_agent_prompt_infers_edit_tool():
-    """Agent mentioning edit/modify gets Edit tool."""
-    content = "This agent edits and modifies existing files."
+    """Agent mentioning edit file gets Edit tool."""
+    content = "This agent can edit file contents and modify file structure."
     result = analyze_agent_prompt(content, "editor.md")
     assert "Edit" in result["tools"]
 
@@ -965,7 +965,7 @@ async def test_full_pipeline_3_agents(tmp_path: Path):
         "# Test Runner\nThis agent runs tests and checks coverage."
     )
     (agents_dir / "deployer.md").write_text(
-        "# Deployer\nThis agent runs bash commands to deploy."
+        "# Deployer\nThis agent uses bash scripts and shell command execution to deploy."
     )
 
     db = AsyncMock()

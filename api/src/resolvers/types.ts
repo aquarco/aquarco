@@ -92,7 +92,7 @@ export const Repository = {
   },
 
   async hasClaudeAgents(
-    parent: { name: string; cloneDir?: string; clone_dir?: string } | RepositoryRow,
+    parent: { name: string } | RepositoryRow,
     _: unknown,
     ctx: Context
   ): Promise<boolean> {
@@ -104,22 +104,14 @@ export const Repository = {
     )
     if (parseInt(result.rows[0].count, 10) > 0) return true
 
-    // Fallback: check filesystem if clone_dir is available
-    const cloneDir = (parent as Record<string, unknown>).cloneDir ?? (parent as Record<string, unknown>).clone_dir
-    if (cloneDir) {
-      try {
-        const fs = await import('node:fs')
-        const path = await import('node:path')
-        const reposBase = process.env.REPOS_BASE ?? '/home/agent/repos'
-        const relative = path.default.relative(reposBase, cloneDir as string)
-        const containerPath = path.default.join('/repos', relative)
-        const agentsDir = path.default.join(containerPath, '.claude', 'agents')
-        return fs.existsSync(agentsDir)
-      } catch {
-        return false
-      }
-    }
-    return false
+    // Check if a successful scan found agents (even if definitions were later removed)
+    const scanResult = await ctx.pool.query<{ agents_found: number }>(
+      `SELECT agents_found FROM repo_agent_scans
+       WHERE repo_name = $1 AND status = 'completed' AND agents_found > 0
+       ORDER BY created_at DESC LIMIT 1`,
+      [parent.name]
+    )
+    return scanResult.rows.length > 0
   },
 
   async lastAgentScan(

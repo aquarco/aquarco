@@ -72,43 +72,16 @@ CREATE TABLE repo_agent_scans (
 
 Add `AUTOLOADED` to the GraphQL `AgentSource` enum.
 
-### 2.3 Agent Analysis Prompt
+### 2.3 Agent Analysis (Heuristic)
 
-The Claude CLI invocation to analyze a `.md` prompt file uses a structured output schema to ensure reliable parsing. The prompt instructs Claude to:
+The implementation uses fast heuristic-based analysis rather than Claude CLI invocation (avoiding per-scan cost and latency). The `analyze_agent_prompt()` function:
 
-1. Read the markdown content
-2. Infer the agent's purpose and role
-3. Map it to one or more aquarco categories: `[analyze, design, implementation, test, docs, review]`
-4. Suggest appropriate tools (allowed/denied)
-5. Suggest priority (1-100)
-6. Suggest output format
-7. Generate a kebab-case name and version
+1. Extracts the description from the first non-empty line of the markdown
+2. Infers the category from keyword matching against agent name and content (e.g., "test", "review", "security")
+3. Infers allowed tools from specific multi-word phrases in content (e.g., "bash", "write file", "edit file")
+4. Falls back to conservative defaults: category=`implementation`, tools=`[Read, Grep, Glob]`
 
-**Output schema:**
-```json
-{
-  "type": "object",
-  "required": ["name", "description", "categories", "tools", "priority", "outputFormat"],
-  "properties": {
-    "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-    "description": { "type": "string", "minLength": 10 },
-    "categories": { "type": "array", "items": { "enum": ["analyze","design","implementation","test","docs","review"] } },
-    "tools": {
-      "type": "object",
-      "properties": {
-        "allowed": { "type": "array", "items": { "type": "string" } },
-        "denied": { "type": "array", "items": { "type": "string" } }
-      }
-    },
-    "priority": { "type": "integer", "minimum": 1, "maximum": 100 },
-    "outputFormat": { "enum": ["task-file","github-pr-comment","commit","issue","none"] },
-    "suggestCustomPipeline": { "type": "boolean" },
-    "customPipeline": { "type": "object" }
-  }
-}
-```
-
-The analysis uses a single Claude CLI call with `--max-turns 1` and `--max-tokens 8000` to keep costs low. The agent prompt content is passed via the task prompt, not as a separate file.
+This approach is zero-cost, deterministic, and avoids the risks of prompt injection during analysis. Claude CLI analysis can be added as an optional enhancement in the future for ambiguous prompts.
 
 ### 2.4 Integration Points
 
