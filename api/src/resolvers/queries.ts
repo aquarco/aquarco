@@ -172,16 +172,11 @@ export const Query = {
     if (taskResult.rows.length === 0) return null
     const task = taskResult.rows[0]
 
-    const stagesResult = await ctx.pool.query<Record<string, unknown>>(
-      `SELECT s.*
-       FROM stages s
-       WHERE s.task_id = $1
-       ORDER BY s.stage_number ASC, COALESCE(s.iteration, 1) ASC, COALESCE(s.run, 1) ASC`,
-      [args.taskId]
+    const stageRows = await ctx.loaders.stagesByTaskLoader.load(args.taskId)
+    const stages = stageRows.map((row) =>
+      mapStage(row as unknown as Record<string, unknown>)
     )
-
-    const stages = stagesResult.rows.map(mapStage)
-    const uniqueStageNumbers = new Set(stagesResult.rows.map((r) => r.stage_number))
+    const uniqueStageNumbers = new Set(stageRows.map((r) => r.stage_number))
     const totalStages = uniqueStageNumbers.size
 
     return {

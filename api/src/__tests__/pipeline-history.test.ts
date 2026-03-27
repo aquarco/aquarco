@@ -18,25 +18,29 @@
 import { jest } from '@jest/globals'
 import { Query, mapStage } from '../resolvers/queries.js'
 import type { Context } from '../context.js'
+import type { StageRow } from '../loaders.js'
 
-// ── Mock pool factory ──────────────────────────────────────────────────────────
+// ── Mock helpers ─────────────────────────────────────────────────────────────
 
-function mockPool(responses: Array<{ rows: Record<string, unknown>[] }>) {
-  let callIndex = 0
-  const query = jest.fn((..._args: unknown[]) => {
-    const response = responses[callIndex] ?? { rows: [] }
-    callIndex++
-    return Promise.resolve(response)
-  })
+function mockPool(taskRows: Record<string, unknown>[]) {
+  const query = jest.fn((..._args: unknown[]) =>
+    Promise.resolve({ rows: taskRows })
+  )
   return { query }
 }
 
-function makeCtx(pool: { query: jest.Mock }): Context {
+function makeCtx(
+  pool: { query: jest.Mock },
+  stageRows: StageRow[] = []
+): Context {
+  const loadStages = jest.fn<() => Promise<StageRow[]>>().mockResolvedValue(stageRows)
   return {
     pool: pool as unknown as Context['pool'],
     loaders: {
       repositoryLoader: { load: jest.fn() } as unknown as Context['loaders']['repositoryLoader'],
-      stagesByTaskLoader: { load: jest.fn() } as unknown as Context['loaders']['stagesByTaskLoader'],
+      stagesByTaskLoader: {
+        load: loadStages,
+      } as unknown as Context['loaders']['stagesByTaskLoader'],
       contextByTaskLoader: { load: jest.fn() } as unknown as Context['loaders']['contextByTaskLoader'],
     },
   }
@@ -44,7 +48,7 @@ function makeCtx(pool: { query: jest.Mock }): Context {
 
 // ── Shared fixture ─────────────────────────────────────────────────────────────
 
-const baseStageRow: Record<string, unknown> = {
+const baseStageRow: StageRow = {
   id: 'stage-1',
   task_id: 'task-42',
   stage_number: 0,
@@ -96,14 +100,14 @@ describe('mapStage — iteration and run fields', () => {
   })
 
   it('should default iteration to 1 when DB column is undefined', () => {
-    const row = { ...baseStageRow }
+    const row: Record<string, unknown> = { ...baseStageRow }
     delete row.iteration
     const result = mapStage(row)
     expect(result.iteration).toBe(1)
   })
 
   it('should default run to 1 when DB column is undefined', () => {
-    const row = { ...baseStageRow }
+    const row: Record<string, unknown> = { ...baseStageRow }
     delete row.run
     const result = mapStage(row)
     expect(result.run).toBe(1)
@@ -137,17 +141,13 @@ describe('mapStage — iteration and run fields', () => {
 
 describe('Query.pipelineStatus — totalStages with Set-based deduplication', () => {
   it('should count one stage when all rows have the same stage_number', async () => {
-    // Three runs of the same stage (stage_number=0) should count as 1 unique stage
-    const stageRows = [
+    const stageRows: StageRow[] = [
       { ...baseStageRow, id: 'stage-1', stage_number: 0, iteration: 1, run: 1 },
       { ...baseStageRow, id: 'stage-2', stage_number: 0, iteration: 1, run: 2 },
       { ...baseStageRow, id: 'stage-3', stage_number: 0, iteration: 2, run: 1 },
     ]
-    const pool = mockPool([
-      { rows: [taskRow] },
-      { rows: stageRows },
-    ])
-    const ctx = makeCtx(pool)
+    const pool = mockPool([taskRow])
+    const ctx = makeCtx(pool, stageRows)
 
     const result = await Query.pipelineStatus(null, { taskId: 'task-42' }, ctx)
 
@@ -156,8 +156,7 @@ describe('Query.pipelineStatus — totalStages with Set-based deduplication', ()
   })
 
   it('should count distinct stage_numbers regardless of how many runs exist', async () => {
-    // stage_number 0: 2 runs, stage_number 1: 1 run, stage_number 2: 3 runs => 3 distinct stages
-    const stageRows = [
+    const stageRows: StageRow[] = [
       { ...baseStageRow, id: 's-0a', stage_number: 0, iteration: 1, run: 1 },
       { ...baseStageRow, id: 's-0b', stage_number: 0, iteration: 1, run: 2 },
       { ...baseStageRow, id: 's-1a', stage_number: 1, iteration: 1, run: 1 },
@@ -165,11 +164,8 @@ describe('Query.pipelineStatus — totalStages with Set-based deduplication', ()
       { ...baseStageRow, id: 's-2b', stage_number: 2, iteration: 2, run: 1 },
       { ...baseStageRow, id: 's-2c', stage_number: 2, iteration: 3, run: 1 },
     ]
-    const pool = mockPool([
-      { rows: [taskRow] },
-      { rows: stageRows },
-    ])
-    const ctx = makeCtx(pool)
+    const pool = mockPool([taskRow])
+    const ctx = makeCtx(pool, stageRows)
 
     const result = await Query.pipelineStatus(null, { taskId: 'task-42' }, ctx)
 
@@ -177,17 +173,14 @@ describe('Query.pipelineStatus — totalStages with Set-based deduplication', ()
   })
 
   it('should equal stages.length when every stage_number is unique (no repeated runs)', async () => {
-    const stageRows = [
+    const stageRows: StageRow[] = [
       { ...baseStageRow, id: 's-0', stage_number: 0 },
       { ...baseStageRow, id: 's-1', stage_number: 1 },
       { ...baseStageRow, id: 's-2', stage_number: 2 },
       { ...baseStageRow, id: 's-3', stage_number: 3 },
     ]
-    const pool = mockPool([
-      { rows: [taskRow] },
-      { rows: stageRows },
-    ])
-    const ctx = makeCtx(pool)
+    const pool = mockPool([taskRow])
+    const ctx = makeCtx(pool, stageRows)
 
     const result = await Query.pipelineStatus(null, { taskId: 'task-42' }, ctx)
 
@@ -196,11 +189,8 @@ describe('Query.pipelineStatus — totalStages with Set-based deduplication', ()
   })
 
   it('should return zero totalStages when no stages exist', async () => {
-    const pool = mockPool([
-      { rows: [taskRow] },
-      { rows: [] },
-    ])
-    const ctx = makeCtx(pool)
+    const pool = mockPool([taskRow])
+    const ctx = makeCtx(pool, [])
 
     const result = await Query.pipelineStatus(null, { taskId: 'task-42' }, ctx)
 
@@ -212,16 +202,13 @@ describe('Query.pipelineStatus — totalStages with Set-based deduplication', ()
 
 describe('Query.pipelineStatus — stages array contains all runs', () => {
   it('should include all stage rows including repeated stage_number runs', async () => {
-    const stageRows = [
+    const stageRows: StageRow[] = [
       { ...baseStageRow, id: 's-0a', stage_number: 0, iteration: 1, run: 1, status: 'completed' },
       { ...baseStageRow, id: 's-0b', stage_number: 0, iteration: 1, run: 2, status: 'completed' },
       { ...baseStageRow, id: 's-1a', stage_number: 1, iteration: 1, run: 1, status: 'executing' },
     ]
-    const pool = mockPool([
-      { rows: [taskRow] },
-      { rows: stageRows },
-    ])
-    const ctx = makeCtx(pool)
+    const pool = mockPool([taskRow])
+    const ctx = makeCtx(pool, stageRows)
 
     const result = await Query.pipelineStatus(null, { taskId: 'task-42' }, ctx)
 
@@ -231,15 +218,12 @@ describe('Query.pipelineStatus — stages array contains all runs', () => {
   })
 
   it('should preserve the iteration and run values on each stage in the returned array', async () => {
-    const stageRows = [
+    const stageRows: StageRow[] = [
       { ...baseStageRow, id: 's-run1', stage_number: 0, iteration: 1, run: 1 },
       { ...baseStageRow, id: 's-run2', stage_number: 0, iteration: 1, run: 2 },
     ]
-    const pool = mockPool([
-      { rows: [taskRow] },
-      { rows: stageRows },
-    ])
-    const ctx = makeCtx(pool)
+    const pool = mockPool([taskRow])
+    const ctx = makeCtx(pool, stageRows)
 
     const result = await Query.pipelineStatus(null, { taskId: 'task-42' }, ctx)
 
@@ -254,35 +238,25 @@ describe('Query.pipelineStatus — stages array contains all runs', () => {
   })
 })
 
-// ── Query.pipelineStatus: SQL query does not use DISTINCT ON ─────────────────
+// ── Query.pipelineStatus uses stagesByTaskLoader ──────────────────────────────
 
-describe('Query.pipelineStatus — SQL query ordering', () => {
-  it('should order stages by stage_number, iteration, run in the SQL query', async () => {
-    const pool = mockPool([
-      { rows: [taskRow] },
-      { rows: [] },
-    ])
-    const ctx = makeCtx(pool)
+describe('Query.pipelineStatus — loader integration', () => {
+  it('should call stagesByTaskLoader.load with the taskId', async () => {
+    const pool = mockPool([taskRow])
+    const ctx = makeCtx(pool, [])
 
     await Query.pipelineStatus(null, { taskId: 'task-42' }, ctx)
 
-    const stagesQuery = (pool.query.mock.calls[1][0] as string).replace(/\s+/g, ' ').trim()
-    expect(stagesQuery).toContain('ORDER BY')
-    expect(stagesQuery).toContain('stage_number')
-    expect(stagesQuery).toContain('iteration')
-    expect(stagesQuery).toContain('run')
+    expect(ctx.loaders.stagesByTaskLoader.load).toHaveBeenCalledWith('task-42')
   })
 
-  it('should NOT use DISTINCT ON in the stages SQL query', async () => {
-    const pool = mockPool([
-      { rows: [taskRow] },
-      { rows: [] },
-    ])
-    const ctx = makeCtx(pool)
+  it('should only make one pool query (for the task), not for stages', async () => {
+    const pool = mockPool([taskRow])
+    const ctx = makeCtx(pool, [baseStageRow])
 
     await Query.pipelineStatus(null, { taskId: 'task-42' }, ctx)
 
-    const stagesQuery = (pool.query.mock.calls[1][0] as string).toUpperCase()
-    expect(stagesQuery).not.toContain('DISTINCT ON')
+    // Only the task query should hit the pool; stages come from the loader
+    expect(pool.query).toHaveBeenCalledTimes(1)
   })
 })
