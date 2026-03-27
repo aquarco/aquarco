@@ -570,7 +570,7 @@ async def test_evaluate_ai_condition_uses_stream_json() -> None:
     result_event = {
         "type": "result",
         "subtype": "success",
-        "structured_output": {"answer": True, "reasoning": "yes"},
+        "structured_output": {"answer": True, "message": "Condition met"},
     }
 
     mock_proc = MagicMock()
@@ -596,7 +596,7 @@ async def test_evaluate_ai_condition_uses_stream_json() -> None:
             stage_num=0,
         )
 
-    assert result is True
+    assert result == (True, "Condition met")
     args_str = " ".join(str(a) for a in captured_args)
     assert "--output-format stream-json" in args_str
 
@@ -623,7 +623,7 @@ async def test_evaluate_ai_condition_returns_false_on_nonzero_exit() -> None:
             stage_num=0,
         )
 
-    assert result is False
+    assert result[0] is False
 
 
 @pytest.mark.asyncio
@@ -658,7 +658,7 @@ async def test_evaluate_ai_condition_returns_false_on_timeout() -> None:
             timeout_seconds=1,
         )
 
-    assert result is False
+    assert result[0] is False
     mock_proc.kill.assert_called_once()
 
 
@@ -670,7 +670,7 @@ async def test_evaluate_ai_condition_parses_ndjson_answer_false() -> None:
     result_event = {
         "type": "result",
         "subtype": "success",
-        "structured_output": {"answer": False, "reasoning": "no evidence"},
+        "structured_output": {"answer": False, "message": "No evidence found"},
     }
 
     mock_proc = MagicMock()
@@ -690,7 +690,7 @@ async def test_evaluate_ai_condition_parses_ndjson_answer_false() -> None:
             stage_num=0,
         )
 
-    assert result is False
+    assert result[0] is False
 
 
 # ---------------------------------------------------------------------------
