@@ -1,5 +1,20 @@
 # Changelog
 
+## [2026-03-27] — Show full pipeline execution history on task detail page (#39)
+
+### Added
+- **`iteration: Int!` and `run: Int!` fields** on the GraphQL `Stage` type — expose per-stage loop counters so clients can distinguish repeated runs of the same stage
+- **Flat chronological history list** on the task detail page — every execution of every stage is now visible; repeated runs are labeled "(next run)", "(3rd run)", etc.
+- **Evaluation info blocks** between stage runs — show `_condition_message` from the condition evaluator so users can see why a stage was retried or why the pipeline advanced
+
+### Changed
+- **`stagesByTaskLoader`** (`api/src/loaders.ts`) — removed `DISTINCT ON` so all stage rows are returned ordered by `(stage_number, iteration, run)` instead of only the latest run per stage
+- **`pipelineStatus` query** (`api/src/resolvers/queries.ts`) — removed `DISTINCT ON`; `totalStages` now counts distinct `stage_number` values rather than total rows
+- **`mapStage` mapper** (`api/src/resolvers/mappers.ts`) — maps the new `iteration` and `run` fields from `StageRow` to the GraphQL type
+- **`GET_TASK` fragment** (`web/src/lib/graphql/queries.ts`) — includes `iteration` and `run` in the stages selection
+- **`PipelineStagesFlow` SVG diagram** (`web/src/app/tasks/[id]/page.tsx`) — deduplicates stage nodes (one node per `stageNumber`, latest run wins for status colouring) so the diagram still shows the pipeline definition shape
+- **Stage Output accordion headers** — standardized to 1-based display (`stageNumber + 1`) to match the SVG flow diagram
+
 ## [2026-03-26] — Separate system agents from pipeline agents (#30)
 
 ### Added
