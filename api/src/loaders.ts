@@ -18,6 +18,8 @@ export interface StageRow {
   id: string
   task_id: string
   stage_number: number
+  iteration: number | null
+  run: number | null
   category: string
   agent: string | null
   agent_version: string | null
@@ -69,13 +71,12 @@ export function createLoaders(pool: Pool): Loaders {
 
   const stagesByTaskLoader = new DataLoader<string, StageRow[]>(
     async (taskIds) => {
-      // Only return the latest run per (stage_key, iteration) to hide superseded failed runs.
-      // For legacy rows without stage_key, falls back to stage_number.
+      // Return all stage runs in chronological order so the UI can display the full execution history.
       const result = await pool.query<StageRow>(
-        `SELECT DISTINCT ON (s.task_id, COALESCE(s.stage_key, s.stage_number::text), s.iteration) s.*
+        `SELECT s.*
          FROM stages s
          WHERE s.task_id = ANY($1)
-         ORDER BY s.task_id, COALESCE(s.stage_key, s.stage_number::text), s.iteration, s.run DESC`,
+         ORDER BY s.task_id, s.stage_number ASC, COALESCE(s.iteration, 1) ASC, COALESCE(s.run, 1) ASC`,
         [taskIds as string[]]
       )
       const byTaskId = new Map<string, StageRow[]>()

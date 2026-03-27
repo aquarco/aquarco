@@ -173,15 +173,16 @@ export const Query = {
     const task = taskResult.rows[0]
 
     const stagesResult = await ctx.pool.query<Record<string, unknown>>(
-      `SELECT DISTINCT ON (COALESCE(s.stage_key, s.stage_number::text), s.iteration) s.*
+      `SELECT s.*
        FROM stages s
        WHERE s.task_id = $1
-       ORDER BY COALESCE(s.stage_key, s.stage_number::text), s.iteration, s.run DESC`,
+       ORDER BY s.stage_number ASC, COALESCE(s.iteration, 1) ASC, COALESCE(s.run, 1) ASC`,
       [args.taskId]
     )
 
     const stages = stagesResult.rows.map(mapStage)
-    const totalStages = stages.length
+    const uniqueStageNumbers = new Set(stagesResult.rows.map((r) => r.stage_number))
+    const totalStages = uniqueStageNumbers.size
 
     return {
       taskId: task.id,
@@ -409,6 +410,8 @@ export function mapStage(row: Record<string, unknown>) {
     id: row.id,
     taskId: row.task_id,
     stageNumber: row.stage_number,
+    iteration: (row.iteration as number | null) ?? 1,
+    run: (row.run as number | null) ?? 1,
     category: (row.category as string).toUpperCase(),
     agent: row.agent ?? null,
     agentVersion: row.agent_version ?? null,

@@ -84,6 +84,8 @@ export const GET_TASK = gql`
       stages {
         id
         stageNumber
+        iteration
+        run
         category
         agent
         agentVersion

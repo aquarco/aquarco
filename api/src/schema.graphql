@@ -115,6 +115,8 @@ type Stage {
   id: ID!
   taskId: ID!
   stageNumber: Int!
+  iteration: Int!
+  run: Int!
   category: String!
   agent: String
   agentVersion: String
