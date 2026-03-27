@@ -471,6 +471,8 @@ describe('Query.pipelineStatus', () => {
     id: 'stage-1',
     task_id: 'task-1',
     stage_number: 0,
+    iteration: null,
+    run: null,
     category: 'analyze',
     agent: 'analyze-agent',
     agent_version: '1.0.0',
@@ -483,14 +485,30 @@ describe('Query.pipelineStatus', () => {
     tokens_output: 200,
     error_message: null,
     retry_count: 0,
+    live_output: null,
+  }
+
+  /** Build a context whose stagesByTaskLoader returns the provided rows. */
+  function makeCtxWithStages(
+    pool: { query: jest.Mock },
+    stageRows: Record<string, unknown>[]
+  ): Context {
+    return {
+      pool: pool as unknown as Context['pool'],
+      loaders: {
+        repositoryLoader: { load: jest.fn() } as unknown as Context['loaders']['repositoryLoader'],
+        stagesByTaskLoader: {
+          load: jest.fn<() => Promise<Record<string, unknown>[]>>().mockResolvedValue(stageRows),
+        } as unknown as Context['loaders']['stagesByTaskLoader'],
+        contextByTaskLoader: { load: jest.fn() } as unknown as Context['loaders']['contextByTaskLoader'],
+      },
+    }
   }
 
   it('should return pipeline status with stages', async () => {
-    const pool = mockPool([
-      { rows: [taskRow] },
-      { rows: [stageRow] },
-    ])
-    const ctx = makeCtx(pool)
+    // pipelineStatus uses pool for the task row and stagesByTaskLoader for stages
+    const pool = mockPool([{ rows: [taskRow] }])
+    const ctx = makeCtxWithStages(pool, [stageRow])
 
     const result = await Query.pipelineStatus(null, { taskId: 'task-1' }, ctx)
 
@@ -505,18 +523,15 @@ describe('Query.pipelineStatus', () => {
 
   it('should return null when task not found', async () => {
     const pool = mockPool([{ rows: [] }])
-    const ctx = makeCtx(pool)
+    const ctx = makeCtxWithStages(pool, [])
 
     const result = await Query.pipelineStatus(null, { taskId: 'nonexistent' }, ctx)
     expect(result).toBeNull()
   })
 
   it('should return empty stages array when no stages exist', async () => {
-    const pool = mockPool([
-      { rows: [taskRow] },
-      { rows: [] },
-    ])
-    const ctx = makeCtx(pool)
+    const pool = mockPool([{ rows: [taskRow] }])
+    const ctx = makeCtxWithStages(pool, [])
 
     const result = await Query.pipelineStatus(null, { taskId: 'task-1' }, ctx)
     expect(result!.totalStages).toBe(0)
