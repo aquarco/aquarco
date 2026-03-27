@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { useQuery, useMutation } from '@apollo/client'
 import { useParams } from 'next/navigation'
 import Box from '@mui/material/Box'
@@ -32,6 +32,8 @@ import { formatDate } from '@/lib/format'
 interface Stage {
   id: string
   stageNumber: number
+  iteration: number
+  run: number
   category: string
   agent: string | null
   agentVersion: string | null
@@ -141,7 +143,7 @@ function PipelineStagesFlow({
   activeStep,
   pipelineName,
 }: {
-  stages: Stage[]
+  stages: Stage[]  // deduplicated: one entry per unique stageNumber (latest run wins)
   activeStep: number
   pipelineName: string
 }) {
@@ -464,8 +466,23 @@ export default function TaskDetailPage() {
   const canCancel = status === 'PENDING' || status === 'QUEUED' || status === 'EXECUTING'
   const canUnblock = status === 'BLOCKED'
 
-  const stages = task.stages.slice().sort((a, b) => a.stageNumber - b.stageNumber)
-  const activeStep = stages.findIndex(
+  // All stage runs sorted chronologically for the history list
+  const stages = task.stages.slice().sort((a, b) => {
+    if (a.stageNumber !== b.stageNumber) return a.stageNumber - b.stageNumber
+    const iterA = a.iteration ?? 1
+    const iterB = b.iteration ?? 1
+    if (iterA !== iterB) return iterA - iterB
+    return (a.run ?? 1) - (b.run ?? 1)
+  })
+
+  // Deduplicated stages for the SVG diagram: one entry per unique stageNumber (last write wins = latest run)
+  const uniqueStagesMap = new Map<number, Stage>()
+  for (const s of stages) {
+    uniqueStagesMap.set(s.stageNumber, s)
+  }
+  const uniqueStages = Array.from(uniqueStagesMap.values()).sort((a, b) => a.stageNumber - b.stageNumber)
+
+  const activeStep = uniqueStages.findIndex(
     (s) => s.status === 'EXECUTING' || (s.status !== 'COMPLETED' && s.status !== 'SKIPPED')
   )
 
@@ -545,9 +562,9 @@ export default function TaskDetailPage() {
       </Card>
 
       {/* Pipeline stages flow diagram */}
-      {stages.length > 0 && (
+      {uniqueStages.length > 0 && (
         <PipelineStagesFlow
-          stages={stages}
+          stages={uniqueStages}
           activeStep={activeStep}
           pipelineName={task.pipeline}
         />
@@ -559,7 +576,22 @@ export default function TaskDetailPage() {
           <Typography variant="subtitle1" fontWeight={700} gutterBottom>
             Stage Output
           </Typography>
-          {stages.map((stage) => {
+          {(() => {
+            // Build flat chronological history: stage accordions interleaved with evaluation blocks
+            const runCountPerStageNumber = new Map<number, number>()
+            const items: React.ReactNode[] = []
+
+            for (const stage of stages) {
+              const stageNum = stage.stageNumber
+              const runCount = (runCountPerStageNumber.get(stageNum) ?? 0) + 1
+              runCountPerStageNumber.set(stageNum, runCount)
+
+              // Run label suffix: first run has no suffix, second is "(next run)", third is "(3rd run)", etc.
+              let runSuffix = ''
+              if (runCount === 2) runSuffix = ' (next run)'
+              else if (runCount === 3) runSuffix = ' (3rd run)'
+              else if (runCount > 3) runSuffix = ` (${runCount}th run)`
+
               const output = stage.structuredOutput as Record<string, unknown> | null
               const findings = output?.findings as Array<{
                 severity?: string
@@ -569,13 +601,14 @@ export default function TaskDetailPage() {
               }> | undefined
               const summary = output?.summary as string | undefined
               const recommendation = output?.recommendation as string | undefined
+              const conditionMessage = output?._condition_message as string | undefined
 
-              return (
+              items.push(
                 <Accordion key={stage.id} variant="outlined" disableGutters>
                   <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                     <Stack direction="row" spacing={2} alignItems="center">
                       <Typography fontWeight={600}>
-                        Stage {stage.stageNumber}: {stage.category}
+                        Stage {stage.stageNumber + 1}: {stage.category}{runSuffix}
                       </Typography>
                       {stage.agent && (
                         <Typography variant="caption" color="text.secondary">
@@ -696,7 +729,37 @@ export default function TaskDetailPage() {
                   </AccordionDetails>
                 </Accordion>
               )
-            })}
+
+              // After each completed stage, emit an evaluation block if a condition message is present
+              if (conditionMessage && stage.status === 'COMPLETED') {
+                items.push(
+                  <Box
+                    key={`eval-${stage.id}`}
+                    sx={{
+                      px: 2,
+                      py: 1,
+                      my: 0.5,
+                      borderLeft: '4px solid',
+                      borderColor: 'info.main',
+                      backgroundColor: 'action.hover',
+                      borderRadius: '0 4px 4px 0',
+                    }}
+                  >
+                    <Stack direction="row" spacing={1} alignItems="baseline">
+                      <Typography variant="caption" fontWeight={700} color="info.main" sx={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Evaluation
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {conditionMessage}
+                      </Typography>
+                    </Stack>
+                  </Box>
+                )
+              }
+            }
+
+            return items
+          })()}
         </Box>
       )}
 

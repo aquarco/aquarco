@@ -464,9 +464,11 @@ export type Stage = {
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   errorMessage?: Maybe<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
+  iteration: Scalars['Int']['output'];
   liveOutput?: Maybe<Scalars['String']['output']>;
   rawOutput?: Maybe<Scalars['String']['output']>;
   retryCount: Scalars['Int']['output'];
+  run: Scalars['Int']['output'];
   stageNumber: Scalars['Int']['output'];
   startedAt?: Maybe<Scalars['DateTime']['output']>;
   status: StageStatus;
@@ -993,9 +995,11 @@ export type StageResolvers<ContextType = Context, ParentType extends ResolversPa
   completedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   errorMessage?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
+  iteration?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   liveOutput?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   rawOutput?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   retryCount?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  run?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   stageNumber?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   startedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   status?: Resolver<ResolversTypes['StageStatus'], ParentType, ContextType>;
