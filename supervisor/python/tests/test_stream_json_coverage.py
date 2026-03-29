@@ -517,7 +517,7 @@ async def test_evaluate_ai_condition_with_extra_env() -> None:
     result_event = {
         "type": "result",
         "subtype": "success",
-        "structured_output": {"answer": True, "message": "env was set"},
+        "structured_output": {"answer": True, "reasoning": "env was set"},
     }
 
     mock_proc = MagicMock()
@@ -544,7 +544,7 @@ async def test_evaluate_ai_condition_with_extra_env() -> None:
             extra_env={"MY_VAR": "my_value"},
         )
 
-    assert result[0] is True
+    assert result is True
     # env kwarg should be a merged dict containing MY_VAR
     assert captured_kwargs.get("env") is not None
     assert captured_kwargs["env"].get("MY_VAR") == "my_value"
@@ -563,7 +563,7 @@ async def test_evaluate_ai_condition_stderr_not_done_is_cancelled() -> None:
     result_event = {
         "type": "result",
         "subtype": "success",
-        "structured_output": {"answer": False, "message": "stderr slow"},
+        "structured_output": {"answer": False, "reasoning": "stderr slow"},
     }
 
     mock_proc = MagicMock()
@@ -590,7 +590,7 @@ async def test_evaluate_ai_condition_stderr_not_done_is_cancelled() -> None:
         )
 
     # Result still parsed correctly despite stderr hanging
-    assert result[0] is False
+    assert result is False
 
 
 # ---------------------------------------------------------------------------
@@ -624,7 +624,7 @@ async def test_evaluate_ai_condition_stdout_task_empty_returns_false() -> None:
         )
 
     # No result parsed -> answer = None -> bool(None) = False
-    assert result[0] is False
+    assert result is False
 
 
 # ---------------------------------------------------------------------------
@@ -675,7 +675,7 @@ async def test_evaluate_ai_condition_stderr_task_result_raises_exception() -> No
         )
 
     # Answer was parsed from stdout despite stderr failing
-    assert result[0] is True
+    assert result is True
 
 
 @pytest.mark.asyncio
@@ -730,7 +730,7 @@ async def test_evaluate_ai_condition_cleans_temp_files_via_evaluate_conditions()
             stage_num=0,
         )
 
-    assert result[0] is True
+    assert result is True
     # Both temp files (sys and in) should have been unlinked via the finally block
     assert len(created_paths) == 2
     assert len(unlinked) == 2
@@ -768,4 +768,4 @@ async def test_evaluate_ai_condition_unlink_oserror_is_suppressed() -> None:
             stage_num=0,
         )
 
-    assert result[0] is True
+    assert result is True

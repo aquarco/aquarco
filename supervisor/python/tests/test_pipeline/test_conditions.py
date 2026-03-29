@@ -144,7 +144,6 @@ async def test_evaluate_conditions_simple_true_with_yes() -> None:
     result = await evaluate_conditions(conditions, {}, {}, {})
     assert result.jump_to == "review"
     assert result.matched is True
-    assert result.message == ""  # simple conditions have no message
 
 
 @pytest.mark.asyncio
@@ -240,8 +239,8 @@ async def test_evaluate_conditions_ai_without_evaluator() -> None:
 @pytest.mark.asyncio
 async def test_evaluate_conditions_ai_with_evaluator() -> None:
     """AI conditions with evaluator should use the result."""
-    async def mock_ai_evaluator(prompt: str, context: dict) -> tuple[bool, str]:
-        return (True, "Code looks safe")
+    async def mock_ai_evaluator(prompt: str, context: dict) -> bool:
+        return True
 
     conditions = [
         {"ai": "Is the code safe?", "yes": "deploy", "no": "fix"}
@@ -249,13 +248,12 @@ async def test_evaluate_conditions_ai_with_evaluator() -> None:
     result = await evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=mock_ai_evaluator)
     assert result.jump_to == "deploy"
     assert result.matched is True
-    assert result.message == "Code looks safe"
 
 
 @pytest.mark.asyncio
 async def test_evaluate_conditions_ai_evaluator_returns_false() -> None:
-    async def mock_ai_evaluator(prompt: str, context: dict) -> tuple[bool, str]:
-        return (False, "Security issues found in auth module")
+    async def mock_ai_evaluator(prompt: str, context: dict) -> bool:
+        return False
 
     conditions = [
         {"ai": "Is the code safe?", "yes": "deploy", "no": "fix"}
@@ -263,7 +261,6 @@ async def test_evaluate_conditions_ai_evaluator_returns_false() -> None:
     result = await evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=mock_ai_evaluator)
     assert result.jump_to == "fix"
     assert result.matched is True
-    assert result.message == "Security issues found in auth module"
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +288,7 @@ async def test_evaluate_ai_condition_uses_prompts_dir(tmp_path: Path) -> None:
     ndjson_line = _json.dumps({
         "type": "result",
         "subtype": "success",
-        "structured_output": {"answer": True, "message": "All conditions met"},
+        "structured_output": {"answer": True, "reasoning": "mocked"},
     })
 
     class _AsyncLineIter:
@@ -341,7 +338,7 @@ async def test_evaluate_ai_condition_uses_prompts_dir(tmp_path: Path) -> None:
         "Custom prompt from prompts_dir was not used as system prompt; "
         f"captured: {captured_sys_prompt[0][:200]!r}"
     )
-    assert result == (True, "All conditions met")
+    assert result is True
 
 
 def test_inline_system_prompt_is_fallback(tmp_path: Path) -> None:
@@ -417,7 +414,7 @@ async def test_file_based_prompt_is_used_verbatim_no_schema_substitution(
     ndjson_line = _json.dumps({
         "type": "result",
         "subtype": "success",
-        "structured_output": {"answer": False, "message": "Condition not met"},
+        "structured_output": {"answer": False, "reasoning": "mocked"},
     })
     captured_sys_prompt: list[str] = []
 

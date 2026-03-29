@@ -217,20 +217,18 @@ class TestEvaluateConditionsRouting:
 class TestAIConditions:
     @pytest.mark.asyncio
     async def test_ai_evaluator_true_routes_to_yes(self) -> None:
-        ai_evaluator = AsyncMock(return_value=(True, "Code is safe"))
+        ai_evaluator = AsyncMock(return_value=True)
         conditions = [{"ai": "Is the code safe?", "yes": "deploy", "no": "fix"}]
         result = await evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=ai_evaluator)
         assert result.jump_to == "deploy"
-        assert result.message == "Code is safe"
         ai_evaluator.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_ai_evaluator_false_routes_to_no(self) -> None:
-        ai_evaluator = AsyncMock(return_value=(False, "Security issues found"))
+        ai_evaluator = AsyncMock(return_value=False)
         conditions = [{"ai": "Is the code safe?", "yes": "deploy", "no": "fix"}]
         result = await evaluate_conditions(conditions, {}, {}, {}, ai_evaluator=ai_evaluator)
         assert result.jump_to == "fix"
-        assert result.message == "Security issues found"
 
     @pytest.mark.asyncio
     async def test_ai_evaluator_none_skips(self) -> None:
@@ -243,7 +241,7 @@ class TestAIConditions:
     async def test_ai_evaluator_exception_skips(self) -> None:
         """AI evaluator that raises => condition is skipped."""
 
-        async def failing_evaluator(prompt: str, context: dict) -> tuple[bool, str]:
+        async def failing_evaluator(prompt: str, context: dict) -> bool:
             raise RuntimeError("Claude CLI failed")
 
         conditions = [{"ai": "Check something", "yes": "next", "no": "prev"}]
@@ -256,9 +254,9 @@ class TestAIConditions:
         """AI evaluator receives merged context from stage_outputs + current_output."""
         captured_args: list[Any] = []
 
-        async def capturing_evaluator(prompt: str, context: dict) -> tuple[bool, str]:
+        async def capturing_evaluator(prompt: str, context: dict) -> bool:
             captured_args.append((prompt, context))
-            return (True, "Risks mitigated")
+            return True
 
         stage_outputs = {"analysis": {"risk_level": "high"}}
         current_output = {"tests_passed": 42}

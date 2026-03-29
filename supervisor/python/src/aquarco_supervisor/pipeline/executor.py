@@ -510,7 +510,7 @@ class PipelineExecutor:
                 if conditions:
                     _prompts_dir = self._registry.get_default_prompts_dir()
 
-                    async def _ai_eval(prompt: str, ctx: dict[str, Any]) -> tuple[bool, str]:
+                    async def _ai_eval(prompt: str, ctx: dict[str, Any]) -> bool:
                         return await evaluate_ai_condition(
                             prompt, ctx,
                             work_dir=clone_dir,
@@ -534,36 +534,7 @@ class PipelineExecutor:
                             from_stage=stage_name,
                             to_stage=cond_result.jump_to,
                             target_idx=target_idx,
-                            condition_message=cond_result.message[:200] if cond_result.message else "",
                         )
-                        # Store condition message so the target stage
-                        # knows what the evaluator found and what to
-                        # focus on.
-                        if cond_result.message:
-                            stage_outputs[stage_name]["_condition_message"] = cond_result.message
-                            # Persist to DB so build_accumulated_context
-                            # includes it for the next stage.
-                            await self._db.execute(
-                                """
-                                UPDATE stages
-                                SET structured_output = jsonb_set(
-                                    COALESCE(structured_output, '{}'::jsonb),
-                                    '{_condition_message}',
-                                    %(msg)s::jsonb
-                                )
-                                WHERE task_id = %(task_id)s
-                                  AND stage_number = %(stage)s
-                                  AND run = (
-                                      SELECT MAX(run) FROM stages
-                                      WHERE task_id = %(task_id)s AND stage_number = %(stage)s
-                                  )
-                                """,
-                                {
-                                    "task_id": task_id,
-                                    "stage": stage_num,
-                                    "msg": json.dumps(cond_result.message),
-                                },
-                            )
                         current_idx = target_idx
                         continue
 
