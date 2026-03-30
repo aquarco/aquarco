@@ -373,7 +373,8 @@ class TestExecutorAutoResume:
             )
 
         assert "_raw_outputs_all" not in output
-        assert "_raw_output" not in output
+        # _raw_output is now intentionally set for DB storage
+        assert "_raw_output" in output
 
     @pytest.mark.asyncio
     async def test_max_turns_passed_to_execute_claude(self, sample_pipelines: Any) -> None:

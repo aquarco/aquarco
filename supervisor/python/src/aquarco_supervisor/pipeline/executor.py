@@ -1025,6 +1025,8 @@ class PipelineExecutor:
 
         output["_agent_name"] = agent_name
         output["_iterations"] = iteration
+        # Carry raw NDJSON log so store_stage_output persists it to raw_output column
+        output["_raw_output"] = claude_output.raw
 
         # Save output log (sanitize task_id to prevent path traversal)
         safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)
