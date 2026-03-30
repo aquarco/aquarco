@@ -475,9 +475,12 @@ export default function TaskDetailPage() {
     return (a.run ?? 1) - (b.run ?? 1)
   })
 
-  // Deduplicated stages for the SVG diagram: one entry per unique stageNumber (last write wins = latest run)
+  // Deduplicated stages for the SVG diagram: one entry per unique stageNumber (last write wins = latest run).
+  // Exclude system stages (planning, condition-eval) which are not part of the pipeline definition.
+  const SYSTEM_CATEGORIES = new Set(['planning', 'condition-eval'])
   const uniqueStagesMap = new Map<number, Stage>()
   for (const s of stages) {
+    if (SYSTEM_CATEGORIES.has(s.category)) continue
     uniqueStagesMap.set(s.stageNumber, s)
   }
   const uniqueStages = Array.from(uniqueStagesMap.values()).sort((a, b) => a.stageNumber - b.stageNumber)
