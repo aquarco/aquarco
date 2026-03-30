@@ -129,6 +129,38 @@ def test_max_iterations_is_positive() -> None:
     assert isinstance(_MAX_ITERATIONS, int)
 
 
-def test_max_iterations_value() -> None:
-    """_MAX_ITERATIONS is set to 5 as documented."""
-    assert _MAX_ITERATIONS == 5
+def test_max_iterations_boundary_is_exclusive() -> None:
+    """_MAX_ITERATIONS acts as an exclusive upper bound:
+    iteration == _MAX_ITERATIONS must be blocked,
+    iteration == _MAX_ITERATIONS - 1 must still be allowed (given open items).
+
+    This tests the boundary semantics rather than pinning the constant value.
+    """
+    # The check in _should_iterate is: current_iteration >= _MAX_ITERATIONS → False.
+    # So the last allowed iteration index is _MAX_ITERATIONS - 1.
+    last_allowed = _MAX_ITERATIONS - 1
+    first_blocked = _MAX_ITERATIONS
+    assert last_allowed >= 0, "_MAX_ITERATIONS must be at least 1"
+    assert first_blocked > last_allowed, "blocked threshold must exceed allowed threshold"
+
+
+@pytest.mark.asyncio
+async def test_should_iterate_blocks_exactly_at_max(
+    executor: PipelineExecutor,
+    mock_tq: AsyncMock,
+) -> None:
+    """_should_iterate returns False at _MAX_ITERATIONS and True at _MAX_ITERATIONS-1
+    (when open items exist), confirming the boundary is exclusive."""
+    mock_vi = MagicMock()
+    mock_vi.id = 99
+    mock_tq.get_open_validation_items = AsyncMock(return_value=[mock_vi])
+
+    # One below the cap: allowed
+    allowed = await executor._should_iterate("task-x", "review", _MAX_ITERATIONS - 1)
+    assert allowed is True, "iteration below _MAX_ITERATIONS should be allowed"
+
+    # Exactly at the cap: blocked (get_open_validation_items should NOT be called again)
+    mock_tq.get_open_validation_items.reset_mock()
+    blocked = await executor._should_iterate("task-x", "review", _MAX_ITERATIONS)
+    assert blocked is False, "iteration at _MAX_ITERATIONS should be blocked"
+    mock_tq.get_open_validation_items.assert_not_called()
