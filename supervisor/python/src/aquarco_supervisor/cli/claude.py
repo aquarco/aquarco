@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..exceptions import AgentExecutionError, AgentTimeoutError, RateLimitError
+from ..exceptions import AgentExecutionError, AgentInactivityError, AgentTimeoutError, OverloadedError, RateLimitError, ServerError
 from ..logging import get_logger
 
 
@@ -248,9 +248,24 @@ async def execute_claude(
     ``tail -f``).  This avoids the premature-EOF problem with pipes where
     the stdout fd can close while the process is still running.
 
+    When resume_session_id is provided, uses --resume to continue a prior session
+    instead of starting fresh (no --system-prompt-file or schema flags needed).
+
     Once the ``{type: "result"}`` NDJSON event is seen the process is given
     a 90-second grace period to exit cleanly.  If it doesn't, it receives
     SIGTERM followed by SIGKILL.
+
+    Raises:
+        RateLimitError: Claude API returned a 429 rate-limit response (detected via
+            ``"rate_limit_error"`` or ``"status code 429"`` in stdout/debug log).
+        ServerError: Claude API returned a 500 internal server error (detected via
+            ``"api_error"`` or ``"status code 500"``). Safe to retry after backoff.
+        OverloadedError: Claude API returned a 529 overloaded response (detected via
+            ``"overloaded_error"`` or ``"status code 529"``). Retry with shorter backoff.
+        AgentExecutionError: The CLI exited non-zero for any other reason.
+        AgentTimeoutError: The overall subprocess wall-clock timeout was exceeded.
+        AgentInactivityError: No NDJSON events arrived within the inactivity window
+            after the result event was emitted.
     """
     if not resume_session_id and not prompt_file.exists():
         raise AgentExecutionError(f"Prompt file not found: {prompt_file}")
@@ -403,6 +418,20 @@ async def execute_claude(
                     f"(task={task_id}, stage={stage_num})"
                 )
 
+            # Detect internal server errors (500)
+            if _is_server_error_in_lines(lines) or _is_server_error(debug_log):
+                raise ServerError(
+                    f"Claude API internal server error (500) "
+                    f"(task={task_id}, stage={stage_num})"
+                )
+
+            # Detect platform overload errors (529)
+            if _is_overloaded_in_lines(lines) or _is_overloaded(debug_log):
+                raise OverloadedError(
+                    f"Claude API overloaded (529) "
+                    f"(task={task_id}, stage={stage_num})"
+                )
+
             raise AgentExecutionError(
                 f"Claude CLI exited with code {proc.returncode} "
                 f"(task={task_id}, stage={stage_num})"
@@ -468,6 +497,31 @@ def _is_rate_limited_in_lines(lines: list[str]) -> bool:
     for line in lines:
         lower = line.lower()
         if "rate_limit_error" in lower or "status code 429" in lower:
+            return True
+    return False
+
+
+def _is_server_error_in_lines(lines: list[str]) -> bool:
+    """Check whether any NDJSON stdout line contains HTTP 500 / api_error indicators.
+
+    Uses quoted-string matching for ``"api_error"`` to avoid false positives when
+    an agent's text output contains the phrase (e.g. while discussing error handling).
+    The token only matches when it appears as a JSON string value surrounded by
+    double-quote characters, which is how the Claude API encodes error types in its
+    NDJSON stdout stream.
+    """
+    for line in lines:
+        lower = line.lower()
+        if '"api_error"' in lower or "status code 500" in lower:
+            return True
+    return False
+
+
+def _is_overloaded_in_lines(lines: list[str]) -> bool:
+    """Check whether any NDJSON stdout line contains HTTP 529 / overloaded_error indicators."""
+    for line in lines:
+        lower = line.lower()
+        if "overloaded_error" in lower or "status code 529" in lower:
             return True
     return False
 
@@ -610,3 +664,41 @@ def _is_rate_limited(debug_log: Path) -> bool:
     except OSError:
         return False
     return "rate_limit_error" in text or "status code 429" in text.lower()
+
+
+def _is_server_error(debug_log: Path) -> bool:
+    """Check whether the Claude CLI debug log contains HTTP 500 / api_error signals.
+
+    Only reads the last 32 KB to avoid high memory usage on large debug logs.
+    Uses quoted-string matching for ``"api_error"`` to avoid false positives from
+    agent text transcripts in the debug log that discuss API error handling.
+    """
+    try:
+        size = debug_log.stat().st_size
+        read_size = min(size, 32768)
+        with open(debug_log, "rb") as f:
+            if size > read_size:
+                f.seek(size - read_size)
+            text = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    lower = text.lower()
+    return '"api_error"' in lower or "status code 500" in lower
+
+
+def _is_overloaded(debug_log: Path) -> bool:
+    """Check whether the Claude CLI debug log contains HTTP 529 / overloaded_error signals.
+
+    Only reads the last 32 KB to avoid high memory usage on large debug logs.
+    """
+    try:
+        size = debug_log.stat().st_size
+        read_size = min(size, 32768)
+        with open(debug_log, "rb") as f:
+            if size > read_size:
+                f.seek(size - read_size)
+            text = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    lower = text.lower()
+    return "overloaded_error" in lower or "status code 529" in lower

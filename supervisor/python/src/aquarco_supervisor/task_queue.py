@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from typing import Any
 
 from .database import Database
@@ -153,20 +154,28 @@ class TaskQueue:
         )
         log.warning("task_failed", task_id=task_id, error=error_message)
 
-    async def rate_limit_task(
-        self, task_id: str, error_message: str, *, max_rate_limit_retries: int = 24,
+    async def postpone_task(
+        self,
+        task_id: str,
+        error_message: str,
+        *,
+        cooldown_minutes: int = 60,
+        max_retries: int = 24,
     ) -> None:
-        """Mark task as rate-limited, or fail it if retries exhausted.
+        """Mark task as rate-limited with a per-task cooldown, or fail if retries exhausted.
 
-        Each rate-limit hit increments ``rate_limit_count``.  After
-        *max_rate_limit_retries* (default 24 ≈ 1 day at 1 h cooldown) the
-        task is marked ``failed`` instead.
+        Each postpone hit increments ``rate_limit_count`` and stores the
+        *cooldown_minutes* so that ``get_postponed_tasks()`` can apply a
+        per-row cooldown when deciding when to resume.
+
+        After *max_retries* (default 24) the task is marked ``failed``.
         """
         await self._db.execute(
             """
             UPDATE tasks
             SET rate_limit_count = rate_limit_count + 1,
                 error_message = %(error)s,
+                postpone_cooldown_minutes = %(cooldown)s,
                 status = CASE
                     WHEN rate_limit_count + 1 >= %(max)s THEN 'failed'
                     ELSE 'rate_limited'
@@ -178,7 +187,12 @@ class TaskQueue:
                 updated_at = NOW()
             WHERE id = %(id)s
             """,
-            {"id": task_id, "error": error_message, "max": max_rate_limit_retries},
+            {
+                "id": task_id,
+                "error": error_message,
+                "cooldown": cooldown_minutes,
+                "max": max_retries,
+            },
         )
         row = await self._db.fetch_one(
             "SELECT status, rate_limit_count FROM tasks WHERE id = %(id)s",
@@ -186,29 +200,59 @@ class TaskQueue:
         )
         if row and row["status"] == "failed":
             log.warning(
-                "task_rate_limit_exhausted",
+                "task_postpone_exhausted",
                 task_id=task_id,
                 rate_limit_count=row["rate_limit_count"],
             )
         else:
             log.warning(
-                "task_rate_limited",
+                "task_postponed",
                 task_id=task_id,
+                cooldown_minutes=cooldown_minutes,
                 rate_limit_count=row["rate_limit_count"] if row else 0,
             )
 
-    async def get_rate_limited_tasks(self, cooldown_minutes: int = 60) -> list[str]:
-        """Return task IDs that have been rate-limited for longer than cooldown."""
+    async def rate_limit_task(
+        self, task_id: str, error_message: str, *, max_rate_limit_retries: int = 24,
+    ) -> None:
+        """Mark task as rate-limited, or fail it if retries exhausted.
+
+        Delegates to :meth:`postpone_task` with a 60-minute cooldown.
+        Kept for backward compatibility.
+        """
+        await self.postpone_task(
+            task_id,
+            error_message,
+            cooldown_minutes=60,
+            max_retries=max_rate_limit_retries,
+        )
+
+    async def get_postponed_tasks(self) -> list[str]:
+        """Return task IDs whose per-row cooldown has elapsed and are ready to resume."""
         rows = await self._db.fetch_all(
             """
             SELECT id FROM tasks
             WHERE status = 'rate_limited'
-              AND updated_at < NOW() - make_interval(mins := %(cooldown)s)
+              AND updated_at < NOW() - make_interval(mins := postpone_cooldown_minutes)
             ORDER BY updated_at ASC
-            """,
-            {"cooldown": cooldown_minutes},
+            """
         )
         return [r["id"] for r in rows]
+
+    async def get_rate_limited_tasks(self, cooldown_minutes: int = 60) -> list[str]:
+        """Return task IDs that have been rate-limited for longer than cooldown.
+
+        .. deprecated::
+            Use :meth:`get_postponed_tasks` which applies the per-row cooldown.
+            This alias ignores *cooldown_minutes* and delegates to get_postponed_tasks().
+        """
+        warnings.warn(
+            "get_rate_limited_tasks() is deprecated and ignores cooldown_minutes; "
+            "use get_postponed_tasks() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return await self.get_postponed_tasks()
 
     async def resume_rate_limited_task(self, task_id: str) -> None:
         """Move a rate-limited task back to pending for retry."""
