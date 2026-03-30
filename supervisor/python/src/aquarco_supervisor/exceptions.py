@@ -93,6 +93,25 @@ class OverloadedError(RetryableError):
     """Claude API platform overload (529) — temporary, retry with short backoff."""
 
 
+def _cooldown_for_error(e: RetryableError) -> tuple[int, int]:
+    """Return ``(cooldown_minutes, max_retries)`` for a :class:`RetryableError` subtype.
+
+    Centralised here so that both the pipeline executor and the main-loop defensive
+    handler can import it without creating a cross-module coupling to executor internals.
+
+    Dispatch table:
+
+    * :class:`OverloadedError` (529): 15 min cooldown, 24 max retries
+    * :class:`ServerError` (500):     30 min cooldown, 12 max retries
+    * :class:`RateLimitError` (429) / other: 60 min cooldown, 24 max retries
+    """
+    if isinstance(e, OverloadedError):
+        return (15, 24)
+    if isinstance(e, ServerError):
+        return (30, 12)
+    return (60, 24)
+
+
 # --- Agent Registry ---
 
 

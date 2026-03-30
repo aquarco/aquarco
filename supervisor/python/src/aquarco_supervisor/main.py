@@ -13,7 +13,7 @@ from typing import Any
 import typer
 
 from .cli.agents import app as agents_app
-from .exceptions import RateLimitError, RetryableError
+from .exceptions import RateLimitError, RetryableError, _cooldown_for_error
 from .cli.auth_helper import auth_watch
 from .cli.repo_manager import repo_app
 from .cli.status import status
@@ -264,7 +264,6 @@ class Supervisor:
             # Defensively postpone the task in case the error propagated
             # before execute_pipeline had a chance to call postpone_task().
             try:
-                from .pipeline.executor import _cooldown_for_error
                 task = await self._tq.get_task(task_id) if self._tq else None
                 if task and task.status.value != "rate_limited":
                     cooldown_minutes, max_retries = _cooldown_for_error(e)

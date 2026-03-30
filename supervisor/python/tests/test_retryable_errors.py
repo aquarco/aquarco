@@ -66,9 +66,16 @@ def test_is_server_error_in_lines_empty() -> None:
 
 
 def test_is_server_error_in_lines_case_insensitive() -> None:
-    """Detection is case-insensitive (lowercased internally)."""
-    assert _is_server_error_in_lines(["API_ERROR occurred"]) is True
+    """Detection is case-insensitive (lowercased internally).
+
+    Note: bare unquoted 'api_error' text does NOT match; the token must appear as
+    a JSON string value (with surrounding double-quotes) to avoid false positives
+    when agent output text discusses API error handling.
+    """
+    assert _is_server_error_in_lines(['{"error":{"type":"API_ERROR"}}']) is True
     assert _is_server_error_in_lines(["Status Code 500"]) is True
+    # Unquoted plain text must NOT produce a false positive
+    assert _is_server_error_in_lines(["api_error discussed in prose"]) is False
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +155,16 @@ def test_is_rate_limited_returns_false_when_log_missing(tmp_path: Any) -> None:
 
 def test_is_server_error_detects_api_error_in_log(tmp_path: Any) -> None:
     log = tmp_path / "debug.log"
-    log.write_text("... api_error status ...")
+    # Must use JSON-quoted form to match (bare 'api_error' is a false-positive guard)
+    log.write_text('{"error":{"type":"api_error","message":"Internal server error"}}')
     assert _is_server_error(log) is True
+
+
+def test_is_server_error_unquoted_api_error_no_false_positive(tmp_path: Any) -> None:
+    """Plain prose 'api_error' in a debug log must NOT trigger server-error detection."""
+    log = tmp_path / "debug.log"
+    log.write_text("Agent discussed api_error handling in its reasoning")
+    assert _is_server_error(log) is False
 
 
 def test_is_server_error_detects_status_500_in_log(tmp_path: Any) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from typing import Any
 
 from .database import Database
@@ -245,6 +246,12 @@ class TaskQueue:
             Use :meth:`get_postponed_tasks` which applies the per-row cooldown.
             This alias ignores *cooldown_minutes* and delegates to get_postponed_tasks().
         """
+        warnings.warn(
+            "get_rate_limited_tasks() is deprecated and ignores cooldown_minutes; "
+            "use get_postponed_tasks() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return await self.get_postponed_tasks()
 
     async def resume_rate_limited_task(self, task_id: str) -> None:

@@ -20,7 +20,7 @@ from ..config_overlay import (
 )
 from .conditions import ConditionResult, evaluate_ai_condition, evaluate_conditions
 from ..database import Database
-from ..exceptions import NoAvailableAgentError, OverloadedError, PipelineError, RateLimitError, RetryableError, ServerError, StageError
+from ..exceptions import NoAvailableAgentError, OverloadedError, PipelineError, RateLimitError, RetryableError, ServerError, StageError, _cooldown_for_error
 from ..logging import get_logger
 from ..models import Complexity, PipelineConfig, TaskPhase
 from ..task_queue import TaskQueue
@@ -39,19 +39,6 @@ _SAFE_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]*$")
 # Maximum number of iteration re-runs per stage to prevent infinite loops
 _MAX_ITERATIONS = 5
 
-
-def _cooldown_for_error(e: RetryableError) -> tuple[int, int]:
-    """Return (cooldown_minutes, max_retries) appropriate for a RetryableError subtype.
-
-    - OverloadedError (529): 15 min cooldown, 24 max retries
-    - ServerError (500):     30 min cooldown, 12 max retries
-    - RateLimitError (429) / other: 60 min cooldown, 24 max retries
-    """
-    if isinstance(e, OverloadedError):
-        return (15, 24)
-    if isinstance(e, ServerError):
-        return (30, 12)
-    return (60, 24)
 
 
 class PipelineExecutor:

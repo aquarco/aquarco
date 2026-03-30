@@ -403,10 +403,17 @@ def _is_rate_limited_in_lines(lines: list[str]) -> bool:
 
 
 def _is_server_error_in_lines(lines: list[str]) -> bool:
-    """Check whether any NDJSON stdout line contains HTTP 500 / api_error indicators."""
+    """Check whether any NDJSON stdout line contains HTTP 500 / api_error indicators.
+
+    Uses quoted-string matching for ``"api_error"`` to avoid false positives when
+    an agent's text output contains the phrase (e.g. while discussing error handling).
+    The token only matches when it appears as a JSON string value surrounded by
+    double-quote characters, which is how the Claude API encodes error types in its
+    NDJSON stdout stream.
+    """
     for line in lines:
         lower = line.lower()
-        if "api_error" in lower or "status code 500" in lower:
+        if '"api_error"' in lower or "status code 500" in lower:
             return True
     return False
 
@@ -576,6 +583,8 @@ def _is_server_error(debug_log: Path) -> bool:
     """Check whether the Claude CLI debug log contains HTTP 500 / api_error signals.
 
     Only reads the last 32 KB to avoid high memory usage on large debug logs.
+    Uses quoted-string matching for ``"api_error"`` to avoid false positives from
+    agent text transcripts in the debug log that discuss API error handling.
     """
     try:
         size = debug_log.stat().st_size
@@ -587,7 +596,7 @@ def _is_server_error(debug_log: Path) -> bool:
     except OSError:
         return False
     lower = text.lower()
-    return "api_error" in lower or "status code 500" in lower
+    return '"api_error"' in lower or "status code 500" in lower
 
 
 def _is_overloaded(debug_log: Path) -> bool:
