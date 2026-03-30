@@ -855,14 +855,17 @@ def test_get_agent_environment_returns_defined_env(
     # Act
     env = reg.get_agent_environment("condition-evaluator-agent")
 
-    # Assert
-    assert env == {"AGENT_MODE": "condition-evaluation", "LOG_LEVEL": "debug"}
+    # Assert — per-agent env is merged on top of the default agent venv env
+    assert env["AGENT_MODE"] == "condition-evaluation"
+    assert env["LOG_LEVEL"] == "debug"
+    assert env["VIRTUAL_ENV"] == AgentRegistry._AGENT_VENV
+    assert env["PATH"].startswith(f"{AgentRegistry._AGENT_VENV}/bin:")
 
 
-def test_get_agent_environment_returns_empty_dict_when_no_env(
+def test_get_agent_environment_returns_defaults_when_no_env(
     mock_db: AsyncMock, tmp_path: Path
 ) -> None:
-    """get_agent_environment returns an empty dict when agent has no environment block."""
+    """get_agent_environment returns the default agent venv env when agent has no environment block."""
     # Arrange
     reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
     reg._agents = {
@@ -876,14 +879,14 @@ def test_get_agent_environment_returns_empty_dict_when_no_env(
     # Act
     env = reg.get_agent_environment("analyze-agent")
 
-    # Assert
-    assert env == {}
+    # Assert — still gets the default agent venv environment
+    assert env == AgentRegistry._AGENT_DEFAULT_ENV
 
 
-def test_get_agent_environment_returns_empty_dict_for_unknown_agent(
+def test_get_agent_environment_returns_defaults_for_unknown_agent(
     mock_db: AsyncMock, tmp_path: Path
 ) -> None:
-    """get_agent_environment returns empty dict for an agent not in the registry."""
+    """get_agent_environment returns default agent venv env for an agent not in the registry."""
     # Arrange
     reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
     reg._agents = {}
@@ -892,7 +895,7 @@ def test_get_agent_environment_returns_empty_dict_for_unknown_agent(
     env = reg.get_agent_environment("nonexistent-agent")
 
     # Assert
-    assert env == {}
+    assert env == AgentRegistry._AGENT_DEFAULT_ENV
 
 
 # ---------------------------------------------------------------------------

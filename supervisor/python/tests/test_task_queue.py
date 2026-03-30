@@ -337,6 +337,26 @@ async def test_record_stage_skipped(
 
 
 @pytest.mark.asyncio
+async def test_record_stage_skipped_guards_terminal_status(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """INSERT/ON CONFLICT path must include a WHERE guard so that a 'skipped'
+    signal arriving after a stage has already completed or failed does NOT
+    overwrite the terminal status (core bugfix for the stage status race).
+    """
+    await task_queue.record_stage_skipped("task-1", 2, "docs")
+
+    call_args = mock_db.execute.call_args
+    sql = call_args[0][0]
+    # The ON CONFLICT DO UPDATE must restrict to non-terminal rows
+    assert "NOT IN" in sql, (
+        "SQL must contain a NOT IN guard to prevent overwriting terminal status"
+    )
+    assert "completed" in sql, "SQL guard must exclude 'completed' rows"
+    assert "failed" in sql, "SQL guard must exclude 'failed' rows"
+
+
+@pytest.mark.asyncio
 async def test_create_pending_stages(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:

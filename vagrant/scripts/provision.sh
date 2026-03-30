@@ -237,6 +237,21 @@ su - "${AGENT_USER}" -c "${AGENT_HOME}/.venv/bin/pip install -e /home/agent/aqua
   log "WARNING: pip install failed; supervisor CLI may not be available"
 }
 
+# Lock the supervisor venv so agents cannot accidentally mutate it.
+# NOTE: To upgrade supervisor dependencies, temporarily restore write
+# permissions first:  chmod -R u+w "${AGENT_HOME}/.venv/lib/"
+chmod -R a-w "${AGENT_HOME}/.venv/lib/"
+log "Supervisor venv locked (read-only lib/)"
+
+# ─── 11c. Separate virtualenv for agent task execution ───────────────────────
+# Agents run pip install / pip install -e inside tasks. Giving them their own
+# venv keeps the supervisor runtime untouched.
+
+log "Creating agent task-execution venv..."
+python3 -m venv "${AGENT_HOME}/.agent-venv"
+chown -R "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}/.agent-venv"
+log "Agent venv ready at ${AGENT_HOME}/.agent-venv"
+
 # ─── 12. Systemd service for supervisor ───────────────────────────────────────
 
 log "Installing aquarco-supervisor (Python) systemd service..."

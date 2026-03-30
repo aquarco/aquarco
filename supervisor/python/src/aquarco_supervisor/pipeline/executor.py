@@ -313,6 +313,10 @@ class PipelineExecutor:
 
         # Create a planning stage at stage_number = -1
         planning_stage_key = "-1:planning:planner-agent"
+        await self._tq.create_system_stage(
+            task_id, -1, "planning", "planner-agent",
+            stage_key=planning_stage_key,
+        )
         await self._tq.record_stage_executing(
             task_id, -1, "planning", "planner-agent",
             stage_key=planning_stage_key, iteration=1,
@@ -320,7 +324,7 @@ class PipelineExecutor:
 
         try:
             output = await self._execute_agent(
-                "planner-agent", task_id, planner_context, {}, -1
+                "planner-agent", task_id, planner_context, -1
             )
         except Exception as e:
             await self._tq.record_stage_failed(
@@ -390,6 +394,9 @@ class PipelineExecutor:
         stage_outputs: dict[str, dict[str, Any]] = {}
         # Track repeat counts per stage for maxRepeats enforcement
         repeat_counts: dict[str, int] = {}
+        # Track current iteration per stage name (1-based); incremented on
+        # condition-driven jump-backs so each visit creates fresh stage rows.
+        stage_iterations: dict[str, int] = {}
 
         current_idx = start_stage
         previous_output: dict[str, Any] = {}
@@ -399,7 +406,10 @@ class PipelineExecutor:
             plan = planned_stages[stage_num]
 
             category = plan["category"]
-            agents = plan.get("agents", [])
+            raw_agents = plan.get("agents", [])
+            agents = [
+                a["name"] if isinstance(a, dict) else a for a in raw_agents
+            ]
             parallel = plan.get("parallel", False)
 
             # Find matching stage def for conditions/required
@@ -412,6 +422,25 @@ class PipelineExecutor:
 
             # Track repeat count
             repeat_counts[stage_name] = repeat_counts.get(stage_name, 0) + 1
+
+            # Determine base iteration for this visit.  First visit = 1;
+            # condition-driven jump-backs increment the iteration so each
+            # visit produces fresh stage rows, preserving full history.
+            #
+            # Invariant: base_iteration > 1 ⟹ repeat_counts[stage_name] > 1.
+            # The first visit always uses iteration=1 (from the initial
+            # create_system_stage call).  Only revisits trigger
+            # create_iteration_stage with an incremented iteration number.
+            base_iteration = stage_iterations.get(stage_name, 1)
+
+            # On revisit (repeat > 1), create new iteration stage rows
+            if repeat_counts[stage_name] > 1:
+                base_iteration = stage_iterations[stage_name]
+                for agent_name in agents:
+                    await self._tq.create_iteration_stage(
+                        task_id, stage_num, category, agent_name,
+                        base_iteration,
+                    )
 
             # Ensure we're on the right branch
             await _git_checkout(clone_dir, branch_name)
@@ -435,7 +464,7 @@ class PipelineExecutor:
                         )
                         out = await self._execute_planned_stage(
                             task_id, stage_num, category, agent_name,
-                            accumulated, iteration=1,
+                            accumulated, iteration=base_iteration,
                             scoped_view=scoped_view,
                             work_dir=clone_dir,
                             pipeline_name=pipeline_name,
@@ -458,9 +487,10 @@ class PipelineExecutor:
                         await self._process_validation_items(task_id, sk, per_agent_output[agent_name])
 
                 # Iteration loop: re-run if open validation items target this category
-                current_iteration = 1
+                current_iteration = base_iteration
                 while await self._should_iterate(task_id, category, current_iteration):
                     current_iteration += 1
+                    stage_iterations[stage_name] = current_iteration
                     log.info(
                         "iteration_rerun",
                         task_id=task_id,
@@ -510,15 +540,47 @@ class PipelineExecutor:
                 # --- Exit gate: evaluate structured conditions ---
                 if conditions:
                     _prompts_dir = self._registry.get_default_prompts_dir()
+                    _cond_eval_iteration = repeat_counts[stage_name]
 
-                    async def _ai_eval(prompt: str, ctx: dict[str, Any]) -> bool:
-                        return await evaluate_ai_condition(
-                            prompt, ctx,
-                            work_dir=clone_dir,
-                            task_id=task_id,
-                            stage_num=stage_num,
-                            prompts_dir=_prompts_dir,
+                    async def _ai_eval(prompt: str, ctx: dict[str, Any]) -> tuple[bool, str]:
+                        cond_stage_key = (
+                            f"{stage_num}:condition-eval:condition-evaluator"
                         )
+                        await self._tq.create_system_stage(
+                            task_id, stage_num,
+                            "condition-eval", "condition-evaluator",
+                            stage_key=cond_stage_key,
+                            iteration=_cond_eval_iteration,
+                        )
+                        await self._tq.record_stage_executing(
+                            task_id, stage_num,
+                            "condition-eval", "condition-evaluator",
+                            stage_key=cond_stage_key,
+                            iteration=_cond_eval_iteration,
+                        )
+                        try:
+                            answer, message = await evaluate_ai_condition(
+                                prompt, ctx,
+                                work_dir=clone_dir,
+                                task_id=task_id,
+                                stage_num=stage_num,
+                                prompts_dir=_prompts_dir,
+                            )
+                            await self._tq.store_stage_output(
+                                task_id, stage_num,
+                                "condition-eval", "condition-evaluator",
+                                {"answer": answer, "message": message, "prompt": prompt},
+                                stage_key=cond_stage_key,
+                                iteration=_cond_eval_iteration,
+                            )
+                            return (answer, message)
+                        except Exception as exc:
+                            await self._tq.record_stage_failed(
+                                task_id, stage_num, str(exc),
+                                stage_key=cond_stage_key,
+                                iteration=_cond_eval_iteration,
+                            )
+                            raise
 
                     cond_result = await evaluate_conditions(
                         conditions,
@@ -529,13 +591,47 @@ class PipelineExecutor:
                     )
                     if cond_result.jump_to and cond_result.jump_to in stages_by_name:
                         target_idx = stages_by_name[cond_result.jump_to]
+                        target_name = cond_result.jump_to
+                        # Increment iteration for the target stage so a new
+                        # set of stage rows is created (preserving history).
+                        next_iter = stage_iterations.get(target_name, 1) + 1
+                        stage_iterations[target_name] = next_iter
                         log.info(
                             "condition_jump",
                             task_id=task_id,
                             from_stage=stage_name,
-                            to_stage=cond_result.jump_to,
+                            to_stage=target_name,
                             target_idx=target_idx,
+                            condition_message=cond_result.message[:200] if cond_result.message else "",
                         )
+                        # Store condition message so the target stage
+                        # knows what the evaluator found and what to
+                        # focus on.
+                        if cond_result.message:
+                            stage_outputs[stage_name]["_condition_message"] = cond_result.message
+                            # Persist to DB so build_accumulated_context
+                            # includes it for the next stage.
+                            await self._db.execute(
+                                """
+                                UPDATE stages
+                                SET structured_output = jsonb_set(
+                                    COALESCE(structured_output, '{}'::jsonb),
+                                    '{_condition_message}',
+                                    %(msg)s::jsonb
+                                )
+                                WHERE task_id = %(task_id)s
+                                  AND stage_number = %(stage)s
+                                  AND run = (
+                                      SELECT MAX(run) FROM stages
+                                      WHERE task_id = %(task_id)s AND stage_number = %(stage)s
+                                  )
+                                """,
+                                {
+                                    "task_id": task_id,
+                                    "stage": stage_num,
+                                    "msg": json.dumps(cond_result.message),
+                                },
+                            )
                         current_idx = target_idx
                         continue
 
@@ -693,10 +789,14 @@ class PipelineExecutor:
         )
 
         worktree_dirs: list[str] = []
+        sub_branches: list[str] = []
         safe_task_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)
 
         try:
-            # Create a worktree per agent
+            # Create a worktree per agent on a unique sub-branch.
+            # Git does not allow the same branch to be checked out in
+            # multiple worktrees, so each agent gets its own branch
+            # forked from the task branch.
             for agent_name in agents:
                 safe_agent = re.sub(r"[^a-zA-Z0-9._-]", "-", agent_name)
                 wt_base = Path("/var/lib/aquarco/worktrees")
@@ -704,15 +804,23 @@ class PipelineExecutor:
                 wt_dir = str(
                     wt_base / f"{safe_task_id}-{safe_agent}-s{stage_num}"
                 )
+                sub_branch = f"{branch_name}/{safe_agent}-s{stage_num}"
                 if Path(wt_dir).exists():
                     try:
                         await _run_git(clone_dir, "worktree", "remove", wt_dir, "--force")
                     except Exception:
                         shutil.rmtree(wt_dir, ignore_errors=True)
+                # Delete stale sub-branch from a previous failed run
+                try:
+                    await _run_git(clone_dir, "branch", "-D", sub_branch)
+                except Exception:
+                    pass
                 await _run_git(
-                    clone_dir, "worktree", "add", wt_dir, branch_name,
+                    clone_dir, "worktree", "add",
+                    "-b", sub_branch, wt_dir, branch_name,
                 )
                 worktree_dirs.append(wt_dir)
+                sub_branches.append(sub_branch)
 
             # Run all agents in parallel
             async def _run_in_worktree(
@@ -796,13 +904,17 @@ class PipelineExecutor:
             return merged_output
 
         finally:
-            # Clean up worktrees
-            for wt_dir in worktree_dirs:
+            # Clean up worktrees and their sub-branches
+            for wt_dir, sub_branch in zip(worktree_dirs, sub_branches):
                 try:
                     await _run_git(clone_dir, "worktree", "remove", wt_dir, "--force")
                 except Exception:
                     # Fallback: manual cleanup
                     shutil.rmtree(wt_dir, ignore_errors=True)
+                try:
+                    await _run_git(clone_dir, "branch", "-D", sub_branch)
+                except Exception:
+                    pass  # branch may already be gone
 
     # -----------------------------------------------------------------------
     # Validation items
@@ -1031,6 +1143,8 @@ class PipelineExecutor:
 
         output["_agent_name"] = agent_name
         output["_iterations"] = iteration
+        # Carry raw NDJSON log so store_stage_output persists it to raw_output column
+        output["_raw_output"] = claude_output.raw
 
         # Save output log (sanitize task_id to prevent path traversal)
         safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)

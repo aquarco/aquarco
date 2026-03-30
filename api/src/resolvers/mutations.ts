@@ -239,9 +239,12 @@ export const Mutation = {
       // Atomic insert: compute rerun number inside the INSERT using a CTE
       // to avoid race conditions with concurrent rerunTask calls.
       const result = await ctx.pool.query<Record<string, unknown>>(
-        `WITH rerun_count AS (
-           SELECT COUNT(*) + 1 AS n FROM tasks WHERE parent_task_id = $1
+        `WITH locked_siblings AS (
+           SELECT id FROM tasks WHERE parent_task_id = $1
            FOR UPDATE
+         ),
+         rerun_count AS (
+           SELECT COUNT(*) + 1 AS n FROM locked_siblings
          )
          INSERT INTO tasks
            (id, title, source, source_ref, repository, pipeline,

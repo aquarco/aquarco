@@ -440,6 +440,43 @@ class TaskQueue:
 
     # --- Stage Management ---
 
+    async def create_system_stage(
+        self,
+        task_id: str,
+        stage_num: int,
+        category: str,
+        agent: str,
+        *,
+        stage_key: str,
+        iteration: int = 1,
+        run: int = 1,
+    ) -> None:
+        """Insert a stage row for a system agent (planner, condition-evaluator).
+
+        Unlike planned pipeline stages (created by create_planned_pending_stages),
+        system agent stages are not pre-created.  This method INSERTs the row so
+        that subsequent record_stage_executing / store_stage_output UPDATEs find it.
+        """
+        await self._db.execute(
+            """
+            INSERT INTO stages
+                (task_id, stage_number, category, agent, status,
+                 stage_key, iteration, run)
+            VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s,
+                    'pending', %(stage_key)s, %(iteration)s, %(run)s)
+            ON CONFLICT DO NOTHING
+            """,
+            {
+                "task_id": task_id,
+                "stage": stage_num,
+                "category": category,
+                "agent": agent,
+                "stage_key": stage_key,
+                "iteration": iteration,
+                "run": run,
+            },
+        )
+
     async def record_stage_executing(
         self,
         task_id: str,
@@ -534,13 +571,19 @@ class TaskQueue:
         *,
         stage_key: str | None = None,
     ) -> None:
-        """Record that a stage was skipped."""
+        """Record that a stage was skipped.
+
+        Only updates stages that are not already in a terminal state
+        (completed, failed) to avoid overwriting results from agents
+        that already ran successfully or recorded an error.
+        """
         if stage_key:
             await self._db.execute(
                 """
                 UPDATE stages
                 SET status = 'skipped', completed_at = NOW()
                 WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
+                      AND status NOT IN ('completed', 'failed')
                 """,
                 {"task_id": task_id, "stage_key": stage_key},
             )
@@ -551,6 +594,7 @@ class TaskQueue:
                 VALUES (%(task_id)s, %(stage)s, %(category)s, 'skipped', NOW(), NOW())
                 ON CONFLICT (task_id, stage_number) DO UPDATE
                 SET status = 'skipped', completed_at = NOW()
+                WHERE stages.status NOT IN ('completed', 'failed')
                 """,
                 {"task_id": task_id, "stage": stage_num, "category": category},
             )
@@ -604,7 +648,10 @@ class TaskQueue:
         """
         for stage_num, plan in enumerate(planned_stages):
             category = plan["category"]
-            agents = plan.get("agents", [])
+            raw_agents = plan.get("agents", [])
+            agents = [
+                a["name"] if isinstance(a, dict) else a for a in raw_agents
+            ]
             for agent_name in agents:
                 stage_key = f"{stage_num}:{category}:{agent_name}"
                 await self._db.execute(
@@ -642,6 +689,7 @@ class TaskQueue:
                  stage_key, iteration)
             VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s,
                     'pending', %(stage_key)s, %(iteration)s)
+            ON CONFLICT DO NOTHING
             """,
             {
                 "task_id": task_id,

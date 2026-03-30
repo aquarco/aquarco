@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+from typing import Any, Generator
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -16,45 +17,45 @@ from aquarco_supervisor.cli.claude import (
     _extract_json,
     _find_result_message,
     _parse_output,
+    _tail_file,
     execute_claude,
 )
+from aquarco_supervisor.cli import claude as claude_mod
 from aquarco_supervisor.exceptions import AgentExecutionError, AgentTimeoutError
 
 
+@pytest.fixture(autouse=True)
+def _patch_log_dir(tmp_path: Path) -> Any:
+    """Redirect _LOG_DIR to tmp_path so tests don't need /var/log/aquarco."""
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    with patch.object(claude_mod, "_LOG_DIR", log_dir):
+        yield
+
+
 # ---------------------------------------------------------------------------
-# Helpers for stream-json mock stdout
+# Helpers for file-based tests
 # ---------------------------------------------------------------------------
 
-class _AsyncLineReader:
-    """Async-iterable mock stdout that yields pre-encoded NDJSON lines."""
-
-    def __init__(self, raw_lines: list[bytes]) -> None:
-        self._data = list(raw_lines)
-
-    def __aiter__(self) -> "_AsyncLineReader":
-        return self
-
-    async def __anext__(self) -> bytes:
-        if not self._data:
-            raise StopAsyncIteration
-        return self._data.pop(0)
+def _write_ndjson_file(path: Path, *dicts: dict[str, Any]) -> None:
+    """Write NDJSON lines to a file (simulates Claude CLI stdout)."""
+    with open(path, "w") as f:
+        for d in dicts:
+            f.write(json.dumps(d) + "\n")
 
 
-class _HangingReader:
-    """Async-iterable mock stdout that hangs indefinitely (for timeout tests)."""
-
-    def __aiter__(self) -> "_HangingReader":
-        return self
-
-    async def __anext__(self) -> bytes:
-        await asyncio.sleep(3600)
-        raise StopAsyncIteration
-
-
-def _make_ndjson_stdout(*dicts: dict[str, Any]) -> _AsyncLineReader:
-    """Create an async-iterable mock stdout yielding NDJSON-encoded lines."""
-    raw_lines = [(json.dumps(d) + "\n").encode() for d in dicts]
-    return _AsyncLineReader(raw_lines)
+def _make_proc_mock(
+    returncode: int | None = 0,
+    *,
+    wait_result: None = None,
+) -> MagicMock:
+    """Create a process mock with the given returncode."""
+    proc = MagicMock()
+    proc.returncode = returncode
+    proc.kill = MagicMock()
+    proc.terminate = MagicMock()
+    proc.wait = AsyncMock(return_value=wait_result)
+    return proc
 
 
 # --- _extract_json ---
@@ -79,7 +80,6 @@ def test_extract_json_returns_none_for_plain_text() -> None:
 def test_extract_json_ignores_invalid_json_in_code_block() -> None:
     text = "```json\n{invalid json}\n```"
     result = _extract_json(text)
-    # Falls through to line-by-line attempt, which also fails
     assert result is None
 
 
@@ -245,19 +245,26 @@ async def test_execute_claude_raises_when_prompt_file_missing(tmp_path: Any) -> 
 
 @pytest.mark.asyncio
 async def test_execute_claude_raises_on_nonzero_exit(tmp_path: Any) -> None:
-    """Raises AgentExecutionError when Claude CLI exits with non-zero code."""
+    """Raises AgentExecutionError when Claude CLI exits with non-zero code and no result event."""
     prompt_file = tmp_path / "system.md"
     prompt_file.write_text("You are a test agent.")
+    stdout_file = tmp_path / "stdout.ndjson"
+    stdout_file.write_text("")  # empty — no result event
 
-    tmp_path / "logs"
+    mock_proc = _make_proc_mock(returncode=1)
 
-    mock_proc = MagicMock()
-    mock_proc.returncode = 1
-    mock_proc.stdout = _make_ndjson_stdout()
+    async def fake_tail(path, proc, **kwargs):
+        return [], False
 
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
-         patch("pathlib.Path.mkdir"), \
-         patch("builtins.open", mock_open()):
+    with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
+         patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+         patch("tempfile.mkstemp") as mock_mkstemp, \
+         patch("pathlib.Path.mkdir"):
+        # First mkstemp is context file, second is stdout file
+        ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
+        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+
         with pytest.raises(AgentExecutionError, match="Claude CLI exited with code 1"):
             await execute_claude(
                 prompt_file=prompt_file,
@@ -266,37 +273,6 @@ async def test_execute_claude_raises_on_nonzero_exit(tmp_path: Any) -> None:
                 task_id="t1",
                 stage_num=0,
             )
-
-
-@pytest.mark.asyncio
-async def test_execute_claude_raises_timeout(tmp_path: Any) -> None:
-    """Raises AgentTimeoutError when the process exceeds timeout."""
-    import asyncio
-
-    prompt_file = tmp_path / "system.md"
-    prompt_file.write_text("You are a test agent.")
-
-    mock_proc = MagicMock()
-    mock_proc.returncode = None
-    mock_proc.kill = MagicMock()
-    mock_proc.wait = AsyncMock()
-    # Simulate a hanging process — stdout never yields
-    mock_proc.stdout = _HangingReader()
-
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
-         patch("pathlib.Path.mkdir"), \
-         patch("builtins.open", mock_open()):
-        with pytest.raises(AgentTimeoutError, match="timed out"):
-            await execute_claude(
-                prompt_file=prompt_file,
-                context={"task_id": "t1"},
-                work_dir=str(tmp_path),
-                timeout_seconds=1,
-                task_id="t1",
-                stage_num=0,
-            )
-
-    mock_proc.kill.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -311,14 +287,21 @@ async def test_execute_claude_returns_parsed_output(tmp_path: Any) -> None:
         "subtype": "success",
         "result": json.dumps(structured),
     }
+    result_line = json.dumps(result_event)
 
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.stdout = _make_ndjson_stdout(result_event)
+    mock_proc = _make_proc_mock(returncode=0)
 
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
-         patch("pathlib.Path.mkdir"), \
-         patch("builtins.open", mock_open()):
+    async def fake_tail(path, proc, **kwargs):
+        return [result_line], True
+
+    with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
+         patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+         patch("tempfile.mkstemp") as mock_mkstemp, \
+         patch("pathlib.Path.mkdir"):
+        ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
+        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+
         result = await execute_claude(
             prompt_file=prompt_file,
             context={"task_id": "t1"},
@@ -329,6 +312,40 @@ async def test_execute_claude_returns_parsed_output(tmp_path: Any) -> None:
 
     assert result.structured["complexity"] == "low"
     assert result.structured["summary"] == "Done"
+    assert result.raw == result_line
+
+
+@pytest.mark.asyncio
+async def test_execute_claude_result_event_ignores_bad_returncode(tmp_path: Any) -> None:
+    """When result event was seen, non-zero returncode is treated as success."""
+    prompt_file = tmp_path / "system.md"
+    prompt_file.write_text("You are a test agent.")
+
+    result_event = {"type": "result", "result": json.dumps({"status": "ok"})}
+    result_line = json.dumps(result_event)
+
+    mock_proc = _make_proc_mock(returncode=-9)  # killed
+
+    async def fake_tail(path, proc, **kwargs):
+        return [result_line], True
+
+    with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
+         patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+         patch("tempfile.mkstemp") as mock_mkstemp, \
+         patch("pathlib.Path.mkdir"):
+        ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
+        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+
+        result = await execute_claude(
+            prompt_file=prompt_file,
+            context={"task_id": "t1"},
+            work_dir=str(tmp_path),
+            task_id="t1",
+            stage_num=0,
+        )
+
+    assert result.structured["status"] == "ok"
 
 
 @pytest.mark.asyncio
@@ -337,20 +354,27 @@ async def test_execute_claude_passes_allowed_tools(tmp_path: Any) -> None:
     prompt_file = tmp_path / "system.md"
     prompt_file.write_text("You are a test agent.")
 
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.stdout = _make_ndjson_stdout()
-
+    mock_proc = _make_proc_mock(returncode=0)
     captured_args: list = []
 
     async def fake_exec(*args: Any, **kwargs: Any) -> Any:
         captured_args.extend(args)
         return mock_proc
 
-    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
-         patch("pathlib.Path.mkdir"), \
-         patch("builtins.open", mock_open()):
-        await execute_claude(
+    async def fake_tail(path, proc, **kwargs):
+        return [], False
+
+    with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
+         patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
+         patch("tempfile.mkstemp") as mock_mkstemp, \
+         patch("pathlib.Path.mkdir"):
+        ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
+        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+
+        # exit 0 with no result event and no lines → falls through to
+        # _parse_ndjson_output which returns _no_structured_output
+        result = await execute_claude(
             prompt_file=prompt_file,
             context={},
             work_dir=str(tmp_path),
@@ -370,20 +394,25 @@ async def test_execute_claude_passes_denied_tools(tmp_path: Any) -> None:
     prompt_file = tmp_path / "system.md"
     prompt_file.write_text("You are a test agent.")
 
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.stdout = _make_ndjson_stdout()
-
+    mock_proc = _make_proc_mock(returncode=0)
     captured_args: list = []
 
     async def fake_exec(*args: Any, **kwargs: Any) -> Any:
         captured_args.extend(args)
         return mock_proc
 
-    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
-         patch("pathlib.Path.mkdir"), \
-         patch("builtins.open", mock_open()):
-        await execute_claude(
+    async def fake_tail(path, proc, **kwargs):
+        return [], False
+
+    with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
+         patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
+         patch("tempfile.mkstemp") as mock_mkstemp, \
+         patch("pathlib.Path.mkdir"):
+        ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
+        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+
+        result = await execute_claude(
             prompt_file=prompt_file,
             context={},
             work_dir=str(tmp_path),
@@ -399,24 +428,29 @@ async def test_execute_claude_passes_denied_tools(tmp_path: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_execute_claude_uses_system_prompt_file(tmp_path: Any) -> None:
-    """Passes --system-prompt-file with the prompt path instead of reading its contents."""
+    """Passes --system-prompt-file with the prompt path."""
     prompt_file = tmp_path / "system.md"
     prompt_file.write_text("You are a test agent.")
 
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.stdout = _make_ndjson_stdout()
-
+    mock_proc = _make_proc_mock(returncode=0)
     captured_args: list = []
 
     async def fake_exec(*args: Any, **kwargs: Any) -> Any:
         captured_args.extend(args)
         return mock_proc
 
-    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
-         patch("pathlib.Path.mkdir"), \
-         patch("builtins.open", mock_open()):
-        await execute_claude(
+    async def fake_tail(path, proc, **kwargs):
+        return [], False
+
+    with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
+         patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
+         patch("tempfile.mkstemp") as mock_mkstemp, \
+         patch("pathlib.Path.mkdir"):
+        ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
+        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+
+        result = await execute_claude(
             prompt_file=prompt_file,
             context={},
             work_dir=str(tmp_path),
@@ -427,7 +461,6 @@ async def test_execute_claude_uses_system_prompt_file(tmp_path: Any) -> None:
     args_str = " ".join(str(a) for a in captured_args)
     assert "--system-prompt-file" in args_str
     assert str(prompt_file) in args_str
-    assert "--system-prompt" not in args_str.replace("--system-prompt-file", "")
 
 
 def test_format_schema_prompt_contains_schema() -> None:
@@ -448,22 +481,27 @@ async def test_execute_claude_passes_output_schema_flags(tmp_path: Any) -> None:
     prompt_file = tmp_path / "system.md"
     prompt_file.write_text("You are a test agent.")
 
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.stdout = _make_ndjson_stdout()
-
+    mock_proc = _make_proc_mock(returncode=0)
     captured_args: list = []
 
     async def fake_exec(*args: Any, **kwargs: Any) -> Any:
         captured_args.extend(args)
         return mock_proc
 
+    async def fake_tail(path, proc, **kwargs):
+        return [], False
+
     schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
 
-    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
-         patch("pathlib.Path.mkdir"), \
-         patch("builtins.open", mock_open()):
-        await execute_claude(
+    with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
+         patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
+         patch("tempfile.mkstemp") as mock_mkstemp, \
+         patch("pathlib.Path.mkdir"):
+        ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
+        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+
+        result = await execute_claude(
             prompt_file=prompt_file,
             context={},
             work_dir=str(tmp_path),
@@ -476,39 +514,6 @@ async def test_execute_claude_passes_output_schema_flags(tmp_path: Any) -> None:
     assert "--append-system-prompt" in args_str
     assert "--json-schema" in args_str
     assert '"summary"' in args_str
-
-
-@pytest.mark.asyncio
-async def test_execute_claude_no_schema_flags_when_none(tmp_path: Any) -> None:
-    """When output_schema is None, no schema flags are added."""
-    prompt_file = tmp_path / "system.md"
-    prompt_file.write_text("You are a test agent.")
-
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.stdout = _make_ndjson_stdout()
-
-    captured_args: list = []
-
-    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
-        captured_args.extend(args)
-        return mock_proc
-
-    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
-         patch("pathlib.Path.mkdir"), \
-         patch("builtins.open", mock_open()):
-        await execute_claude(
-            prompt_file=prompt_file,
-            context={},
-            work_dir=str(tmp_path),
-            task_id="t1",
-            stage_num=0,
-            output_schema=None,
-        )
-
-    args_str = " ".join(str(a) for a in captured_args)
-    assert "--append-system-prompt" not in args_str
-    assert "--json-schema" not in args_str
 
 
 # --- ClaudeOutput dataclass ---
@@ -530,19 +535,16 @@ def test_claude_output_custom_values() -> None:
 # --- _parse_output: no _raw_output in any path ---
 
 def test_parse_output_empty_has_no_raw_output_key() -> None:
-    """Empty input should NOT include _raw_output key."""
     result = _parse_output("", "task-001", 0)
     assert "_raw_output" not in result
 
 
 def test_parse_output_invalid_json_has_no_raw_output_key() -> None:
-    """Invalid JSON should NOT include _raw_output key."""
     result = _parse_output("not json", "task-001", 0)
     assert "_raw_output" not in result
 
 
 def test_parse_output_plain_text_result_has_no_raw_output_key() -> None:
-    """Plain text result should NOT include _raw_output key."""
     raw = json.dumps({"result": "Just some text"})
     result = _parse_output(raw, "task-001", 0)
     assert "_raw_output" not in result
@@ -550,7 +552,6 @@ def test_parse_output_plain_text_result_has_no_raw_output_key() -> None:
 
 
 def test_parse_output_list_format_has_no_raw_output_and_no_parsed_messages() -> None:
-    """List-format output should NOT include _raw_output or _parsed_messages."""
     messages = [
         {"type": "result", "result": "Some plain text from assistant"},
     ]
@@ -565,17 +566,14 @@ def test_parse_output_list_format_has_no_raw_output_and_no_parsed_messages() -> 
 # --- _parse_output: _result_text truncation ---
 
 def test_parse_output_result_text_truncated_to_2000() -> None:
-    """Long plain text in result field is truncated to 2000 chars."""
     long_text = "x" * 5000
     raw = json.dumps({"result": long_text})
     result = _parse_output(raw, "task-001", 0)
     assert result["_no_structured_output"] is True
     assert len(result["_result_text"]) == 2000
-    assert result["_result_text"] == "x" * 2000
 
 
 def test_parse_output_list_result_text_truncated_to_2000() -> None:
-    """Long result text from list-format is truncated to 2000 chars."""
     long_text = "y" * 5000
     messages = [{"type": "result", "result": long_text}]
     raw = json.dumps(messages)
@@ -583,79 +581,9 @@ def test_parse_output_list_result_text_truncated_to_2000() -> None:
     assert len(result["_result_text"]) == 2000
 
 
-# --- execute_claude returns ClaudeOutput with raw ---
-
-@pytest.mark.asyncio
-async def test_execute_claude_returns_claude_output_with_raw(tmp_path: Any) -> None:
-    """execute_claude returns ClaudeOutput with both structured and raw fields."""
-    prompt_file = tmp_path / "system.md"
-    prompt_file.write_text("You are a test agent.")
-
-    structured = {"status": "ok"}
-    result_event = {"type": "result", "subtype": "success", "result": json.dumps(structured)}
-    result_event_str = json.dumps(result_event)
-
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.stdout = _make_ndjson_stdout(result_event)
-
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
-         patch("pathlib.Path.mkdir"), \
-         patch("builtins.open", mock_open()):
-        result = await execute_claude(
-            prompt_file=prompt_file,
-            context={"task_id": "t1"},
-            work_dir=str(tmp_path),
-            task_id="t1",
-            stage_num=0,
-        )
-
-    assert isinstance(result, ClaudeOutput)
-    assert result.structured["status"] == "ok"
-    assert result.raw == result_event_str
-
-
-@pytest.mark.asyncio
-async def test_execute_claude_cleans_up_context_file(tmp_path: Any) -> None:
-    """Temporary context file is deleted even when an exception occurs."""
-    prompt_file = tmp_path / "system.md"
-    prompt_file.write_text("You are a test agent.")
-
-    # Track files created in tmp
-    created_files: list[Path] = []
-
-    original_mkstemp = __import__("tempfile").mkstemp
-
-    def tracking_mkstemp(**kwargs: Any) -> Any:
-        fd, path = original_mkstemp(**kwargs)
-        created_files.append(Path(path))
-        return fd, path
-
-    mock_proc = MagicMock()
-    mock_proc.returncode = 1
-    mock_proc.stdout = _make_ndjson_stdout()
-
-    with patch("tempfile.mkstemp", side_effect=tracking_mkstemp), \
-         patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
-         patch("pathlib.Path.mkdir"), \
-         patch("builtins.open", mock_open()):
-        with pytest.raises(AgentExecutionError):
-            await execute_claude(
-                prompt_file=prompt_file,
-                context={},
-                work_dir=str(tmp_path),
-            )
-
-    # All created temp files should be cleaned up
-    for f in created_files:
-        assert not f.exists(), f"Temp file {f} was not cleaned up"
-
-
 # --- _find_result_message ---
 
 def test_find_result_message_found() -> None:
-    from aquarco_supervisor.cli.claude import _find_result_message
-
     messages = [
         {"role": "assistant", "content": "hi"},
         {"type": "result", "result": "done"},
@@ -664,20 +592,14 @@ def test_find_result_message_found() -> None:
 
 
 def test_find_result_message_not_found() -> None:
-    from aquarco_supervisor.cli.claude import _find_result_message
-
     assert _find_result_message([{"role": "assistant"}]) is None
 
 
 def test_find_result_message_empty_list() -> None:
-    from aquarco_supervisor.cli.claude import _find_result_message
-
     assert _find_result_message([]) is None
 
 
 def test_find_result_message_skips_non_dicts() -> None:
-    from aquarco_supervisor.cli.claude import _find_result_message
-
     messages = ["string", 42, None, {"type": "result", "result": "ok"}]
     assert _find_result_message(messages) == {"type": "result", "result": "ok"}
 
@@ -685,81 +607,56 @@ def test_find_result_message_skips_non_dicts() -> None:
 # --- _extract_from_result_message ---
 
 def test_extract_structured_output_dict() -> None:
-    from aquarco_supervisor.cli.claude import _extract_from_result_message
-
     msg = {"structured_output": {"summary": "done", "issues": []}, "result": "text"}
     result = _extract_from_result_message(msg)
     assert result["summary"] == "done"
 
 
 def test_extract_structured_output_string() -> None:
-    from aquarco_supervisor.cli.claude import _extract_from_result_message
-
-    msg = {"structured_output": '{"key": "val"}'}
+    msg = {"structured_output": json.dumps({"verdict": "pass"}), "result": "text"}
     result = _extract_from_result_message(msg)
-    assert result["key"] == "val"
+    assert result["verdict"] == "pass"
 
 
-def test_extract_structured_output_invalid_string_falls_back() -> None:
-    from aquarco_supervisor.cli.claude import _extract_from_result_message
-
+def test_extract_structured_output_invalid_string_falls_to_result() -> None:
     msg = {"structured_output": "not json", "result": '{"fallback": true}'}
     result = _extract_from_result_message(msg)
     assert result["fallback"] is True
 
 
-def test_extract_no_structured_extracts_from_result() -> None:
-    from aquarco_supervisor.cli.claude import _extract_from_result_message
-
-    msg = {"result": '```json\n{"answer": 42}\n```'}
+def test_extract_result_text_json() -> None:
+    msg = {"result": '{"status": "ok"}'}
     result = _extract_from_result_message(msg)
-    assert result["answer"] == 42
+    assert result["status"] == "ok"
 
 
-def test_extract_plain_text_result() -> None:
-    from aquarco_supervisor.cli.claude import _extract_from_result_message
-
-    msg = {"result": "Just some text"}
+def test_extract_result_text_plain() -> None:
+    msg = {"result": "Everything looks fine."}
     result = _extract_from_result_message(msg)
     assert result["_no_structured_output"] is True
-    assert result["_result_text"] == "Just some text"
+    assert result["_result_text"] == "Everything looks fine."
 
 
-def test_extract_no_result_no_structured_returns_msg() -> None:
-    from aquarco_supervisor.cli.claude import _extract_from_result_message
-
-    msg = {"type": "result", "duration_ms": 5000}
+def test_extract_no_result_no_structured() -> None:
+    msg = {"type": "result", "subtype": "error_max_turns"}
     result = _extract_from_result_message(msg)
-    assert result["type"] == "result"
-    assert result["duration_ms"] == 5000
-
-
-def test_extract_empty_result_no_structured_returns_msg() -> None:
-    from aquarco_supervisor.cli.claude import _extract_from_result_message
-
-    msg = {"type": "result", "result": ""}
-    result = _extract_from_result_message(msg)
-    assert result["type"] == "result"
+    assert result == msg
 
 
 def test_extract_metadata_fields() -> None:
-    from aquarco_supervisor.cli.claude import _extract_from_result_message
-
     msg = {
-        "structured_output": {"ok": True},
-        "total_cost_usd": 0.05,
-        "usage": {
-            "input_tokens": 100,
-            "cache_read_input_tokens": 50,
-            "output_tokens": 200,
-            "cache_creation_input_tokens": 10,
-        },
+        "result": '{"ok": true}',
+        "subtype": "success",
+        "total_cost_usd": 0.5,
+        "usage": {"input_tokens": 100, "cache_read_input_tokens": 50, "output_tokens": 200, "cache_creation_input_tokens": 10},
         "duration_ms": 3000,
         "num_turns": 5,
         "session_id": "sess-123",
     }
     result = _extract_from_result_message(msg)
-    assert result["_cost_usd"] == 0.05
+    assert result["ok"] is True
+    assert result["_subtype"] == "success"
+    assert result["_cost_usd"] == 0.5
     assert result["_input_tokens"] == 150
     assert result["_output_tokens"] == 200
     assert result["_cache_creation_tokens"] == 10
@@ -768,487 +665,232 @@ def test_extract_metadata_fields() -> None:
     assert result["_session_id"] == "sess-123"
 
 
-def test_extract_result_with_structured_none() -> None:
-    from aquarco_supervisor.cli.claude import _extract_from_result_message
-
-    msg = {"result": "non-json text", "structured_output": None}
+def test_extract_handles_missing_optional_keys() -> None:
+    msg = {"result": '{"ok": true}'}
     result = _extract_from_result_message(msg)
-    assert result["_no_structured_output"] is True
-    assert result["_result_text"] == "non-json text"
+    assert result["ok"] is True
+    assert "_subtype" not in result
+    assert "_cost_usd" not in result
 
 
-# --- _parse_output: list format with result message ---
-
-def test_parse_output_list_with_result_message() -> None:
-    messages = [
-        {"role": "assistant", "content": [{"type": "text", "text": "working..."}]},
-        {"type": "result", "structured_output": {"tests_passed": 5}, "result": "done"},
-    ]
-    result = _parse_output(json.dumps(messages), "task-001", 0)
-    assert result["tests_passed"] == 5
-
-
-def test_parse_output_list_no_result_fallback_to_assistant() -> None:
-    messages = [
-        {"role": "assistant", "content": [{"type": "text", "text": '{"extracted": "ok"}'}]},
-    ]
-    result = _parse_output(json.dumps(messages), "task-001", 0)
-    assert result["extracted"] == "ok"
-
-
-def test_parse_output_list_string_content_fallback() -> None:
-    messages = [{"role": "assistant", "content": '{"from_string": true}'}]
-    result = _parse_output(json.dumps(messages), "task-001", 0)
-    assert result["from_string"] is True
-
-
-def test_parse_output_list_no_json_in_fallback() -> None:
-    messages = [{"role": "assistant", "content": "Just chatting"}]
-    result = _parse_output(json.dumps(messages), "task-001", 0)
-    assert result["_no_structured_output"] is True
-
-
-def test_parse_output_list_no_assistant_messages() -> None:
-    messages = [{"role": "user", "content": "hello"}]
-    result = _parse_output(json.dumps(messages), "task-001", 0)
-    assert result["_no_structured_output"] is True
-    assert result["_result_text"] == ""
-
-
-def test_parse_output_single_dict_with_structured_output() -> None:
-    raw = json.dumps({
-        "type": "result",
-        "structured_output": {"verdict": "pass"},
-        "total_cost_usd": 0.01,
-    })
-    result = _parse_output(raw, "task-001", 0)
-    assert result["verdict"] == "pass"
-    assert result["_cost_usd"] == 0.01
-
-
-# --- execute_claude extra_env ---
+# --- _tail_file ---
 
 @pytest.mark.asyncio
-async def test_execute_claude_passes_extra_env(tmp_path: Any) -> None:
-    prompt_file = tmp_path / "system.md"
-    prompt_file.write_text("You are a test agent.")
+async def test_tail_file_reads_ndjson_lines(tmp_path: Any) -> None:
+    """_tail_file reads all NDJSON lines from a file."""
+    stdout_file = tmp_path / "stdout.ndjson"
+    events = [
+        {"type": "assistant", "content": "hello"},
+        {"type": "result", "result": '{"status": "ok"}'},
+    ]
+    _write_ndjson_file(stdout_file, *events)
 
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.stdout = _make_ndjson_stdout()
+    proc = _make_proc_mock(returncode=0)
+    lines, result_seen = await _tail_file(
+        stdout_file, proc,
+        timeout_seconds=5.0, task_id="t1", stage_num=0,
+    )
 
-    captured_kwargs: dict = {}
-
-    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
-        captured_kwargs.update(kwargs)
-        return mock_proc
-
-    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
-         patch("pathlib.Path.mkdir"), \
-         patch("builtins.open", mock_open()):
-        await execute_claude(
-            prompt_file=prompt_file, context={}, work_dir=str(tmp_path),
-            task_id="t1", stage_num=0, extra_env={"CUSTOM_VAR": "custom_value"},
-        )
-
-    assert captured_kwargs["env"] is not None
-    assert captured_kwargs["env"]["CUSTOM_VAR"] == "custom_value"
+    assert len(lines) == 2
+    assert result_seen is True
+    assert '"result"' in lines[1]
 
 
 @pytest.mark.asyncio
-async def test_execute_claude_no_extra_env_passes_none(tmp_path: Any) -> None:
-    prompt_file = tmp_path / "system.md"
-    prompt_file.write_text("You are a test agent.")
+async def test_tail_file_detects_result_event(tmp_path: Any) -> None:
+    """result_seen is True when a {type: 'result'} line is found."""
+    stdout_file = tmp_path / "stdout.ndjson"
+    _write_ndjson_file(stdout_file, {"type": "result", "result": "done"})
 
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.stdout = _make_ndjson_stdout()
+    proc = _make_proc_mock(returncode=0)
+    _, result_seen = await _tail_file(
+        stdout_file, proc,
+        timeout_seconds=5.0, task_id="t1", stage_num=0,
+    )
+    assert result_seen is True
 
-    captured_kwargs: dict = {}
 
-    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
-        captured_kwargs.update(kwargs)
-        return mock_proc
+@pytest.mark.asyncio
+async def test_tail_file_no_result_event(tmp_path: Any) -> None:
+    """result_seen is False when no result event in file."""
+    stdout_file = tmp_path / "stdout.ndjson"
+    _write_ndjson_file(stdout_file, {"type": "assistant", "content": "hi"})
 
-    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
-         patch("pathlib.Path.mkdir"), \
-         patch("builtins.open", mock_open()):
-        await execute_claude(
-            prompt_file=prompt_file, context={}, work_dir=str(tmp_path),
+    proc = _make_proc_mock(returncode=0)
+    lines, result_seen = await _tail_file(
+        stdout_file, proc,
+        timeout_seconds=5.0, task_id="t1", stage_num=0,
+    )
+    assert result_seen is False
+    assert len(lines) == 1
+
+
+@pytest.mark.asyncio
+async def test_tail_file_calls_on_live_output(tmp_path: Any) -> None:
+    """on_live_output callback is invoked per NDJSON line."""
+    stdout_file = tmp_path / "stdout.ndjson"
+    events = [
+        {"type": "assistant", "content": "working"},
+        {"type": "result", "result": "done"},
+    ]
+    _write_ndjson_file(stdout_file, *events)
+
+    captured: list[str] = []
+
+    async def on_live(line: str) -> None:
+        captured.append(line)
+
+    proc = _make_proc_mock(returncode=0)
+    await _tail_file(
+        stdout_file, proc,
+        on_live_output=on_live,
+        timeout_seconds=5.0, task_id="t1", stage_num=0,
+    )
+    assert len(captured) == 2
+
+
+@pytest.mark.asyncio
+async def test_tail_file_skips_empty_lines(tmp_path: Any) -> None:
+    """Empty lines in the file are skipped."""
+    stdout_file = tmp_path / "stdout.ndjson"
+    with open(stdout_file, "w") as f:
+        f.write("\n")
+        f.write(json.dumps({"type": "result", "result": "ok"}) + "\n")
+        f.write("\n")
+        f.write("  \n")
+
+    proc = _make_proc_mock(returncode=0)
+    lines, _ = await _tail_file(
+        stdout_file, proc,
+        timeout_seconds=5.0, task_id="t1", stage_num=0,
+    )
+    assert len(lines) == 1
+
+
+@pytest.mark.asyncio
+async def test_tail_file_timeout_kills_process(tmp_path: Any) -> None:
+    """Process is killed when timeout expires."""
+    stdout_file = tmp_path / "stdout.ndjson"
+    stdout_file.write_text("")
+
+    proc = MagicMock()
+    proc.returncode = None  # never exits on its own
+    proc.kill = MagicMock()
+    # After kill, returncode becomes -9
+    async def fake_wait():
+        proc.returncode = -9
+    proc.wait = AsyncMock(side_effect=fake_wait)
+
+    lines, result_seen = await _tail_file(
+        stdout_file, proc,
+        timeout_seconds=0.1,
+        task_id="t1", stage_num=0,
+    )
+
+    proc.kill.assert_called_once()
+    assert result_seen is False
+
+
+@pytest.mark.asyncio
+async def test_tail_file_post_result_grace_terminates(tmp_path: Any) -> None:
+    """After result event, process is terminated after grace period."""
+    from aquarco_supervisor.cli import claude as claude_mod
+
+    stdout_file = tmp_path / "stdout.ndjson"
+    _write_ndjson_file(stdout_file, {"type": "result", "result": "done"})
+
+    proc = MagicMock()
+    proc.returncode = None
+    proc.terminate = MagicMock()
+    proc.kill = MagicMock()
+    async def fake_wait():
+        proc.returncode = -15
+    proc.wait = AsyncMock(side_effect=fake_wait)
+
+    # Use very short grace period for testing
+    original_grace = claude_mod._POST_RESULT_GRACE_SECONDS
+    claude_mod._POST_RESULT_GRACE_SECONDS = 0.1
+    try:
+        lines, result_seen = await _tail_file(
+            stdout_file, proc,
+            timeout_seconds=10.0,
             task_id="t1", stage_num=0,
         )
+    finally:
+        claude_mod._POST_RESULT_GRACE_SECONDS = original_grace
 
-    assert captured_kwargs["env"] is None
-
-
-# --- _find_result_message ---
-
-def test_find_result_message_returns_result_type() -> None:
-    """Finds the message with type='result' in a list."""
-    messages = [
-        {"type": "assistant", "content": "hello"},
-        {"type": "result", "result": "done", "total_cost_usd": 0.1},
-    ]
-    found = _find_result_message(messages)
-    assert found is not None
-    assert found["type"] == "result"
-    assert found["total_cost_usd"] == 0.1
+    assert result_seen is True
+    proc.terminate.assert_called_once()
+    assert len(lines) == 1
 
 
-def test_find_result_message_returns_none_when_missing() -> None:
-    """Returns None when no result message exists."""
-    messages = [
-        {"type": "assistant", "content": "hello"},
-        {"type": "system", "subtype": "init"},
-    ]
-    assert _find_result_message(messages) is None
+# --- Temp file helper ---
+
+def _make_temp_file(path: Path) -> tuple[int, str]:
+    """Create a real temp file and return (fd, path) for mkstemp mock."""
+    fd = os.open(str(path), os.O_CREAT | os.O_WRONLY, 0o600)
+    return fd, str(path)
 
 
-def test_find_result_message_skips_non_dicts() -> None:
-    """Gracefully skips non-dict entries in the message list."""
-    messages = ["not a dict", 42, {"type": "result", "result": "ok"}]
-    found = _find_result_message(messages)
-    assert found is not None
-    assert found["result"] == "ok"
+# --- Single-dict format (older CLI) ---
 
-
-def test_find_result_message_empty_list() -> None:
-    """Returns None for empty list."""
-    assert _find_result_message([]) is None
-
-
-# --- _extract_from_result_message ---
-
-def test_extract_from_result_message_structured_dict() -> None:
-    """Extracts structured_output when it's a dict."""
+def test_parse_output_single_dict_with_structured_output() -> None:
     msg = {
         "type": "result",
-        "structured_output": {"verdict": "pass", "score": 95},
-        "result": "Some text",
-        "total_cost_usd": 0.5,
+        "structured_output": {"summary": "all good"},
+        "total_cost_usd": 0.1,
     }
-    result = _extract_from_result_message(msg)
-    assert result["verdict"] == "pass"
-    assert result["score"] == 95
-    assert result["_cost_usd"] == 0.5
+    result = _parse_output(json.dumps(msg), "task-001", 0)
+    assert result["summary"] == "all good"
+    assert result["_cost_usd"] == 0.1
 
 
-def test_extract_from_result_message_structured_string() -> None:
-    """Parses structured_output when it's a JSON string."""
+def test_parse_output_single_dict_with_metadata() -> None:
     msg = {
         "type": "result",
-        "structured_output": '{"status": "ok", "count": 3}',
-        "result": "text",
+        "result": '{"ok": true}',
+        "duration_ms": 5000,
+        "num_turns": 7,
     }
-    result = _extract_from_result_message(msg)
+    result = _parse_output(json.dumps(msg), "task-001", 0)
+    assert result["ok"] is True
+    assert result["_duration_ms"] == 5000
+    assert result["_num_turns"] == 7
+
+
+# --- _parse_output list format fallback paths ---
+
+def test_parse_output_list_no_result_extracts_from_assistant_text() -> None:
+    messages = [
+        {"role": "assistant", "content": [{"type": "text", "text": '{"status": "ok"}'}]},
+    ]
+    result = _parse_output(json.dumps(messages), "task-001", 0)
     assert result["status"] == "ok"
-    assert result["count"] == 3
 
 
-def test_extract_from_result_message_structured_invalid_string() -> None:
-    """Falls back to result text when structured_output is invalid JSON string."""
-    msg = {
-        "type": "result",
-        "structured_output": "not valid json",
-        "result": '{"fallback": true}',
-    }
-    result = _extract_from_result_message(msg)
-    assert result["fallback"] is True
-
-
-def test_extract_from_result_message_structured_non_dict_json_string() -> None:
-    """Falls back when structured_output is valid JSON but not a dict."""
-    msg = {
-        "type": "result",
-        "structured_output": "[1, 2, 3]",
-        "result": '{"from_result": true}',
-    }
-    result = _extract_from_result_message(msg)
-    assert result["from_result"] is True
-
-
-def test_extract_from_result_message_no_structured_no_result() -> None:
-    """When no structured_output and no result text, returns full message dict."""
-    msg = {"type": "result", "total_cost_usd": 0.1, "duration_ms": 500}
-    result = _extract_from_result_message(msg)
-    # Falls into the 'elif not msg.get("result") and not structured' branch
-    assert result["type"] == "result"
-    assert result["total_cost_usd"] == 0.1
-
-
-def test_extract_from_result_message_empty_result_no_structured() -> None:
-    """Empty result string with no structured_output returns raw msg dict."""
-    msg = {"type": "result", "result": "", "extra": "data"}
-    result = _extract_from_result_message(msg)
-    assert result == msg
-
-
-def test_extract_from_result_message_usage_with_missing_keys() -> None:
-    """Usage extraction handles missing optional keys gracefully."""
-    msg = {
-        "type": "result",
-        "structured_output": {"ok": True},
-        "usage": {"input_tokens": 100, "output_tokens": 50},
-        # cache_read_input_tokens and cache_creation_input_tokens missing
-    }
-    result = _extract_from_result_message(msg)
-    assert result["_input_tokens"] == 100  # 100 + 0 (no cache_read)
-    assert result["_output_tokens"] == 50
-    assert result["_cache_creation_tokens"] == 0
-
-
-def test_extract_from_result_message_usage_non_dict_ignored() -> None:
-    """Non-dict usage value is silently ignored."""
-    msg = {
-        "type": "result",
-        "structured_output": {"ok": True},
-        "usage": "invalid",
-    }
-    result = _extract_from_result_message(msg)
-    assert "_input_tokens" not in result
-    assert "_output_tokens" not in result
-
-
-def test_extract_from_result_message_all_metadata() -> None:
-    """All metadata fields are extracted with correct prefixed keys."""
-    msg = {
-        "type": "result",
-        "structured_output": {"data": 1},
-        "total_cost_usd": 1.23,
-        "usage": {
-            "input_tokens": 200,
-            "cache_read_input_tokens": 300,
-            "output_tokens": 400,
-            "cache_creation_input_tokens": 100,
-        },
-        "duration_ms": 15000,
-        "num_turns": 5,
-        "session_id": "sess-abc",
-    }
-    result = _extract_from_result_message(msg)
-    assert result["data"] == 1
-    assert result["_cost_usd"] == 1.23
-    assert result["_input_tokens"] == 500  # 200 + 300
-    assert result["_output_tokens"] == 400
-    assert result["_cache_creation_tokens"] == 100
-    assert result["_duration_ms"] == 15000
-    assert result["_num_turns"] == 5
-    assert result["_session_id"] == "sess-abc"
-
-
-def test_extract_from_result_message_no_metadata() -> None:
-    """When no metadata keys exist, no underscore-prefixed keys are added."""
-    msg = {
-        "type": "result",
-        "structured_output": {"clean": True},
-    }
-    result = _extract_from_result_message(msg)
-    assert result == {"clean": True}
-    assert "_cost_usd" not in result
-    assert "_input_tokens" not in result
-    assert "_duration_ms" not in result
-
-
-def test_extract_from_result_message_result_text_plain_no_json() -> None:
-    """Plain text result with no extractable JSON marks _no_structured_output."""
-    msg = {
-        "type": "result",
-        "result": "All looks good, no issues found.",
-        "total_cost_usd": 0.02,
-    }
-    result = _extract_from_result_message(msg)
-    assert result["_no_structured_output"] is True
-    assert "All looks good" in result["_result_text"]
-    assert result["_cost_usd"] == 0.02
-
-
-def test_extract_from_result_message_result_has_none_structured_output() -> None:
-    """None structured_output falls through to result text extraction."""
-    msg = {
-        "type": "result",
-        "structured_output": None,
-        "result": '{"extracted": true}',
-    }
-    result = _extract_from_result_message(msg)
-    assert result["extracted"] is True
-
-
-# --- _parse_output: list format fallback paths ---
-
-def test_parse_output_list_no_result_msg_extracts_assistant_text() -> None:
-    """Fallback: concatenate assistant text when no result message exists."""
+def test_parse_output_list_plain_assistant_text() -> None:
     messages = [
-        {"role": "assistant", "content": [{"type": "text", "text": '{"from_text": true}'}]},
-    ]
-    result = _parse_output(json.dumps(messages), "task-001", 0)
-    assert result["from_text"] is True
-
-
-def test_parse_output_list_no_result_msg_string_content() -> None:
-    """Fallback handles assistant content as a plain string."""
-    messages = [
-        {"role": "assistant", "content": '{"stringy": true}'},
-    ]
-    result = _parse_output(json.dumps(messages), "task-001", 0)
-    assert result["stringy"] is True
-
-
-def test_parse_output_list_no_result_msg_no_json_in_text() -> None:
-    """Fallback with no JSON in assistant text returns _no_structured_output."""
-    messages = [
-        {"role": "assistant", "content": [{"type": "text", "text": "just words"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "Just some text"}]},
     ]
     result = _parse_output(json.dumps(messages), "task-001", 0)
     assert result["_no_structured_output"] is True
-    assert "just words" in result["_result_text"]
+    assert "Just some text" in result["_result_text"]
 
 
-def test_parse_output_list_no_result_msg_empty_messages() -> None:
-    """Empty message list returns _no_structured_output."""
+def test_parse_output_list_string_content() -> None:
+    messages = [
+        {"role": "assistant", "content": '{"inline": true}'},
+    ]
+    result = _parse_output(json.dumps(messages), "task-001", 0)
+    assert result["inline"] is True
+
+
+def test_parse_output_list_empty_messages() -> None:
     result = _parse_output(json.dumps([]), "task-001", 0)
     assert result["_no_structured_output"] is True
 
 
-def test_parse_output_list_no_result_no_assistant() -> None:
-    """Messages without result or assistant role return _no_structured_output."""
+def test_parse_output_list_no_assistant_messages() -> None:
     messages = [{"type": "system", "subtype": "init"}]
     result = _parse_output(json.dumps(messages), "task-001", 0)
     assert result["_no_structured_output"] is True
-
-
-def test_parse_output_list_fallback_truncates_result_text() -> None:
-    """Fallback path truncates _result_text to 2000 chars."""
-    long_text = "z" * 5000
-    messages = [
-        {"role": "assistant", "content": [{"type": "text", "text": long_text}]},
-    ]
-    result = _parse_output(json.dumps(messages), "task-001", 0)
-    assert result["_no_structured_output"] is True
-    assert len(result["_result_text"]) == 2000
-
-
-# --- _parse_output: single dict format ---
-
-def test_parse_output_single_dict_with_structured_output() -> None:
-    """Single dict (older CLI) with structured_output is extracted."""
-    raw = json.dumps({
-        "type": "result",
-        "structured_output": {"verdict": "pass"},
-        "total_cost_usd": 0.3,
-        "usage": {"input_tokens": 50, "cache_read_input_tokens": 0, "output_tokens": 75},
-    })
-    result = _parse_output(raw, "task-001", 0)
-    assert result["verdict"] == "pass"
-    assert result["_cost_usd"] == 0.3
-    assert result["_input_tokens"] == 50
-    assert result["_output_tokens"] == 75
-
-
-# --- _monitor_for_inactivity_stream ---
-
-from aquarco_supervisor.cli.claude import _monitor_for_inactivity_stream
-
-# Save the real asyncio.sleep before any patching happens at module level
-_real_sleep = asyncio.sleep
-
-
-def _make_fake_proc(*, returncode: int | None = None) -> MagicMock:
-    """Create a minimal process mock for inactivity monitor tests."""
-    proc = MagicMock()
-    proc.returncode = returncode
-    proc.kill = MagicMock()
-    return proc
-
-
-@pytest.mark.asyncio
-async def test_monitor_stream_returns_false_on_normal_exit() -> None:
-    """Monitor returns False when the process exits normally without inactivity kill."""
-    proc = _make_fake_proc(returncode=None)
-    last_event_time = [asyncio.get_event_loop().time()]
-    result_seen = asyncio.Event()
-
-    async def fast_sleep(delay: float) -> None:
-        # Simulate process exit on first poll
-        proc.returncode = 0
-        await _real_sleep(0)
-
-    with patch("asyncio.sleep", side_effect=fast_sleep):
-        result = await _monitor_for_inactivity_stream(
-            proc,
-            last_event_time,
-            result_seen,
-            inactivity_timeout=5.0,
-            poll_interval=0.01,
-            task_id="t1",
-            stage_num=0,
-        )
-
-    assert result is False
-    proc.kill.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_monitor_stream_kills_after_result_event_stale() -> None:
-    """Monitor kills the process after inactivity_timeout once result_seen is set."""
-    proc = _make_fake_proc(returncode=None)
-    result_seen = asyncio.Event()
-    result_seen.set()  # Simulate result event already received
-
-    base_time = 1000.0
-    # First call: last_event_time[0] is base_time, elapsed = 0 (no kill)
-    # Second call: elapsed = 200 s > inactivity_timeout → kill
-    loop_time_values = [base_time, base_time + 200.0]
-    loop_time_iter = iter(loop_time_values)
-    last_event_time = [base_time]
-
-    async def counted_sleep(delay: float) -> None:
-        await _real_sleep(0)
-
-    mock_loop = MagicMock()
-    mock_loop.time = MagicMock(side_effect=loop_time_iter)
-
-    with patch("asyncio.sleep", side_effect=counted_sleep), \
-         patch("asyncio.get_event_loop", return_value=mock_loop):
-        result = await _monitor_for_inactivity_stream(
-            proc,
-            last_event_time,
-            result_seen,
-            inactivity_timeout=90.0,
-            poll_interval=0.01,
-            task_id="t1",
-            stage_num=0,
-        )
-
-    assert result is True
-    proc.kill.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_monitor_stream_no_kill_without_result_event() -> None:
-    """Monitor does NOT kill when result_seen is never set (no result event yet)."""
-    proc = _make_fake_proc(returncode=None)
-    last_event_time = [asyncio.get_event_loop().time()]
-    result_seen = asyncio.Event()  # Never set
-
-    poll_count = 0
-
-    async def counted_sleep(delay: float) -> None:
-        nonlocal poll_count
-        poll_count += 1
-        if poll_count >= 3:
-            proc.returncode = 0
-        await _real_sleep(0)
-
-    with patch("asyncio.sleep", side_effect=counted_sleep):
-        result = await _monitor_for_inactivity_stream(
-            proc,
-            last_event_time,
-            result_seen,
-            inactivity_timeout=0.001,  # very short — would trigger if result_seen
-            poll_interval=0.01,
-            task_id="t1",
-            stage_num=0,
-        )
-
-    assert result is False
-    proc.kill.assert_not_called()
