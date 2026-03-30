@@ -31,6 +31,7 @@ class ConditionResult:
 
     jump_to: str | None = None
     matched: bool = False
+    message: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +44,7 @@ async def evaluate_conditions(
     stage_outputs: dict[str, dict[str, Any]],
     current_output: dict[str, Any],
     repeat_counts: dict[str, int],
-    ai_evaluator: Callable[[str, dict[str, Any]], Awaitable[bool]] | None = None,
+    ai_evaluator: Callable[[str, dict[str, Any]], Awaitable[tuple[bool, str]]] | None = None,
 ) -> ConditionResult:
     """Evaluate a list of structured conditions as exit gates.
 
@@ -52,10 +53,10 @@ async def evaluate_conditions(
         stage_outputs: Map of stage_name -> output for all completed stages.
         current_output: Output of the current stage.
         repeat_counts: Map of stage_name -> times visited.
-        ai_evaluator: Async callable for AI conditions (prompt, context) -> bool.
+        ai_evaluator: Async callable for AI conditions (prompt, context) -> (bool, message).
 
     Returns:
-        ConditionResult with jump_to stage name or None.
+        ConditionResult with jump_to stage name, message, or None.
     """
     if not conditions:
         return ConditionResult()
@@ -69,10 +70,12 @@ async def evaluate_conditions(
         if not isinstance(cond, dict):
             continue
 
-        result = await _evaluate_single_condition(cond, context, ai_evaluator)
-        if result is None:
+        eval_result = await _evaluate_single_condition(cond, context, ai_evaluator)
+        if eval_result is None:
             # Condition couldn't be evaluated; skip
             continue
+
+        result, message = eval_result
 
         # Determine jump target based on yes/no
         # Handle both string keys ("yes"/"no") and boolean keys (True/False)
@@ -99,7 +102,7 @@ async def evaluate_conditions(
                 )
                 continue  # Skip this condition, try next
 
-        return ConditionResult(jump_to=jump_target, matched=True)
+        return ConditionResult(jump_to=jump_target, matched=True, message=message)
 
     return ConditionResult()
 
@@ -112,17 +115,17 @@ async def evaluate_conditions(
 async def _evaluate_single_condition(
     cond: dict[str, Any],
     context: dict[str, Any],
-    ai_evaluator: Callable[[str, dict[str, Any]], Awaitable[bool]] | None,
-) -> bool | None:
-    """Evaluate a single condition. Returns True/False or None if unevaluable."""
+    ai_evaluator: Callable[[str, dict[str, Any]], Awaitable[tuple[bool, str]]] | None,
+) -> tuple[bool, str] | None:
+    """Evaluate a single condition. Returns (answer, message) or None if unevaluable."""
     if "simple" in cond:
         raw_expr = cond["simple"]
         # Handle boolean values (YAML `true`/`false` parsed as bool)
         if isinstance(raw_expr, bool):
-            return raw_expr
+            return (raw_expr, "")
         expr = str(raw_expr)
         try:
-            return evaluate_simple_expression(expr, context)
+            return (evaluate_simple_expression(expr, context), "")
         except Exception as e:
             log.warning("simple_condition_eval_error", expr=expr, error=str(e))
             return None
@@ -414,15 +417,20 @@ def _compare(left: Any, op: str, right: Any) -> bool:
 
 _AI_CONDITION_SCHEMA = {
     "type": "object",
-    "required": ["answer"],
+    "required": ["answer", "message"],
     "properties": {
         "answer": {
             "type": "boolean",
             "description": "true if the condition is met, false otherwise",
         },
-        "reasoning": {
+        "message": {
             "type": "string",
-            "description": "Brief explanation of why the condition is or is not met",
+            "description": (
+                "Concise description of what was found and what the next stage "
+                "should focus on. Include specific issues, missing items, or "
+                "areas that need attention. This message is passed to the next "
+                "pipeline stage as context."
+            ),
         },
     },
 }
@@ -432,10 +440,13 @@ _AI_CONDITION_SCHEMA = {
 _INLINE_SYSTEM_PROMPT = (
     "You are a pipeline condition evaluator. You will be given a question "
     "about pipeline stage outputs and must answer with a JSON object "
-    "containing an 'answer' boolean field.\n\n"
+    "containing an 'answer' boolean and a 'message' string.\n\n"
     "Evaluate the condition based ONLY on the provided context data. "
     "If the context does not contain enough information to evaluate the "
     "condition, answer false.\n\n"
+    "The 'message' field is passed to the next pipeline stage as context. "
+    "It should describe what was found and what the next stage should focus on — "
+    "specific issues, missing items, or areas needing attention.\n\n"
     "## Output Format\n\n"
     "You MUST respond with a JSON object conforming to this schema:\n\n"
     "```json\n"
@@ -454,19 +465,20 @@ async def evaluate_ai_condition(
     timeout_seconds: int = 120,
     extra_env: dict[str, str] | None = None,
     prompts_dir: "Path | None" = None,
-) -> bool:
+) -> tuple[bool, str]:
     """Evaluate an AI condition by asking Claude CLI a yes/no question.
 
     Constructs a minimal prompt with the condition question and accumulated
     pipeline context, then invokes Claude CLI with --max-turns 1 (no tools)
-    and a boolean output schema.
+    and a structured output schema.
 
     Args:
         prompts_dir: Optional path to the agents/prompts/ directory.  When
             provided and ``condition-evaluator-agent.md`` exists there, its
             content is used as the system prompt instead of the inline fallback.
 
-    Returns True if the condition is met, False otherwise.
+    Returns (answer, message) — boolean result and descriptive message for the
+    next pipeline stage.
     """
     context_json = json.dumps(context, indent=2, default=str)
 
@@ -567,7 +579,7 @@ async def evaluate_ai_condition(
                     except (asyncio.CancelledError, Exception):
                         pass
                 log.warning("ai_condition_timeout", task_id=task_id, prompt=prompt[:100])
-                return False
+                return (False, "Condition evaluation timed out")
 
             ndjson_lines: list[str] = []
             try:
@@ -598,7 +610,7 @@ async def evaluate_ai_condition(
                 returncode=proc.returncode,
                 stderr=stderr_text,
             )
-            return False
+            return (False, f"Condition evaluation CLI error (rc={proc.returncode})")
 
         # Parse NDJSON stream: find the result message and extract 'answer'
         from ..cli.claude import _parse_ndjson_output  # noqa: PLC0415
@@ -606,15 +618,15 @@ async def evaluate_ai_condition(
         output_dict = _parse_ndjson_output(ndjson_lines, task_id, stage_num)
         answer = output_dict.get("answer")
         result = bool(answer)
-        reasoning = output_dict.get("reasoning", "")
+        message = str(output_dict.get("message", ""))
         log.info(
             "ai_condition_result",
             task_id=task_id,
             prompt=prompt[:100],
             answer=result,
-            reasoning=str(reasoning)[:200],
+            message=message[:200],
         )
-        return result
+        return (result, message)
 
     finally:
         for p in (sys_path, in_path):

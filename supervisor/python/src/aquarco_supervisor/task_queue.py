@@ -527,13 +527,19 @@ class TaskQueue:
         *,
         stage_key: str | None = None,
     ) -> None:
-        """Record that a stage was skipped."""
+        """Record that a stage was skipped.
+
+        Only updates stages that are not already in a terminal state
+        (completed, failed) to avoid overwriting results from agents
+        that already ran successfully or recorded an error.
+        """
         if stage_key:
             await self._db.execute(
                 """
                 UPDATE stages
                 SET status = 'skipped', completed_at = NOW()
                 WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
+                      AND status NOT IN ('completed', 'failed')
                 """,
                 {"task_id": task_id, "stage_key": stage_key},
             )
@@ -544,6 +550,7 @@ class TaskQueue:
                 VALUES (%(task_id)s, %(stage)s, %(category)s, 'skipped', NOW(), NOW())
                 ON CONFLICT (task_id, stage_number) DO UPDATE
                 SET status = 'skipped', completed_at = NOW()
+                WHERE stages.status NOT IN ('completed', 'failed')
                 """,
                 {"task_id": task_id, "stage": stage_num, "category": category},
             )

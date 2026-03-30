@@ -536,7 +536,7 @@ class PipelineExecutor:
                     _prompts_dir = self._registry.get_default_prompts_dir()
                     _cond_eval_iteration = repeat_counts[stage_name]
 
-                    async def _ai_eval(prompt: str, ctx: dict[str, Any]) -> bool:
+                    async def _ai_eval(prompt: str, ctx: dict[str, Any]) -> tuple[bool, str]:
                         cond_stage_key = (
                             f"{stage_num}:condition-eval:condition-evaluator"
                         )
@@ -553,7 +553,7 @@ class PipelineExecutor:
                             iteration=_cond_eval_iteration,
                         )
                         try:
-                            answer = await evaluate_ai_condition(
+                            answer, message = await evaluate_ai_condition(
                                 prompt, ctx,
                                 work_dir=clone_dir,
                                 task_id=task_id,
@@ -563,11 +563,11 @@ class PipelineExecutor:
                             await self._tq.store_stage_output(
                                 task_id, stage_num,
                                 "condition-eval", "condition-evaluator",
-                                {"answer": answer, "prompt": prompt},
+                                {"answer": answer, "message": message, "prompt": prompt},
                                 stage_key=cond_stage_key,
                                 iteration=_cond_eval_iteration,
                             )
-                            return answer
+                            return (answer, message)
                         except Exception as exc:
                             await self._tq.record_stage_failed(
                                 task_id, stage_num, str(exc),
@@ -596,8 +596,36 @@ class PipelineExecutor:
                             from_stage=stage_name,
                             to_stage=target_name,
                             target_idx=target_idx,
-                            target_iteration=next_iter,
+                            condition_message=cond_result.message[:200] if cond_result.message else "",
                         )
+                        # Store condition message so the target stage
+                        # knows what the evaluator found and what to
+                        # focus on.
+                        if cond_result.message:
+                            stage_outputs[stage_name]["_condition_message"] = cond_result.message
+                            # Persist to DB so build_accumulated_context
+                            # includes it for the next stage.
+                            await self._db.execute(
+                                """
+                                UPDATE stages
+                                SET structured_output = jsonb_set(
+                                    COALESCE(structured_output, '{}'::jsonb),
+                                    '{_condition_message}',
+                                    %(msg)s::jsonb
+                                )
+                                WHERE task_id = %(task_id)s
+                                  AND stage_number = %(stage)s
+                                  AND run = (
+                                      SELECT MAX(run) FROM stages
+                                      WHERE task_id = %(task_id)s AND stage_number = %(stage)s
+                                  )
+                                """,
+                                {
+                                    "task_id": task_id,
+                                    "stage": stage_num,
+                                    "msg": json.dumps(cond_result.message),
+                                },
+                            )
                         current_idx = target_idx
                         continue
 

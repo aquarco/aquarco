@@ -542,7 +542,7 @@ async def test_evaluate_ai_condition_uses_stream_json(tmp_path: Path) -> None:
     result_event = {
         "type": "result",
         "subtype": "success",
-        "structured_output": {"answer": True, "reasoning": "yes"},
+        "structured_output": {"answer": True, "message": "Condition met"},
     }
 
     class _MockLineReader:
@@ -581,4 +581,4 @@ async def test_evaluate_ai_condition_uses_stream_json(tmp_path: Path) -> None:
     args_str = " ".join(str(a) for a in captured_args)
     assert "--output-format" in args_str
     assert "stream-json" in args_str
-    assert result is True
+    assert result == (True, "Condition met")
