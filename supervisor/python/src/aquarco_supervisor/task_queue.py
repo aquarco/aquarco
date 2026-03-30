@@ -396,6 +396,43 @@ class TaskQueue:
 
     # --- Stage Management ---
 
+    async def create_system_stage(
+        self,
+        task_id: str,
+        stage_num: int,
+        category: str,
+        agent: str,
+        *,
+        stage_key: str,
+        iteration: int = 1,
+        run: int = 1,
+    ) -> None:
+        """Insert a stage row for a system agent (planner, condition-evaluator).
+
+        Unlike planned pipeline stages (created by create_planned_pending_stages),
+        system agent stages are not pre-created.  This method INSERTs the row so
+        that subsequent record_stage_executing / store_stage_output UPDATEs find it.
+        """
+        await self._db.execute(
+            """
+            INSERT INTO stages
+                (task_id, stage_number, category, agent, status,
+                 stage_key, iteration, run)
+            VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s,
+                    'pending', %(stage_key)s, %(iteration)s, %(run)s)
+            ON CONFLICT DO NOTHING
+            """,
+            {
+                "task_id": task_id,
+                "stage": stage_num,
+                "category": category,
+                "agent": agent,
+                "stage_key": stage_key,
+                "iteration": iteration,
+                "run": run,
+            },
+        )
+
     async def record_stage_executing(
         self,
         task_id: str,
@@ -560,7 +597,10 @@ class TaskQueue:
         """
         for stage_num, plan in enumerate(planned_stages):
             category = plan["category"]
-            agents = plan.get("agents", [])
+            raw_agents = plan.get("agents", [])
+            agents = [
+                a["name"] if isinstance(a, dict) else a for a in raw_agents
+            ]
             for agent_name in agents:
                 stage_key = f"{stage_num}:{category}:{agent_name}"
                 await self._db.execute(

@@ -267,9 +267,16 @@ async def execute_claude(
             else:
                 json.dump(context, f, indent=2)
 
+        # Dry-run mode: swap claude binary for the logging stub script
+        _claude_bin = "claude"
+        if os.environ.get("CLAUDE_DRY_RUN"):
+            _dry_run_script = Path(__file__).resolve().parents[4] / "scripts" / "claude-dry-run.sh"
+            if _dry_run_script.exists():
+                _claude_bin = str(_dry_run_script)
+
         if resume_session_id:
             args = [
-                "claude",
+                _claude_bin,
                 "--resume", resume_session_id,
                 "--print",
                 "--dangerously-skip-permissions",
@@ -279,7 +286,7 @@ async def execute_claude(
             ]
         else:
             args = [
-                "claude",
+                _claude_bin,
                 "--print",
                 "--dangerously-skip-permissions",
                 "--output-format", "stream-json",
@@ -329,6 +336,7 @@ async def execute_claude(
                 stderr=stderr_f,
                 cwd=work_dir,
                 env=proc_env,
+                start_new_session=True,
             )
 
             lines, result_seen = await _tail_file(
@@ -555,9 +563,9 @@ def _extract_json(text: str) -> dict[str, Any] | None:
     match = re.search(r"```json\s*\n(.*?)\n\s*```", text, re.DOTALL)
     if match:
         try:
-            result: dict[str, Any] = json.loads(match.group(1))
-            if isinstance(result, dict):
-                return result
+            parsed = json.loads(match.group(1))
+            if isinstance(parsed, dict):
+                return parsed
         except json.JSONDecodeError:
             pass
 
