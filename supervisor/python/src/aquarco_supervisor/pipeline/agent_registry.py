@@ -281,10 +281,22 @@ class AgentRegistry:
         schema: dict[str, Any] | None = spec.get("outputSchema")
         return schema if schema else None
 
+    # Default environment for agent task execution.
+    # Agents get their own virtualenv so pip installs don't corrupt the supervisor.
+    _AGENT_VENV = "/home/agent/.agent-venv"
+    _AGENT_DEFAULT_ENV: dict[str, str] = {
+        "VIRTUAL_ENV": _AGENT_VENV,
+        "PATH": f"{_AGENT_VENV}/bin:/usr/local/bin:/usr/bin:/bin:/home/agent/.npm-global/bin",
+    }
+
     def get_agent_environment(self, agent_name: str) -> dict[str, str]:
-        """Get environment variables for an agent."""
+        """Get environment variables for an agent.
+
+        Merges per-agent env from the definition on top of the default agent
+        venv environment, so agents run in an isolated virtualenv by default.
+        """
         spec = self._agents.get(agent_name, {})
-        env: dict[str, str] = spec.get("environment", {})
+        env: dict[str, str] = {**self._AGENT_DEFAULT_ENV, **spec.get("environment", {})}
         return env
 
     def _get_max_concurrent(self, agent_name: str) -> int:
