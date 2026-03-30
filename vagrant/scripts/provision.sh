@@ -237,7 +237,9 @@ su - "${AGENT_USER}" -c "${AGENT_HOME}/.venv/bin/pip install -e /home/agent/aqua
   log "WARNING: pip install failed; supervisor CLI may not be available"
 }
 
-# Lock the supervisor venv so agents cannot accidentally mutate it
+# Lock the supervisor venv so agents cannot accidentally mutate it.
+# NOTE: To upgrade supervisor dependencies, temporarily restore write
+# permissions first:  chmod -R u+w "${AGENT_HOME}/.venv/lib/"
 chmod -R a-w "${AGENT_HOME}/.venv/lib/"
 log "Supervisor venv locked (read-only lib/)"
 

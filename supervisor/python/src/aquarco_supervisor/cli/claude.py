@@ -69,131 +69,138 @@ async def _tail_file(
     result_seen = False
     result_seen_at: float | None = None
     partial = ""  # leftover bytes that don't end with newline yet
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     start_time = loop.time()
 
-    while True:
-        # --- check process state ---
-        if proc.returncode is not None:
-            break
+    # Keep a persistent file handle to avoid repeated open/close syscalls
+    # on every poll cycle.  The file was already created by mkstemp before
+    # the subprocess started so it is safe to open now.
+    tail_fh = open(path, "rb")
 
-        elapsed = loop.time() - start_time
-        if elapsed >= timeout_seconds:
-            log.warning(
-                "claude_timeout_killing",
-                task_id=task_id,
-                stage=stage_num,
-                seconds=timeout_seconds,
-            )
-            proc.kill()
-            await proc.wait()
-            break
-
-        # Post-result grace period: result is done, wait for graceful exit
-        if result_seen and result_seen_at is not None:
-            since_result = loop.time() - result_seen_at
-            if since_result >= _POST_RESULT_GRACE_SECONDS:
-                log.warning(
-                    "claude_post_result_grace_expired",
-                    task_id=task_id,
-                    stage=stage_num,
-                    grace_seconds=_POST_RESULT_GRACE_SECONDS,
-                )
-                proc.terminate()
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=10.0)
-                except asyncio.TimeoutError:
-                    proc.kill()
-                    await proc.wait()
+    try:
+        while True:
+            # --- check process state ---
+            if proc.returncode is not None:
                 break
 
-        # --- read new bytes from file ---
-        try:
-            size = path.stat().st_size
-        except OSError:
-            size = 0
+            elapsed = loop.time() - start_time
+            if elapsed >= timeout_seconds:
+                log.warning(
+                    "claude_timeout_killing",
+                    task_id=task_id,
+                    stage=stage_num,
+                    seconds=timeout_seconds,
+                )
+                proc.kill()
+                await proc.wait()
+                break
 
-        if size > offset:
-            with open(path, "rb") as f:
-                f.seek(offset)
-                chunk = f.read(size - offset)
-            offset = size
-            text = partial + chunk.decode("utf-8", errors="replace")
+            # Post-result grace period: result is done, wait for graceful exit
+            if result_seen and result_seen_at is not None:
+                since_result = loop.time() - result_seen_at
+                if since_result >= _POST_RESULT_GRACE_SECONDS:
+                    log.warning(
+                        "claude_post_result_grace_expired",
+                        task_id=task_id,
+                        stage=stage_num,
+                        grace_seconds=_POST_RESULT_GRACE_SECONDS,
+                    )
+                    proc.terminate()
+                    try:
+                        await asyncio.wait_for(proc.wait(), timeout=10.0)
+                    except asyncio.TimeoutError:
+                        proc.kill()
+                        await proc.wait()
+                    break
 
-            # Split into lines; keep trailing partial if no final newline
-            if text.endswith("\n"):
-                raw_lines = text.split("\n")
-                partial = ""
+            # --- read new bytes from file ---
+            try:
+                size = path.stat().st_size
+            except OSError:
+                size = 0
+
+            if size > offset:
+                tail_fh.seek(offset)
+                chunk = tail_fh.read(size - offset)
+                offset = size
+                text = partial + chunk.decode("utf-8", errors="replace")
+
+                # Split into lines; keep trailing partial if no final newline
+                if text.endswith("\n"):
+                    raw_lines = text.split("\n")
+                    partial = ""
+                else:
+                    raw_lines = text.split("\n")
+                    partial = raw_lines.pop()  # incomplete line
+
+                for raw_line in raw_lines:
+                    line = raw_line.rstrip("\r")
+                    if not line.strip():
+                        continue
+                    lines.append(line)
+
+                    # Check for result event
+                    if not result_seen:
+                        try:
+                            msg = json.loads(line)
+                            if isinstance(msg, dict) and msg.get("type") == "result":
+                                result_seen = True
+                                result_seen_at = loop.time()
+                                log.info(
+                                    "claude_result_event_seen",
+                                    task_id=task_id,
+                                    stage=stage_num,
+                                )
+                        except json.JSONDecodeError:
+                            pass
+
+                    # Live output callback (best-effort)
+                    if on_live_output is not None:
+                        try:
+                            await on_live_output(line)
+                        except Exception:
+                            pass
             else:
-                raw_lines = text.split("\n")
-                partial = raw_lines.pop()  # incomplete line
+                await asyncio.sleep(_TAIL_POLL_INTERVAL)
 
-            for raw_line in raw_lines:
+        # --- final read after process exit (still inside try/finally) ---
+        try:
+            final_size = path.stat().st_size
+        except OSError:
+            final_size = 0
+
+        if final_size > offset:
+            tail_fh.seek(offset)
+            chunk = tail_fh.read()
+            text = partial + chunk.decode("utf-8", errors="replace")
+            for raw_line in text.split("\n"):
                 line = raw_line.rstrip("\r")
                 if not line.strip():
                     continue
                 lines.append(line)
-
-                # Check for result event
                 if not result_seen:
                     try:
                         msg = json.loads(line)
                         if isinstance(msg, dict) and msg.get("type") == "result":
                             result_seen = True
-                            result_seen_at = loop.time()
-                            log.info(
-                                "claude_result_event_seen",
-                                task_id=task_id,
-                                stage=stage_num,
-                            )
                     except json.JSONDecodeError:
                         pass
-
-                # Live output callback (best-effort)
                 if on_live_output is not None:
                     try:
                         await on_live_output(line)
                     except Exception:
                         pass
-        else:
-            await asyncio.sleep(_TAIL_POLL_INTERVAL)
-
-    # --- final read after process exit ---
-    try:
-        final_size = path.stat().st_size
-    except OSError:
-        final_size = 0
-
-    if final_size > offset:
-        with open(path, "rb") as f:
-            f.seek(offset)
-            chunk = f.read()
-        text = partial + chunk.decode("utf-8", errors="replace")
-        for raw_line in text.split("\n"):
-            line = raw_line.rstrip("\r")
-            if not line.strip():
-                continue
-            lines.append(line)
-            if not result_seen:
-                try:
-                    msg = json.loads(line)
-                    if isinstance(msg, dict) and msg.get("type") == "result":
-                        result_seen = True
-                except json.JSONDecodeError:
-                    pass
+        elif partial.strip():
+            # Flush any remaining partial line
+            lines.append(partial.rstrip("\r"))
             if on_live_output is not None:
                 try:
-                    await on_live_output(line)
+                    await on_live_output(partial.rstrip("\r"))
                 except Exception:
                     pass
-    elif partial.strip():
-        # Flush any remaining partial line
-        lines.append(partial.rstrip("\r"))
-        if on_live_output is not None:
-            try:
-                await on_live_output(partial.rstrip("\r"))
-            except Exception:
-                pass
+
+    finally:
+        tail_fh.close()
 
     return lines, result_seen
 
@@ -252,7 +259,9 @@ async def execute_claude(
     fd, context_path = tempfile.mkstemp(suffix=".json", prefix="claude-ctx-")
     context_file = Path(context_path)
 
-    # Stdout capture file
+    # Stdout capture file – we open the fd immediately via os.fdopen so that
+    # if an exception occurs before the subprocess is launched the fd is
+    # properly closed by the context manager (no leak).
     stdout_fd, stdout_path = tempfile.mkstemp(suffix=".ndjson", prefix="claude-out-")
     stdout_file = Path(stdout_path)
 
@@ -324,6 +333,10 @@ async def execute_claude(
         if extra_env:
             proc_env = {**os.environ, **extra_env}
 
+        # Wrap stdout_fd early so it is always cleaned up.  The subprocess
+        # inherits the fd at fork time and gets its own copy, so closing the
+        # supervisor's copy here is safe – the child keeps writing to its fd
+        # independently.  _tail_file reads the *file on disk*, not the fd.
         with (
             open(context_file) as stdin_f,
             os.fdopen(stdout_fd, "w") as stdout_f,

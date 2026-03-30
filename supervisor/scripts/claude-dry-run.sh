@@ -42,7 +42,9 @@ mkdir -p "$LOG_DIR"
 # --- Read stdin ---
 STDIN_CONTENT="$(cat)"
 
-# --- Log everything ---
+# --- Log everything (restrictive permissions to protect sensitive data) ---
+touch "$LOG_FILE"
+chmod 600 "$LOG_FILE"
 {
   echo "=== CLAUDE DRY-RUN LOG ==="
   echo "timestamp:    $TS"
@@ -64,14 +66,14 @@ STDIN_CONTENT="$(cat)"
   echo "resume_session:     $RESUME_SESSION"
   echo "append_system_prompt_len: ${#APPEND_SYSTEM_PROMPT}"
   echo ""
-  echo "=== ENVIRONMENT ==="
-  echo "PATH=$PATH"
+  echo "=== ENVIRONMENT (safe subset) ==="
   echo "AGENT_MODE=${AGENT_MODE:-}"
   echo "STRICT_MODE=${STRICT_MODE:-}"
   echo "CLAUDE_DRY_RUN=${CLAUDE_DRY_RUN:-}"
   echo ""
   echo "=== STDIN (context) ==="
-  echo "$STDIN_CONTENT"
+  echo "stdin_bytes: ${#STDIN_CONTENT}"
+  echo "(content omitted — may contain sensitive data)"
   echo ""
   echo "=== SYSTEM PROMPT FILE CONTENT ==="
   if [[ -n "$SYSTEM_PROMPT_FILE" && -f "$SYSTEM_PROMPT_FILE" ]]; then
@@ -91,10 +93,6 @@ if [[ -n "$DEBUG_FILE" ]]; then
     echo "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z") [DEBUG] Args logged to: $LOG_FILE"
   } > "$DEBUG_FILE"
 fi
-
-# --- Allocate ~150MB memory to simulate real Node.js footprint ---
-# Read random data into a variable to hold memory for the duration
-MEM_BLOCK="$(dd if=/dev/urandom bs=1M count=150 2>/dev/null | base64)"
 
 # --- Build structured_output from --json-schema ---
 if [[ -n "$JSON_SCHEMA" ]] && command -v jq &>/dev/null; then
@@ -186,8 +184,5 @@ echo "$RESULT_JSON"
   echo "structured_output: $STRUCTURED_OUTPUT"
   echo "duration: ~13s (simulated)"
 } >> "$LOG_FILE" 2>&1
-
-# Release memory (variable goes out of scope on exit)
-unset MEM_BLOCK
 
 exit 0

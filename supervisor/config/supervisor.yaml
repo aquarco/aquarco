@@ -23,6 +23,8 @@ spec:
     format: json
 
   globalLimits:
+    # Intentionally conservative: single-agent execution and limited retries
+    # to control cost during early development. Increase for production use.
     maxConcurrentAgents: 1
     maxTokensPerHour: 1000000
     cooldownBetweenTasksSeconds: 5
