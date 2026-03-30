@@ -480,7 +480,7 @@ export default function TaskDetailPage() {
   const SYSTEM_CATEGORIES = new Set(['planning', 'condition-eval'])
   const uniqueStagesMap = new Map<number, Stage>()
   for (const s of stages) {
-    if (SYSTEM_CATEGORIES.has(s.category)) continue
+    if (SYSTEM_CATEGORIES.has(s.category.toLowerCase())) continue
     uniqueStagesMap.set(s.stageNumber, s)
   }
   const uniqueStages = Array.from(uniqueStagesMap.values()).sort((a, b) => a.stageNumber - b.stageNumber)
