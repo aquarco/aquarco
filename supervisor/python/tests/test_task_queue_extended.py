@@ -102,6 +102,29 @@ async def test_record_stage_skipped_with_stage_key(
     assert params["stage_key"] == "2:docs:docs-agent"
 
 
+@pytest.mark.asyncio
+async def test_record_stage_skipped_with_stage_key_guards_terminal_status(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """UPDATE stage_key path must include AND status NOT IN ('completed', 'failed')
+    so that a late 'skipped' signal never overwrites a row that already recorded
+    a terminal status (core bugfix for the stage_key branch of record_stage_skipped).
+    """
+    await task_queue.record_stage_skipped(
+        "task-1", 2, "docs",
+        stage_key="2:docs:docs-agent",
+    )
+
+    call_args = mock_db.execute.call_args
+    sql = call_args[0][0]
+    assert "NOT IN" in sql, (
+        "UPDATE WHERE clause must contain a NOT IN guard to prevent overwriting "
+        "terminal status via stage_key path"
+    )
+    assert "completed" in sql, "SQL guard must exclude 'completed' rows"
+    assert "failed" in sql, "SQL guard must exclude 'failed' rows"
+
+
 # --- store_stage_output with stage_key ---
 
 
