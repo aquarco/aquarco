@@ -99,6 +99,11 @@ def _cooldown_for_error(e: RetryableError) -> tuple[int, int]:
     Centralised here so that both the pipeline executor and the main-loop defensive
     handler can import it without creating a cross-module coupling to executor internals.
 
+    .. note::
+        The leading underscore signals this is *package-internal*: it is intentionally
+        imported by ``pipeline.executor`` and ``main`` within this package, but should
+        not be considered part of the public API.
+
     Dispatch table:
 
     * :class:`OverloadedError` (529): 15 min cooldown, 24 max retries

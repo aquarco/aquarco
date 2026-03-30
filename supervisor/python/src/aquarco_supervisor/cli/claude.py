@@ -509,6 +509,11 @@ def _is_server_error_in_lines(lines: list[str]) -> bool:
     The token only matches when it appears as a JSON string value surrounded by
     double-quote characters, which is how the Claude API encodes error types in its
     NDJSON stdout stream.
+
+    The ``"status code 500"`` branch is unquoted and therefore more prone to false
+    positives (e.g. an agent discussing HTTP error codes in prose).  This is an
+    accepted trade-off: missing a real 500 error is worse than an occasional spurious
+    retry; callers should expect this branch to fire rarely in practice.
     """
     for line in lines:
         lower = line.lower()

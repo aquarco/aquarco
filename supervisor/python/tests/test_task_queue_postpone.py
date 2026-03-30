@@ -5,6 +5,14 @@ Covers:
   - postpone_task() delegates to the DB with correct params for each error type
   - get_rate_limited_tasks() delegates to get_postponed_tasks() (backward-compat alias)
   - rate_limit_task() delegates to postpone_task with 60-minute cooldown
+
+Note on scope vs test_postpone_task.py:
+  ``test_postpone_task.py`` validates the AC-numbered acceptance criteria from the
+  retryable-error design document (SQL column names, retry-exhaustion logic, and
+  the DeprecationWarning emitted by ``rate_limit_task``).  This file exercises the
+  *per-error-type cooldown values* surfaced through the public
+  ``postpone_task`` / ``rate_limit_task`` API — a complementary behavioural lens
+  that is intentionally kept separate to avoid bloating the AC test file.
 """
 
 from __future__ import annotations
