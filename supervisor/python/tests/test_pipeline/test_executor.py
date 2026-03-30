@@ -1159,6 +1159,18 @@ async def test_sequential_stage_passes_per_agent_output_to_validation(
 
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
+    # Override _build_default_plan so that planning fast-path produces a single
+    # stage with BOTH agents (the real impl only takes [:1]; this lets the test
+    # exercise the multi-agent sequential path without needing a planner agent).
+    executor._build_default_plan = lambda stages: [  # type: ignore[method-assign]
+        {
+            "category": "analyze",
+            "agents": ["agent-a", "agent-b"],
+            "parallel": False,
+            "validation": [],
+        }
+    ]
+
     # Spy on _process_validation_items to capture (stage_key, agent_output) calls
     captured_calls: list[tuple[str, dict]] = []
 
