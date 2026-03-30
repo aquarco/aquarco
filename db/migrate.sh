@@ -4,6 +4,49 @@ set -e
 # Helper script for yoyo migration operations.
 # Usage: migrate.sh [apply|rollback|reapply|list] [extra yoyo args...]
 
+# ── Pre-flight: remove yoyo tracking tables from the aquarco schema ──
+# Yoyo must find its _yoyo_migration table in the public schema.
+# If a previous run leaked SET search_path into the session, yoyo may
+# have created empty tracking tables inside the aquarco schema. These
+# shadow the real ones in public and cause yoyo to re-apply everything.
+# This block drops them ONLY if they are empty (safety check).
+python3 - "$DATABASE_URL" <<'PYEOF'
+import sys, os, psycopg2
+
+url = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("DATABASE_URL", "")
+
+YOYO_TABLES = ["_yoyo_migration", "_yoyo_log", "_yoyo_version", "yoyo_lock"]
+
+conn = psycopg2.connect(url)
+conn.autocommit = True
+cur = conn.cursor()
+
+# Check if aquarco schema exists
+cur.execute("SELECT 1 FROM information_schema.schemata WHERE schema_name = 'aquarco'")
+if not cur.fetchone():
+    sys.exit(0)
+
+for table in YOYO_TABLES:
+    cur.execute(
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = 'aquarco' AND table_name = %s",
+        (table,)
+    )
+    if not cur.fetchone():
+        continue
+    # Safety: only drop if empty
+    cur.execute(f'SELECT COUNT(*) FROM aquarco."{table}"')
+    count = cur.fetchone()[0]
+    if count == 0:
+        cur.execute(f'DROP TABLE aquarco."{table}" CASCADE')
+        print(f"Dropped empty aquarco.{table}")
+    else:
+        print(f"WARNING: aquarco.{table} has {count} rows — skipping drop", file=sys.stderr)
+
+cur.close()
+conn.close()
+PYEOF
+
 COMMAND="${1:-apply}"
 shift 2>/dev/null || true
 

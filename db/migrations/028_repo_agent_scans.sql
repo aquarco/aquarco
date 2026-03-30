@@ -1,5 +1,7 @@
+-- depends: 027_task_lifecycle
 -- Migration 028: Add repo_agent_scans table for autoloading .claude/agents
 -- Tracks the status and results of agent scanning operations per repository.
+SET search_path TO aquarco, public;
 
 CREATE TABLE IF NOT EXISTS repo_agent_scans (
     id          SERIAL PRIMARY KEY,

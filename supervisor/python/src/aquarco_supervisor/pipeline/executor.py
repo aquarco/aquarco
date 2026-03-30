@@ -1043,6 +1043,10 @@ class PipelineExecutor:
         }
 
         cumulative_cost = 0.0
+        cumulative_input = 0
+        cumulative_cache_read = 0
+        cumulative_cache_write = 0
+        cumulative_output = 0
         resume_session_id: str | None = None
         iteration = 0
         max_resume_iterations = 10
@@ -1078,7 +1082,15 @@ class PipelineExecutor:
                     iteration=iteration,
                 )
             cumulative_cost += iteration_cost
+            cumulative_input += output.get("_input_tokens", 0)
+            cumulative_cache_read += output.get("_cache_read_tokens", 0)
+            cumulative_cache_write += output.get("_cache_write_tokens", 0)
+            cumulative_output += output.get("_output_tokens", 0)
             output["_cumulative_cost_usd"] = cumulative_cost
+            output["_cumulative_input_tokens"] = cumulative_input
+            output["_cumulative_cache_read_tokens"] = cumulative_cache_read
+            output["_cumulative_cache_write_tokens"] = cumulative_cache_write
+            output["_cumulative_output_tokens"] = cumulative_output
             iteration += 1
 
             # Preserve last successful structured output (non-error)
@@ -1139,6 +1151,10 @@ class PipelineExecutor:
         # If final iteration lacks structured data, fall back to last successful output
         if output.get("_no_structured_output") and last_successful_output:
             last_successful_output["_cumulative_cost_usd"] = cumulative_cost
+            last_successful_output["_cumulative_input_tokens"] = cumulative_input
+            last_successful_output["_cumulative_cache_read_tokens"] = cumulative_cache_read
+            last_successful_output["_cumulative_cache_write_tokens"] = cumulative_cache_write
+            last_successful_output["_cumulative_output_tokens"] = cumulative_output
             output = last_successful_output
 
         output["_agent_name"] = agent_name

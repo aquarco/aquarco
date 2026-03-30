@@ -141,6 +141,7 @@ def test_parse_ndjson_output_finds_result_line() -> None:
     assert result["score"] == 95
     assert result["_cost_usd"] == 0.05
     assert result["_input_tokens"] == 100
+    assert result["_cache_read_tokens"] == 0
     assert result["_output_tokens"] == 50
     assert result["_duration_ms"] == 1500
     assert result["_num_turns"] == 2

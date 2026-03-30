@@ -1,8 +1,10 @@
+-- depends: 029_add_pipeline_categories
 -- Migration 030: Add agent_group column to agent_definitions
 --
 -- Distinguishes system agents (orchestration/infrastructure) from
 -- pipeline agents (stage execution). Default is 'pipeline' for
 -- backward compatibility with existing rows.
+SET search_path TO aquarco, public;
 
 ALTER TABLE agent_definitions
   ADD COLUMN IF NOT EXISTS agent_group TEXT NOT NULL DEFAULT 'pipeline'

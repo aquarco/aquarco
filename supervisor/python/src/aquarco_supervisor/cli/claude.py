@@ -612,9 +612,10 @@ def _extract_from_result_message(msg: dict[str, Any]) -> dict[str, Any]:
     if "usage" in msg:
         usage = msg["usage"]
         if isinstance(usage, dict):
-            output["_input_tokens"] = usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
+            output["_input_tokens"] = usage.get("input_tokens", 0)
+            output["_cache_read_tokens"] = usage.get("cache_read_input_tokens", 0)
+            output["_cache_write_tokens"] = usage.get("cache_creation_input_tokens", 0)
             output["_output_tokens"] = usage.get("output_tokens", 0)
-            output["_cache_creation_tokens"] = usage.get("cache_creation_input_tokens", 0)
     if "duration_ms" in msg:
         output["_duration_ms"] = msg["duration_ms"]
     if "num_turns" in msg:

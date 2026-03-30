@@ -174,9 +174,10 @@ def test_parse_output_list_with_structured_output() -> None:
     assert result["summary"] == "all good"
     assert result["recommendation"] == "approve"
     assert result["_cost_usd"] == 0.25
-    assert result["_input_tokens"] == 600  # 100 + 500 cache_read
+    assert result["_input_tokens"] == 100
+    assert result["_cache_read_tokens"] == 500
     assert result["_output_tokens"] == 200
-    assert result["_cache_creation_tokens"] == 50
+    assert result["_cache_write_tokens"] == 50
     assert result["_duration_ms"] == 5000
     assert result["_num_turns"] == 3
     assert result["_session_id"] == "test-session-123"
@@ -657,9 +658,10 @@ def test_extract_metadata_fields() -> None:
     assert result["ok"] is True
     assert result["_subtype"] == "success"
     assert result["_cost_usd"] == 0.5
-    assert result["_input_tokens"] == 150
+    assert result["_input_tokens"] == 100
+    assert result["_cache_read_tokens"] == 50
     assert result["_output_tokens"] == 200
-    assert result["_cache_creation_tokens"] == 10
+    assert result["_cache_write_tokens"] == 10
     assert result["_duration_ms"] == 3000
     assert result["_num_turns"] == 5
     assert result["_session_id"] == "sess-123"

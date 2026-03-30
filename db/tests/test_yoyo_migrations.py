@@ -49,6 +49,11 @@ EXPECTED_MIGRATIONS = [
     "025_add_stage_run",
     "026_add_live_output",
     "027_task_lifecycle",
+    "028_repo_agent_scans",
+    "029_add_pipeline_categories",
+    "030_add_agent_group",
+    "031_add_postpone_cooldown",
+    "032_add_stage_spending",
 ]
 
 # Build expected dependency map: migration_name -> depends_on_name

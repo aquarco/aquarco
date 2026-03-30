@@ -13,12 +13,11 @@
 -- multiple environments (aquarco, aquarco_test) in one cluster.
 CREATE SCHEMA IF NOT EXISTS aquarco;
 
--- Set the default search path for the application role so that
--- all subsequent migrations and queries do not need to qualify
--- every object with the schema name.
--- Replace 'aquarco_app' with the actual application role name used
--- in the connection pool.
--- ALTER ROLE aquarco_app SET search_path TO aquarco, public;
+-- Pin the role-level search_path so that the PostgreSQL default
+-- ("$user", public) does not resolve "$user" to the aquarco schema.
+-- Without this, tools that open their own connections (e.g. yoyo-migrations)
+-- would create internal tables in aquarco instead of public.
+ALTER ROLE aquarco SET search_path TO public;
 
 -- Enable the pgcrypto extension (used for gen_random_uuid() where needed).
 CREATE EXTENSION IF NOT EXISTS pgcrypto;

@@ -126,9 +126,10 @@ def test_extract_from_result_message_usage_metadata() -> None:
     }
     output = _extract_from_result_message(msg)
     assert output["_cost_usd"] == 1.23
-    assert output["_input_tokens"] == 300  # 100 + 200
+    assert output["_input_tokens"] == 100
+    assert output["_cache_read_tokens"] == 200
     assert output["_output_tokens"] == 50
-    assert output["_cache_creation_tokens"] == 10
+    assert output["_cache_write_tokens"] == 10
     assert output["_duration_ms"] == 3000
     assert output["_num_turns"] == 5
     assert output["_session_id"] == "sess-abc"

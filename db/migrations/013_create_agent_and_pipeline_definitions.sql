@@ -1,4 +1,5 @@
 -- depends: 012_fix_null_agent_instance
+SET search_path TO aquarco, public;
 -- Store versioned agent definitions (full YAML content) in the database.
 -- Same (name, version) → UPDATE; new version → INSERT, old versions deactivated.
 CREATE TABLE IF NOT EXISTS agent_definitions (

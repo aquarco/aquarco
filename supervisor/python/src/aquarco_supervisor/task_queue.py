@@ -306,7 +306,27 @@ class TaskQueue:
         # raw_output is no longer set by _execute_agent (replaced by live_output
         # streaming). Pop to keep the interface consistent; value will be NULL in DB.
         raw_output = output.pop("_raw_output", None)
+        # Extract spending metadata before serializing structured_output.
+        # Prefer cumulative values (sum across resume iterations) over
+        # per-iteration values which only cover the last CLI invocation.
+        def _pop_cumulative(key: str, cumulative_key: str) -> Any:
+            cumulative = output.pop(cumulative_key, None)
+            per_iter = output.pop(key, None)
+            return cumulative if cumulative is not None else per_iter
+
+        cost_usd = _pop_cumulative("_cost_usd", "_cumulative_cost_usd")
+        tokens_input = _pop_cumulative("_input_tokens", "_cumulative_input_tokens")
+        tokens_output = _pop_cumulative("_output_tokens", "_cumulative_output_tokens")
+        cache_read = _pop_cumulative("_cache_read_tokens", "_cumulative_cache_read_tokens")
+        cache_write = _pop_cumulative("_cache_write_tokens", "_cumulative_cache_write_tokens")
         structured_json = json.dumps(output)
+        spending_params = {
+            "cost_usd": cost_usd,
+            "tokens_in": tokens_input,
+            "tokens_out": tokens_output,
+            "cache_read": cache_read,
+            "cache_write": cache_write,
+        }
         if stage_key:
             # New path: use stage_key + iteration + run for upsert
             await self._db.execute(
@@ -318,6 +338,11 @@ class TaskQueue:
                     validation_items_in = %(vi_in)s::jsonb,
                     validation_items_out = %(vi_out)s::jsonb,
                     live_output = NULL,
+                    cost_usd = %(cost_usd)s,
+                    tokens_input = %(tokens_in)s,
+                    tokens_output = %(tokens_out)s,
+                    cache_read_tokens = %(cache_read)s,
+                    cache_write_tokens = %(cache_write)s,
                     started_at = COALESCE(stages.started_at, NOW()),
                     completed_at = NOW()
                 WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
@@ -333,6 +358,7 @@ class TaskQueue:
                     "raw": raw_output,
                     "vi_in": json.dumps(validation_items_in) if validation_items_in else None,
                     "vi_out": json.dumps(validation_items_out) if validation_items_out else None,
+                    **spending_params,
                 },
             )
         else:
@@ -340,13 +366,24 @@ class TaskQueue:
             await self._db.execute(
                 """
                 INSERT INTO stages (task_id, stage_number, category, agent, status,
-                                   structured_output, raw_output, started_at, completed_at)
+                                   structured_output, raw_output,
+                                   cost_usd, tokens_input, tokens_output,
+                                   cache_read_tokens, cache_write_tokens,
+                                   started_at, completed_at)
                 VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s, 'completed',
-                        %(output)s::jsonb, %(raw)s, NOW(), NOW())
+                        %(output)s::jsonb, %(raw)s,
+                        %(cost_usd)s, %(tokens_in)s, %(tokens_out)s,
+                        %(cache_read)s, %(cache_write)s,
+                        NOW(), NOW())
                 ON CONFLICT (task_id, stage_number) DO UPDATE
                 SET agent = %(agent)s, status = 'completed',
                     structured_output = %(output)s::jsonb,
                     raw_output = %(raw)s,
+                    cost_usd = %(cost_usd)s,
+                    tokens_input = %(tokens_in)s,
+                    tokens_output = %(tokens_out)s,
+                    cache_read_tokens = %(cache_read)s,
+                    cache_write_tokens = %(cache_write)s,
                     started_at = COALESCE(stages.started_at, NOW()),
                     completed_at = NOW()
                 """,
@@ -357,6 +394,7 @@ class TaskQueue:
                     "agent": agent,
                     "output": structured_json,
                     "raw": raw_output,
+                    **spending_params,
                 },
             )
         await self._db.execute(
@@ -366,6 +404,50 @@ class TaskQueue:
             """,
             {"task_id": task_id, "next_stage": stage_num + 1},
         )
+
+    async def get_task_spending(self, task_id: str) -> dict[str, Any]:
+        """Aggregate spending across all completed stages for a task."""
+        row = await self._db.fetch_one(
+            """
+            SELECT
+                COALESCE(SUM(tokens_input), 0)       AS input_tokens,
+                COALESCE(SUM(cache_write_tokens), 0)  AS cache_write_tokens,
+                COALESCE(SUM(cache_read_tokens), 0)   AS cache_read_tokens,
+                COALESCE(SUM(tokens_output), 0)       AS output_tokens,
+                COALESCE(SUM(cost_usd), 0)            AS total_cost_usd
+            FROM stages
+            WHERE task_id = %(id)s AND status = 'completed'
+            """,
+            {"id": task_id},
+        )
+        return dict(row) if row else {}
+
+    async def get_live_stage_spending(
+        self, task_id: str, stage_key: str,
+    ) -> dict[str, Any] | None:
+        """Parse live_output of an in-progress stage for current spending."""
+        from .spending import parse_ndjson_spending
+
+        row = await self._db.fetch_one(
+            """
+            SELECT live_output FROM stages
+            WHERE task_id = %(id)s AND stage_key = %(sk)s
+              AND status = 'executing'
+            """,
+            {"id": task_id, "sk": stage_key},
+        )
+        if row and row["live_output"]:
+            summary = parse_ndjson_spending(row["live_output"])
+            return {
+                "input_tokens": summary.total_input,
+                "cache_write_tokens": summary.total_cache_write,
+                "cache_read_tokens": summary.total_cache_read,
+                "output_tokens": summary.total_output,
+                "estimated_cost_usd": summary.estimated_cost_usd,
+                "model": summary.model,
+                "turns": len(summary.turns),
+            }
+        return None
 
     async def get_task_context(self, task_id: str) -> dict[str, Any] | None:
         """Call the database-side get_task_context function."""

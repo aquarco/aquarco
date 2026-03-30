@@ -197,7 +197,8 @@ def test_parse_ndjson_output_with_result_event() -> None:
     result = _parse_ndjson_output(lines, "t1", 0)
     assert result["summary"] == "all good"
     assert result["_cost_usd"] == 0.5
-    assert result["_input_tokens"] == 150
+    assert result["_input_tokens"] == 100
+    assert result["_cache_read_tokens"] == 50
 
 
 def test_parse_ndjson_output_fallback_to_assistant_text() -> None:
