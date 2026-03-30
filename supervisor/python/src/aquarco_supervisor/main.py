@@ -13,7 +13,7 @@ from typing import Any
 import typer
 
 from .cli.agents import app as agents_app
-from .exceptions import RateLimitError
+from .exceptions import RateLimitError, RetryableError
 from .cli.auth_helper import auth_watch
 from .cli.repo_manager import repo_app
 from .cli.status import status
@@ -260,16 +260,22 @@ class Supervisor:
         try:
             await self._tq.assign_agent(task_id, "pending-assignment")
             await self._executor.execute_pipeline(pipeline, task_id, initial_context)
-        except RateLimitError as e:
-            # Defensively mark task as rate_limited in case the error propagated
-            # before execute_pipeline had a chance to call rate_limit_task().
+        except RetryableError as e:
+            # Defensively postpone the task in case the error propagated
+            # before execute_pipeline had a chance to call postpone_task().
             try:
+                from .pipeline.executor import _cooldown_for_error
                 task = await self._tq.get_task(task_id) if self._tq else None
                 if task and task.status.value != "rate_limited":
-                    await self._tq.rate_limit_task(task_id, str(e))
+                    cooldown_minutes, max_retries = _cooldown_for_error(e)
+                    await self._tq.postpone_task(
+                        task_id, str(e),
+                        cooldown_minutes=cooldown_minutes,
+                        max_retries=max_retries,
+                    )
             except Exception:
-                log.exception("rate_limit_task_fallback_error", task_id=task_id)
-            log.info("task_rate_limited_stopped", task_id=task_id)
+                log.exception("postpone_task_fallback_error", task_id=task_id)
+            log.info("task_postponed_stopped", task_id=task_id)
         except Exception:
             log.exception("task_execution_error", task_id=task_id)
             if self._tq:
@@ -285,12 +291,12 @@ class Supervisor:
             await self._tq.fail_task(task_id, "Task execution timed out (90 min)")
 
     async def _resume_rate_limited_tasks(self) -> None:
-        """Move rate-limited tasks back to pending after cooldown (1 hour)."""
+        """Move rate-limited tasks back to pending after their per-row cooldown elapses."""
         if not self._tq:
             return
-        task_ids = await self._tq.get_rate_limited_tasks(cooldown_minutes=60)
+        task_ids = await self._tq.get_postponed_tasks()
         for task_id in task_ids:
-            log.info("resuming_rate_limited_task", task_id=task_id)
+            log.info("resuming_postponed_task", task_id=task_id)
             await self._tq.resume_rate_limited_task(task_id)
 
     async def _close_merged_tasks(self) -> None:

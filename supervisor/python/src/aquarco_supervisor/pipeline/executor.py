@@ -20,7 +20,7 @@ from ..config_overlay import (
 )
 from .conditions import ConditionResult, evaluate_ai_condition, evaluate_conditions
 from ..database import Database
-from ..exceptions import NoAvailableAgentError, PipelineError, RateLimitError, StageError
+from ..exceptions import NoAvailableAgentError, OverloadedError, PipelineError, RateLimitError, RetryableError, ServerError, StageError
 from ..logging import get_logger
 from ..models import Complexity, PipelineConfig, TaskPhase
 from ..task_queue import TaskQueue
@@ -38,6 +38,20 @@ _SAFE_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]*$")
 
 # Maximum number of iteration re-runs per stage to prevent infinite loops
 _MAX_ITERATIONS = 5
+
+
+def _cooldown_for_error(e: RetryableError) -> tuple[int, int]:
+    """Return (cooldown_minutes, max_retries) appropriate for a RetryableError subtype.
+
+    - OverloadedError (529): 15 min cooldown, 24 max retries
+    - ServerError (500):     30 min cooldown, 12 max retries
+    - RateLimitError (429) / other: 60 min cooldown, 24 max retries
+    """
+    if isinstance(e, OverloadedError):
+        return (15, 24)
+    if isinstance(e, ServerError):
+        return (30, 12)
+    return (60, 24)
 
 
 class PipelineExecutor:
@@ -541,10 +555,15 @@ class PipelineExecutor:
                 # Default: advance to next stage
                 current_idx += 1
 
-            except RateLimitError as e:
+            except RetryableError as e:
                 last_completed = stage_num - 1 if stage_num > 0 else 0
                 await self._tq.checkpoint_pipeline(task_id, last_completed)
-                await self._tq.rate_limit_task(task_id, str(e))
+                cooldown_minutes, max_retries = _cooldown_for_error(e)
+                await self._tq.postpone_task(
+                    task_id, str(e),
+                    cooldown_minutes=cooldown_minutes,
+                    max_retries=max_retries,
+                )
                 for agent_name in agents:
                     sk = f"{stage_num}:{category}:{agent_name}"
                     await self._db.execute(
@@ -651,7 +670,7 @@ class PipelineExecutor:
                 validation_items_out=output.get("validation_items_new"),
             )
             return output
-        except (StageError, RateLimitError):
+        except (StageError, RetryableError):
             raise
         except asyncio.CancelledError:
             raise
