@@ -645,6 +645,7 @@ class TaskQueue:
                  stage_key, iteration)
             VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s,
                     'pending', %(stage_key)s, %(iteration)s)
+            ON CONFLICT DO NOTHING
             """,
             {
                 "task_id": task_id,

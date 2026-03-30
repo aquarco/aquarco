@@ -425,6 +425,11 @@ class PipelineExecutor:
             # Determine base iteration for this visit.  First visit = 1;
             # condition-driven jump-backs increment the iteration so each
             # visit produces fresh stage rows, preserving full history.
+            #
+            # Invariant: base_iteration > 1 ⟹ repeat_counts[stage_name] > 1.
+            # The first visit always uses iteration=1 (from the initial
+            # create_system_stage call).  Only revisits trigger
+            # create_iteration_stage with an incremented iteration number.
             base_iteration = stage_iterations.get(stage_name, 1)
 
             # On revisit (repeat > 1), create new iteration stage rows
