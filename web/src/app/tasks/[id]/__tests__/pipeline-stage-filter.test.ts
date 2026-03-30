@@ -9,7 +9,7 @@
  *   const SYSTEM_CATEGORIES = new Set(['planning', 'condition-eval'])
  *   const uniqueStagesMap = new Map<number, Stage>()
  *   for (const s of stages) {
- *     if (SYSTEM_CATEGORIES.has(s.category)) continue
+ *     if (SYSTEM_CATEGORIES.has(s.category.toLowerCase())) continue
  *     uniqueStagesMap.set(s.stageNumber, s)
  *   }
  *   const uniqueStages = Array.from(uniqueStagesMap.values())
@@ -50,7 +50,7 @@ function buildUniqueStages(rawStages: Stage[]): Stage[] {
   // Deduplicate: last-write-wins per stageNumber; exclude system categories (page.tsx ~480)
   const uniqueStagesMap = new Map<number, Stage>()
   for (const s of stages) {
-    if (SYSTEM_CATEGORIES.has(s.category)) continue
+    if (SYSTEM_CATEGORIES.has(s.category.toLowerCase())) continue
     uniqueStagesMap.set(s.stageNumber, s)
   }
 
@@ -147,6 +147,18 @@ describe('buildUniqueStages — system stage exclusion', () => {
     ]
     const result = buildUniqueStages(stages)
     expect(result).toEqual([])
+  })
+
+  it('excludes system categories regardless of case (e.g., Planning, CONDITION-EVAL)', () => {
+    const stages = [
+      makeStage('plan-1', -1, 'Planning'),
+      makeStage('review-1', 0, 'review'),
+      makeStage('cond-0', 0, 'CONDITION-EVAL'),
+      makeStage('impl-1', 1, 'implementation'),
+    ]
+    const result = buildUniqueStages(stages)
+    expect(result.every(s => !SYSTEM_CATEGORIES.has(s.category.toLowerCase()))).toBe(true)
+    expect(result.map(s => s.category)).toEqual(['review', 'implementation'])
   })
 
   it('returns all stages when no system stages are present', () => {
