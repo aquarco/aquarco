@@ -139,6 +139,18 @@ async def execute_claude(
 
     When resume_session_id is provided, uses --resume to continue a prior session
     instead of starting fresh (no --system-prompt-file or schema flags needed).
+
+    Raises:
+        RateLimitError: Claude API returned a 429 rate-limit response (detected via
+            ``"rate_limit_error"`` or ``"status code 429"`` in stdout/debug log).
+        ServerError: Claude API returned a 500 internal server error (detected via
+            ``"api_error"`` or ``"status code 500"``). Safe to retry after backoff.
+        OverloadedError: Claude API returned a 529 overloaded response (detected via
+            ``"overloaded_error"`` or ``"status code 529"``). Retry with shorter backoff.
+        AgentExecutionError: The CLI exited non-zero for any other reason.
+        AgentTimeoutError: The overall subprocess wall-clock timeout was exceeded.
+        AgentInactivityError: No NDJSON events arrived within the inactivity window
+            after the result event was emitted.
     """
     if not resume_session_id and not prompt_file.exists():
         raise AgentExecutionError(f"Prompt file not found: {prompt_file}")

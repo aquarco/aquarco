@@ -1,5 +1,25 @@
 # Changelog
 
+## [2026-03-30] — Expand retryable error handling to cover HTTP 500 and 529 (#41)
+
+### Added
+- **`RetryableError`** base exception class (`exceptions.py`) — sits between `AgentExecutionError` and the concrete postponable errors; catching it covers all transient Claude API errors in a single clause
+- **`ServerError(RetryableError)`** — raised when the Claude CLI exits non-zero and stdout or the debug log contains `"api_error"` / `"status code 500"` signals; postponed with a 30-minute cooldown (max 12 retries)
+- **`OverloadedError(RetryableError)`** — raised when the same signals indicate `"overloaded_error"` / `"status code 529"`; postponed with a 15-minute cooldown (max 24 retries)
+- **`_cooldown_for_error(e)`** helper (`exceptions.py`) — returns `(cooldown_minutes, max_retries)` for any `RetryableError` subtype; used by both executor and the main-loop defensive handler
+- **`_is_server_error_in_lines()` / `_is_server_error()`** (`cli/claude.py`) — detection helpers for HTTP 500 signals in NDJSON stdout lines and debug log file respectively
+- **`_is_overloaded_in_lines()` / `_is_overloaded()`** (`cli/claude.py`) — detection helpers for HTTP 529 signals
+- **`postpone_task()`** method on `TaskQueue` (`task_queue.py`) — generalised postpone with configurable `cooldown_minutes` and `max_retries`; persists the cooldown value to `tasks.postpone_cooldown_minutes` so the resume poller uses per-task wait times
+- **`get_postponed_tasks()`** method on `TaskQueue` — replaces `get_rate_limited_tasks()`; queries `status='rate_limited'` using the per-row `postpone_cooldown_minutes` column instead of a fixed 60-minute constant
+- **Database migration `031_add_postpone_cooldown.sql`** — adds `postpone_cooldown_minutes INTEGER NOT NULL DEFAULT 60` column to `tasks` table; rollback file included
+
+### Changed
+- **`RateLimitError`** now inherits from `RetryableError` instead of directly from `AgentExecutionError` — all existing `isinstance(e, RateLimitError)` checks continue to pass; existing 429 behaviour is unchanged (60-minute cooldown, 24 max retries)
+- **`execute_claude()`** (`cli/claude.py`) — raises `ServerError` or `OverloadedError` before the generic `AgentExecutionError` fallthrough when the process exits non-zero
+- **`_execute_running_phase()`** (`pipeline/executor.py`) — `except RateLimitError` replaced with `except RetryableError`; calls `postpone_task()` with per-type cooldown values from `_cooldown_for_error()`
+- **`rate_limit_task()`** (`task_queue.py`) — delegates to `postpone_task(cooldown_minutes=60, max_retries=...)`; behaviour unchanged, kept for backward compatibility
+- **`_resume_rate_limited_tasks()`** (`main.py`) — calls `get_postponed_tasks()` instead of `get_rate_limited_tasks(cooldown_minutes=60)`
+
 ## [2026-03-27] — Show full pipeline execution history on task detail page (#39)
 
 ### Added
