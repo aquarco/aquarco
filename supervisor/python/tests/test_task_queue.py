@@ -232,6 +232,113 @@ async def test_store_stage_output_no_raw_output(
 
 
 @pytest.mark.asyncio
+async def test_store_stage_output_spending_fields_legacy(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Legacy path: spending fields are extracted from output and passed to INSERT."""
+    output = {
+        "summary": "ok",
+        "_cost_usd": 0.42,
+        "_input_tokens": 1000,
+        "_output_tokens": 500,
+        "_cache_read_tokens": 200,
+        "_cache_write_tokens": 100,
+    }
+    await task_queue.store_stage_output("task-1", 1, "review", "agent-1", output)
+
+    first_params = mock_db.execute.call_args_list[0][0][1]
+    # Spending fields must be present and correct
+    assert first_params["cost_usd"] == 0.42
+    assert first_params["tokens_in"] == 1000
+    assert first_params["tokens_out"] == 500
+    assert first_params["cache_read"] == 200
+    assert first_params["cache_write"] == 100
+    # Spending keys must NOT appear in the structured JSON
+    structured = json.loads(first_params["output"])
+    for key in ("_cost_usd", "_input_tokens", "_output_tokens",
+                "_cache_read_tokens", "_cache_write_tokens"):
+        assert key not in structured
+    assert structured["summary"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_store_stage_output_cumulative_takes_precedence_legacy(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """_pop_cumulative: cumulative values override per-iteration values (legacy path)."""
+    output = {
+        "summary": "ok",
+        "_cost_usd": 0.5,            # per-iteration — should be ignored
+        "_cumulative_cost_usd": 1.5, # cumulative — should win
+        "_input_tokens": 100,
+        "_cumulative_input_tokens": 300,
+        "_output_tokens": 50,
+        "_cumulative_output_tokens": 150,
+        "_cache_read_tokens": 20,
+        "_cumulative_cache_read_tokens": 60,
+        "_cache_write_tokens": 10,
+        "_cumulative_cache_write_tokens": 30,
+    }
+    await task_queue.store_stage_output("task-1", 1, "review", "agent-1", output)
+
+    first_params = mock_db.execute.call_args_list[0][0][1]
+    assert first_params["cost_usd"] == 1.5   # cumulative wins
+    assert first_params["tokens_in"] == 300
+    assert first_params["tokens_out"] == 150
+    assert first_params["cache_read"] == 60
+    assert first_params["cache_write"] == 30
+
+
+@pytest.mark.asyncio
+async def test_store_stage_output_spending_fields_stage_key(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Stage-key path: spending fields are extracted from output and passed to UPDATE."""
+    output = {
+        "result": "pass",
+        "_cost_usd": 0.75,
+        "_input_tokens": 2000,
+        "_output_tokens": 800,
+        "_cache_read_tokens": 400,
+        "_cache_write_tokens": 150,
+    }
+    await task_queue.store_stage_output(
+        "task-1", 2, "test", "test-agent", output,
+        stage_key="2:test:test-agent", iteration=1,
+    )
+
+    first_params = mock_db.execute.call_args_list[0][0][1]
+    first_sql = mock_db.execute.call_args_list[0][0][0]
+    assert "UPDATE stages" in first_sql
+    assert first_params["cost_usd"] == 0.75
+    assert first_params["tokens_in"] == 2000
+    assert first_params["tokens_out"] == 800
+    assert first_params["cache_read"] == 400
+    assert first_params["cache_write"] == 150
+    # Spending keys must NOT appear in the structured JSON
+    structured = json.loads(first_params["output"])
+    for key in ("_cost_usd", "_input_tokens", "_output_tokens",
+                "_cache_read_tokens", "_cache_write_tokens"):
+        assert key not in structured
+
+
+@pytest.mark.asyncio
+async def test_store_stage_output_spending_missing_fields_default_none(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """When no spending keys in output, params default to None."""
+    output = {"summary": "done"}
+    await task_queue.store_stage_output("task-1", 0, "review", "agent-1", output)
+
+    first_params = mock_db.execute.call_args_list[0][0][1]
+    assert first_params["cost_usd"] is None
+    assert first_params["tokens_in"] is None
+    assert first_params["tokens_out"] is None
+    assert first_params["cache_read"] is None
+    assert first_params["cache_write"] is None
+
+
+@pytest.mark.asyncio
 async def test_assign_agent(task_queue: TaskQueue, mock_db: AsyncMock) -> None:
     await task_queue.assign_agent("task-1", "analyzer-agent")
 

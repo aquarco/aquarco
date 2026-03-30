@@ -561,3 +561,58 @@ class TestClaudeResumePrompt:
             full_content = "".join(written_content)
             assert "structured" in full_content.lower()
             assert "output format" in full_content.lower()
+
+    @pytest.mark.asyncio
+    async def test_cumulative_token_buckets_accumulate_across_iterations(
+        self, sample_pipelines: Any
+    ) -> None:
+        """All four token buckets accumulate correctly across two resume iterations."""
+        mock_db = AsyncMock(spec=Database)
+        mock_tq = AsyncMock(spec=TaskQueue)
+        registry = _make_mock_registry(max_cost=10.0)
+
+        # First call: hits max_turns with token counts
+        first_output = ClaudeOutput(
+            structured={
+                "_subtype": "error_max_turns",
+                "_session_id": "sess-tok-1",
+                "_cost_usd": 1.0,
+                "_input_tokens": 100,
+                "_cache_read_tokens": 200,
+                "_cache_write_tokens": 50,
+                "_output_tokens": 80,
+            },
+            raw="raw1",
+        )
+        # Second call: completes normally with different token counts
+        second_output = ClaudeOutput(
+            structured={
+                "summary": "done",
+                "_cost_usd": 0.5,
+                "_input_tokens": 60,
+                "_cache_read_tokens": 120,
+                "_cache_write_tokens": 30,
+                "_output_tokens": 40,
+            },
+            raw="raw2",
+        )
+
+        executor = PipelineExecutor(mock_db, mock_tq, registry, sample_pipelines)
+
+        with patch(
+            "aquarco_supervisor.pipeline.executor.execute_claude",
+            new_callable=AsyncMock,
+            side_effect=[first_output, second_output],
+        ), patch("aquarco_supervisor.pipeline.executor.Path"):
+            output = await executor._execute_agent(
+                "test-agent", "task-1", {}, 0, work_dir="/repos/test"
+            )
+
+        # Cost accumulates correctly
+        assert output["_cumulative_cost_usd"] == 1.5
+        # All four token buckets must be the sum across both iterations
+        assert output["_cumulative_input_tokens"] == 160       # 100 + 60
+        assert output["_cumulative_cache_read_tokens"] == 320  # 200 + 120
+        assert output["_cumulative_cache_write_tokens"] == 80  # 50 + 30
+        assert output["_cumulative_output_tokens"] == 120      # 80 + 40
+        assert output["_iterations"] == 2
