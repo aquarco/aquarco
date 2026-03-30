@@ -22,7 +22,7 @@ from .config import load_config, load_pipelines, load_secrets
 from .config_store import sync_all_agent_definitions_to_db, sync_pipeline_definitions_to_db
 from .database import Database
 from .logging import get_logger, setup_logging
-from .models import PipelineConfig, SupervisorConfig
+from .models import PipelineConfig, SupervisorConfig, TaskStatus
 from .pipeline.agent_registry import AgentRegistry
 from .pipeline.executor import PipelineExecutor
 from .pollers.external_triggers import ExternalTriggersPoller
@@ -265,7 +265,9 @@ class Supervisor:
             # before execute_pipeline had a chance to call postpone_task().
             try:
                 task = await self._tq.get_task(task_id) if self._tq else None
-                if task and task.status.value != "rate_limited":
+                # Invariant: execute_pipeline sets status to RATE_LIMITED for all
+                # RetryableError subtypes before re-raising; skip duplicate postpone.
+                if task and task.status != TaskStatus.RATE_LIMITED:
                     cooldown_minutes, max_retries = _cooldown_for_error(e)
                     await self._tq.postpone_task(
                         task_id, str(e),

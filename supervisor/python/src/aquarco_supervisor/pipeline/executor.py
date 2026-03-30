@@ -20,7 +20,7 @@ from ..config_overlay import (
 )
 from .conditions import ConditionResult, evaluate_ai_condition, evaluate_conditions
 from ..database import Database
-from ..exceptions import NoAvailableAgentError, OverloadedError, PipelineError, RateLimitError, RetryableError, ServerError, StageError, _cooldown_for_error
+from ..exceptions import NoAvailableAgentError, PipelineError, RetryableError, StageError, _cooldown_for_error
 from ..logging import get_logger
 from ..models import Complexity, PipelineConfig, TaskPhase
 from ..task_queue import TaskQueue
@@ -38,7 +38,6 @@ _SAFE_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]*$")
 
 # Maximum number of iteration re-runs per stage to prevent infinite loops
 _MAX_ITERATIONS = 5
-
 
 
 class PipelineExecutor:
