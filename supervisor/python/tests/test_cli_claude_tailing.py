@@ -283,56 +283,45 @@ def test_is_rate_limited_in_lines_empty() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_claude_dry_run_uses_script(tmp_path: Path) -> None:
-    """When CLAUDE_DRY_RUN is set and script exists, use the dry-run script."""
+    """When CLAUDE_DRY_RUN=1 and the dry-run script exists, the subprocess is
+    invoked with the script path (not the 'claude' binary) as its first argument."""
     prompt_file = tmp_path / "system.md"
     prompt_file.write_text("You are a test agent.")
 
     mock_proc = _make_proc_mock(returncode=0)
-    captured_args: list = []
+    captured_args: list[str] = []
 
     async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        # args[0] is the executable, args[1:] are the CLI arguments
         captured_args.extend(args)
         return mock_proc
 
-    async def fake_tail(path, proc, **kwargs):
+    async def fake_tail(path: Path, proc: Any, **kwargs: Any) -> tuple[list[str], bool]:
         return [], False
 
-    # Create a fake dry-run script at the expected location
-    # The script path is resolved relative to claude.py
-    scripts_dir = tmp_path / "scripts"
-    scripts_dir.mkdir()
-    dry_run_script = scripts_dir / "claude-dry-run.sh"
-    dry_run_script.write_text("#!/bin/bash\necho dry-run")
-
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
-         patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
+         patch("aquarco_supervisor.cli.claude.asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"), \
-         patch.dict(os.environ, {"CLAUDE_DRY_RUN": "1"}), \
-         patch("aquarco_supervisor.cli.claude.Path.__file__", create=True):
+         patch.dict(os.environ, {"CLAUDE_DRY_RUN": "1"}):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
         out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
         mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
 
-        # Patch the resolved script path
-        with patch.object(Path, "exists", return_value=True), \
-             patch.object(Path, "resolve", return_value=dry_run_script.parent.parent), \
-             patch("aquarco_supervisor.cli.claude.Path.resolve") as mock_resolve:
-            # The actual script path resolution uses __file__.parents[4] / "scripts" / "claude-dry-run.sh"
-            # We need to make the resolved _dry_run_script.exists() return True
-            # Simpler: just check that CLAUDE_DRY_RUN env var is checked
-            result = await execute_claude(
-                prompt_file=prompt_file,
-                context={"task_id": "t1"},
-                work_dir=str(tmp_path),
-                task_id="t1",
-                stage_num=0,
-            )
+        await execute_claude(
+            prompt_file=prompt_file,
+            context={"task_id": "t1"},
+            work_dir=str(tmp_path),
+            task_id="t1",
+            stage_num=0,
+        )
 
-    # The first arg should be the dry-run script path if it was found,
-    # or "claude" if the script wasn't found at the resolved location
-    # In this test the important thing is that the env var is checked
-    assert result is not None
+    # The real claude-dry-run.sh exists in the repo so the path resolution
+    # inside execute_claude should find it and use it as the executable.
+    assert len(captured_args) > 0, "create_subprocess_exec was not called"
+    assert captured_args[0].endswith("claude-dry-run.sh"), (
+        f"Expected first arg to end with 'claude-dry-run.sh', got {captured_args[0]!r}"
+    )
 
 
 @pytest.mark.asyncio
