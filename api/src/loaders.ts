@@ -30,6 +30,9 @@ export interface StageRow {
   raw_output: string | null
   tokens_input: number | null
   tokens_output: number | null
+  cost_usd: number | null
+  cache_read_tokens: number | null
+  cache_write_tokens: number | null
   error_message: string | null
   retry_count: number
   live_output: string | null

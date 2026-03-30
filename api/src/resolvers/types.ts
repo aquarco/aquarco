@@ -41,6 +41,19 @@ export const Task = {
     return ctx.loaders.repositoryLoader.load(parent._repositoryName)
   },
 
+  async totalCostUsd(
+    parent: { id: string },
+    _: unknown,
+    ctx: Context
+  ): Promise<number | null> {
+    const result = await ctx.pool.query<{ total: string }>(
+      'SELECT COALESCE(SUM(cost_usd), 0) AS total FROM stages WHERE task_id = $1',
+      [parent.id]
+    )
+    const val = parseFloat(result.rows[0].total)
+    return val > 0 ? val : null
+  },
+
   async stages(
     parent: { id: string },
     _: unknown,

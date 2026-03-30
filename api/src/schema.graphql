@@ -107,6 +107,7 @@ type Task {
   parentTaskId: ID
   prNumber: Int
   branchName: String
+  totalCostUsd: Float
   stages: [Stage!]!
   context: [ContextEntry!]!
 }
@@ -127,6 +128,9 @@ type Stage {
   rawOutput: String
   tokensInput: Int
   tokensOutput: Int
+  costUsd: Float
+  cacheReadTokens: Int
+  cacheWriteTokens: Int
   errorMessage: String
   retryCount: Int!
   liveOutput: String
@@ -188,6 +192,7 @@ type DashboardStats {
   blockedTasks: Int!
   activeAgents: Int!
   totalTokensToday: Int!
+  totalCostToday: Float!
   tasksByPipeline: [PipelineCount!]!
   tasksByRepository: [RepositoryCount!]!
 }

@@ -13,6 +13,7 @@ export const DASHBOARD_STATS = gql`
       blockedTasks
       activeAgents
       totalTokensToday
+      totalCostToday
       tasksByPipeline {
         pipeline
         count
@@ -51,6 +52,7 @@ export const GET_TASKS = gql`
         updatedAt
         pipeline
         assignedAgent
+        totalCostUsd
       }
       totalCount
     }
@@ -96,6 +98,9 @@ export const GET_TASK = gql`
         rawOutput
         tokensInput
         tokensOutput
+        costUsd
+        cacheReadTokens
+        cacheWriteTokens
         errorMessage
         retryCount
         liveOutput

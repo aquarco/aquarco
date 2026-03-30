@@ -21,10 +21,11 @@ import Divider from '@mui/material/Divider'
 import { DASHBOARD_STATS, GET_TASKS } from '@/lib/graphql/queries'
 import { StatusChip } from '@/components/ui/StatusChip'
 import { formatDate } from '@/lib/format'
+import { formatCost } from '@/lib/spending'
 
 interface StatCardProps {
   label: string
-  value: number | undefined
+  value: number | string | undefined
   color: string
   loading: boolean
 }
@@ -81,6 +82,7 @@ export default function DashboardPage() {
     { label: 'Completed', value: stats?.completedTasks, color: '#2e7d32' },
     { label: 'Failed', value: stats?.failedTasks, color: '#d32f2f' },
     { label: 'Blocked', value: stats?.blockedTasks, color: '#e65100' },
+    { label: 'Cost Today', value: stats?.totalCostToday != null ? formatCost(stats.totalCostToday) : '—', color: '#ed6c02' },
   ]
 
   return (

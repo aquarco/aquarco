@@ -22,12 +22,14 @@ import Accordion from '@mui/material/Accordion'
 import AccordionSummary from '@mui/material/AccordionSummary'
 import AccordionDetails from '@mui/material/AccordionDetails'
 import Tooltip from '@mui/material/Tooltip'
+import Divider from '@mui/material/Divider'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTheme } from '@mui/material/styles'
 import { GET_TASK, GET_PIPELINE_DEFINITIONS, RETRY_TASK, RERUN_TASK, CLOSE_TASK, CANCEL_TASK, UNBLOCK_TASK } from '@/lib/graphql/queries'
 import { StatusChip } from '@/components/ui/StatusChip'
 import { monoStyle } from '@/lib/theme'
 import { formatDate } from '@/lib/format'
+import { parseLiveSpending, formatCost, formatTokens } from '@/lib/spending'
 
 interface Stage {
   id: string
@@ -44,6 +46,9 @@ interface Stage {
   rawOutput: string | null
   tokensInput: number | null
   tokensOutput: number | null
+  costUsd: number | null
+  cacheReadTokens: number | null
+  cacheWriteTokens: number | null
   errorMessage: string | null
   retryCount: number
   liveOutput: string | null
@@ -142,10 +147,12 @@ function PipelineStagesFlow({
   stages,
   activeStep,
   pipelineName,
+  effectiveExecutingStages,
 }: {
   stages: Stage[]  // deduplicated: one entry per unique stageNumber (latest run wins)
   activeStep: number
   pipelineName: string
+  effectiveExecutingStages: Set<number>
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
@@ -301,7 +308,9 @@ function PipelineStagesFlow({
               const x = flowNodeX(i)
               const runtimeStage = stages[i]
               const defStage = defnStages[i]
-              const status = runtimeStage?.status ?? 'PENDING'
+              const rawStatus = runtimeStage?.status ?? 'PENDING'
+              const status = rawStatus === 'PENDING' && runtimeStage && effectiveExecutingStages.has(runtimeStage.stageNumber)
+                ? 'EXECUTING' : rawStatus
               const borderColor = STATUS_COLORS[status] ?? '#bdbdbd'
               const isActive = i === activeStep
               const name = defStage?.name ?? runtimeStage?.category ?? `Stage ${i + 1}`
@@ -485,9 +494,19 @@ export default function TaskDetailPage() {
   }
   const uniqueStages = Array.from(uniqueStagesMap.values()).sort((a, b) => a.stageNumber - b.stageNumber)
 
-  const activeStep = uniqueStages.findIndex(
-    (s) => s.status === 'EXECUTING' || (s.status !== 'COMPLETED' && s.status !== 'SKIPPED')
-  )
+  // Determine which stage is actually active using the task's currentStage field
+  // (more reliable than stage.status which may still be PENDING when the agent is running)
+  const activeStep = task.status === 'EXECUTING'
+    ? uniqueStages.findIndex((s) => s.stageNumber === task.currentStage)
+    : uniqueStages.findIndex(
+        (s) => s.status === 'EXECUTING' || (s.status !== 'COMPLETED' && s.status !== 'SKIPPED')
+      )
+
+  // Build a set of stage numbers that should display as EXECUTING based on task state
+  const effectiveExecutingStages = new Set<number>()
+  if (task.status === 'EXECUTING') {
+    effectiveExecutingStages.add(task.currentStage)
+  }
 
   return (
     <Box>
@@ -510,47 +529,115 @@ export default function TaskDetailPage() {
         </Alert>
       )}
 
-      {/* Metadata card */}
+      {/* Task overview card */}
       <Card variant="outlined" sx={{ mb: 2 }}>
         <CardContent>
           <Grid container spacing={2}>
-            <Grid item xs={12} sm={6} md={3}>
+            {/* Spending row */}
+            {(() => {
+              const totalCost = stages.reduce((sum, s) => sum + (s.costUsd ?? 0), 0)
+              const totalInput = stages.reduce((sum, s) => sum + (s.tokensInput ?? 0), 0)
+              const totalOutput = stages.reduce((sum, s) => sum + (s.tokensOutput ?? 0), 0)
+              const totalCacheRead = stages.reduce((sum, s) => sum + (s.cacheReadTokens ?? 0), 0)
+              const totalCacheWrite = stages.reduce((sum, s) => sum + (s.cacheWriteTokens ?? 0), 0)
+
+              let liveCost = 0
+              let liveInput = 0
+              let liveOutput = 0
+              let liveCacheRead = 0
+              let liveCacheWrite = 0
+              for (const s of stages) {
+                if ((s.status === 'EXECUTING' || (s.status === 'PENDING' && effectiveExecutingStages.has(s.stageNumber))) && s.liveOutput) {
+                  const live = parseLiveSpending(s.liveOutput)
+                  liveCost += live.estimatedCostUsd
+                  liveInput += live.inputTokens
+                  liveOutput += live.outputTokens
+                  liveCacheRead += live.cacheReadTokens
+                  liveCacheWrite += live.cacheWriteTokens
+                }
+              }
+
+              const grandCost = totalCost + liveCost
+              const grandInput = totalInput + liveInput
+              const grandOutput = totalOutput + liveOutput
+              const grandCacheRead = totalCacheRead + liveCacheRead
+              const grandCacheWrite = totalCacheWrite + liveCacheWrite
+              const hasAny = grandCost > 0 || grandInput > 0 || grandOutput > 0
+
+              if (!hasAny) return null
+              return (
+                <>
+                  <Grid item xs={6} sm={4} md={2}>
+                    <Typography variant="caption" color="text.secondary">Cost</Typography>
+                    <Typography variant="h6" fontWeight={700} color="warning.main">
+                      {formatCost(grandCost)}{liveCost > 0 ? '*' : ''}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={4} md={2}>
+                    <Typography variant="caption" color="text.secondary">Input Tokens</Typography>
+                    <Typography variant="body1" fontWeight={600}>{formatTokens(grandInput)}</Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={4} md={2}>
+                    <Typography variant="caption" color="text.secondary">Output Tokens</Typography>
+                    <Typography variant="body1" fontWeight={600}>{formatTokens(grandOutput)}</Typography>
+                  </Grid>
+                  {grandCacheRead > 0 && (
+                    <Grid item xs={6} sm={4} md={2}>
+                      <Typography variant="caption" color="text.secondary">Cache Read</Typography>
+                      <Typography variant="body1" fontWeight={600}>{formatTokens(grandCacheRead)}</Typography>
+                    </Grid>
+                  )}
+                  {grandCacheWrite > 0 && (
+                    <Grid item xs={6} sm={4} md={2}>
+                      <Typography variant="caption" color="text.secondary">Cache Write</Typography>
+                      <Typography variant="body1" fontWeight={600}>{formatTokens(grandCacheWrite)}</Typography>
+                    </Grid>
+                  )}
+                  {liveCost > 0 && (
+                    <Grid item xs={12}>
+                      <Typography variant="caption" color="text.secondary">
+                        * includes live estimate from executing stages
+                      </Typography>
+                    </Grid>
+                  )}
+                  <Grid item xs={12}>
+                    <Divider />
+                  </Grid>
+                </>
+              )
+            })()}
+            {/* Metadata — row 1: identity */}
+            <Grid item xs={6} sm={4} md={3}>
               <Typography variant="caption" color="text.secondary">Source</Typography>
               <Typography variant="body2">{task.source}</Typography>
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid item xs={6} sm={4} md={3}>
               <Typography variant="caption" color="text.secondary">Repository</Typography>
               <Typography variant="body2">{task.repository.name}</Typography>
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid item xs={6} sm={4} md={3}>
               <Typography variant="caption" color="text.secondary">Pipeline</Typography>
               <Typography variant="body2">{task.pipeline}</Typography>
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Typography variant="caption" color="text.secondary">Assigned Agent</Typography>
-              <Typography variant="body2">{task.assignedAgent ?? '—'}</Typography>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid item xs={6} sm={4} md={3}>
               <Typography variant="caption" color="text.secondary">Priority</Typography>
               <Typography variant="body2">{task.priority}</Typography>
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
+            {/* Metadata — row 2: progress */}
+            <Grid item xs={6} sm={4} md={3}>
               <Typography variant="caption" color="text.secondary">Current Stage</Typography>
               <Typography variant="body2">{task.currentStage}</Typography>
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid item xs={6} sm={4} md={3}>
               <Typography variant="caption" color="text.secondary">Retry Count</Typography>
               <Typography variant="body2">{task.retryCount}</Typography>
             </Grid>
-            <Grid item xs={12} sm={6} md={4}>
-              <Typography variant="caption" color="text.secondary">Created</Typography>
-              <Typography variant="body2">{formatDate(task.createdAt)}</Typography>
-            </Grid>
-            <Grid item xs={12} sm={6} md={4}>
+            <Grid item xs={6} sm={4} md={3}>
               <Typography variant="caption" color="text.secondary">Started</Typography>
               <Typography variant="body2">{formatDate(task.startedAt)}</Typography>
             </Grid>
-            <Grid item xs={12} sm={6} md={4}>
+            {/* Metadata — row 3: completion */}
+            <Grid item xs={6} sm={4} md={3}>
               <Typography variant="caption" color="text.secondary">Completed</Typography>
               <Typography variant="body2">{formatDate(task.completedAt)}</Typography>
             </Grid>
@@ -570,200 +657,261 @@ export default function TaskDetailPage() {
           stages={uniqueStages}
           activeStep={activeStep}
           pipelineName={task.pipeline}
+          effectiveExecutingStages={effectiveExecutingStages}
         />
       )}
 
       {/* Stage output */}
       {stages.length > 0 && (
-        <Box sx={{ mb: 2 }}>
-          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-            Stage Output
-          </Typography>
-          {(() => {
-            // Build flat chronological history: stage accordions interleaved with evaluation blocks
-            const runCountPerStageNumber = new Map<number, number>()
-            const items: React.ReactNode[] = []
+        <Card variant="outlined" sx={{ mb: 2 }}>
+          <CardContent>
+            <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+              Stage Output
+            </Typography>
+            <Stack spacing={1}>
+              {(() => {
+                const runCountPerStageNumber = new Map<number, number>()
+                const items: React.ReactNode[] = []
 
-            for (const stage of stages) {
-              const stageNum = stage.stageNumber
-              const runCount = (runCountPerStageNumber.get(stageNum) ?? 0) + 1
-              runCountPerStageNumber.set(stageNum, runCount)
+                for (const stage of stages) {
+                  const stageNum = stage.stageNumber
+                  const runCount = (runCountPerStageNumber.get(stageNum) ?? 0) + 1
+                  runCountPerStageNumber.set(stageNum, runCount)
 
-              // Run label suffix: first run has no suffix, second is "(next run)", third is "(3rd run)", etc.
-              let runSuffix = ''
-              if (runCount === 2) runSuffix = ' (next run)'
-              else if (runCount === 3) runSuffix = ' (3rd run)'
-              else if (runCount > 3) runSuffix = ` (${runCount}th run)`
+                  let runSuffix = ''
+                  if (runCount === 2) runSuffix = ' (next run)'
+                  else if (runCount === 3) runSuffix = ' (3rd run)'
+                  else if (runCount > 3) runSuffix = ` (${runCount}th run)`
 
-              const output = stage.structuredOutput as Record<string, unknown> | null
-              const findings = output?.findings as Array<{
-                severity?: string
-                file?: string
-                line?: number
-                message?: string
-              }> | undefined
-              const summary = output?.summary as string | undefined
-              const recommendation = output?.recommendation as string | undefined
-              const conditionMessage = output?._condition_message as string | undefined
+                  const effectiveStatus = stage.status === 'PENDING' && effectiveExecutingStages.has(stage.stageNumber)
+                    ? 'EXECUTING' : stage.status
+                  const isLive = (effectiveStatus === 'EXECUTING') && !!stage.liveOutput
+                  const live = isLive ? parseLiveSpending(stage.liveOutput!) : null
+                  const stageCost = live?.estimatedCostUsd ?? stage.costUsd
 
-              items.push(
-                <Accordion key={stage.id} variant="outlined" disableGutters>
-                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                    <Stack direction="row" spacing={2} alignItems="center">
-                      <Typography fontWeight={600}>
-                        Stage {stage.stageNumber + 1}: {stage.category}{runSuffix}
-                      </Typography>
-                      {stage.agent && (
-                        <Typography variant="caption" color="text.secondary">
-                          {stage.agent}
-                        </Typography>
-                      )}
-                      <StatusChip status={stage.status} size="small" />
-                    </Stack>
-                  </AccordionSummary>
-                  <AccordionDetails>
-                    {summary && (
-                      <Typography variant="body2" sx={{ mb: 2 }}>
-                        {summary}
-                      </Typography>
-                    )}
-                    {recommendation && (
-                      <Alert severity="info" sx={{ mb: 2 }}>
-                        {recommendation}
-                      </Alert>
-                    )}
-                    {findings && findings.length > 0 && (
-                      <Stack spacing={1} sx={{ mb: 2 }}>
-                        {findings.map((f, i) => (
-                          <Box
-                            key={i}
-                            sx={{
-                              p: 1.5,
-                              borderRadius: 1,
-                              backgroundColor: 'background.default',
-                              border: '1px solid',
-                              borderColor: 'divider',
-                            }}
-                          >
-                            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-                              {f.severity && (
-                                <Chip
-                                  label={f.severity}
-                                  size="small"
-                                  color={
-                                    f.severity === 'error' || f.severity === 'critical'
-                                      ? 'error'
-                                      : f.severity === 'warning'
-                                        ? 'warning'
-                                        : 'default'
-                                  }
-                                />
+                  const output = stage.structuredOutput as Record<string, unknown> | null
+                  const findings = output?.findings as Array<{
+                    severity?: string
+                    file?: string
+                    line?: number
+                    message?: string
+                  }> | undefined
+                  const summary = output?.summary as string | undefined
+                  const recommendation = output?.recommendation as string | undefined
+                  const conditionMessage = output?._condition_message as string | undefined
+
+                  items.push(
+                    <Accordion key={stage.id} variant="outlined" disableGutters sx={{ '&:before': { display: 'none' } }}>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 2, minHeight: 48 }}>
+                        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ width: '100%', mr: 1 }}>
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            <StatusChip status={effectiveStatus} size="small" />
+                            <Typography variant="body2" fontWeight={600}>
+                              {stage.category}{runSuffix}
+                            </Typography>
+                            {stage.agent && (
+                              <Typography variant="caption" color="text.secondary">
+                                {stage.agent}
+                              </Typography>
+                            )}
+                          </Stack>
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            {stageCost != null && stageCost > 0 && (
+                              <Typography variant="caption" fontWeight={600} color="warning.main">
+                                {isLive ? '~' : ''}{formatCost(stageCost)}
+                              </Typography>
+                            )}
+                            {stage.startedAt && (
+                              <Typography variant="caption" color="text.secondary">
+                                {formatDate(stage.startedAt)}
+                              </Typography>
+                            )}
+                          </Stack>
+                        </Stack>
+                      </AccordionSummary>
+                      <AccordionDetails sx={{ px: 2, pt: 0, pb: 2 }}>
+                        {/* Token stats bar */}
+                        {(() => {
+                          const inp = live?.inputTokens ?? stage.tokensInput
+                          const out = live?.outputTokens ?? stage.tokensOutput
+                          const cr = live?.cacheReadTokens ?? stage.cacheReadTokens
+                          const cw = live?.cacheWriteTokens ?? stage.cacheWriteTokens
+                          if (!inp && !out) return null
+                          return (
+                            <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap justifyContent="flex-end"
+                              sx={{ mb: 2, py: 1, px: 1.5, borderRadius: 1, backgroundColor: 'action.hover' }}
+                            >
+                              {inp != null && inp > 0 && (
+                                <Typography variant="caption" color="text.secondary">
+                                  Input: {formatTokens(inp)}
+                                </Typography>
                               )}
-                              {f.file && (
-                                <Typography variant="caption" sx={monoStyle}>
-                                  {f.file}{f.line ? `:${f.line}` : ''}
+                              {out != null && out > 0 && (
+                                <Typography variant="caption" color="text.secondary">
+                                  Output: {formatTokens(out)}
+                                </Typography>
+                              )}
+                              {cr != null && cr > 0 && (
+                                <Typography variant="caption" color="text.secondary">
+                                  Cache Read: {formatTokens(cr)}
+                                </Typography>
+                              )}
+                              {cw != null && cw > 0 && (
+                                <Typography variant="caption" color="text.secondary">
+                                  Cache Write: {formatTokens(cw)}
                                 </Typography>
                               )}
                             </Stack>
-                            {f.message && (
-                              <Typography variant="body2">{f.message}</Typography>
-                            )}
+                          )
+                        })()}
+                        {/* Summary & recommendation */}
+                        {summary && (
+                          <Typography variant="body2" sx={{ mb: 2 }}>
+                            {summary}
+                          </Typography>
+                        )}
+                        {recommendation && (
+                          <Alert severity="info" sx={{ mb: 2 }}>
+                            {recommendation}
+                          </Alert>
+                        )}
+                        {/* Findings */}
+                        {findings && findings.length > 0 && (
+                          <Stack spacing={1} sx={{ mb: 2 }}>
+                            {findings.map((f, i) => (
+                              <Box
+                                key={i}
+                                sx={{
+                                  p: 1.5,
+                                  borderRadius: 1,
+                                  backgroundColor: 'background.default',
+                                  border: '1px solid',
+                                  borderColor: 'divider',
+                                }}
+                              >
+                                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                                  {f.severity && (
+                                    <Chip
+                                      label={f.severity}
+                                      size="small"
+                                      color={
+                                        f.severity === 'error' || f.severity === 'critical'
+                                          ? 'error'
+                                          : f.severity === 'warning'
+                                            ? 'warning'
+                                            : 'default'
+                                      }
+                                    />
+                                  )}
+                                  {f.file && (
+                                    <Typography variant="caption" sx={monoStyle}>
+                                      {f.file}{f.line ? `:${f.line}` : ''}
+                                    </Typography>
+                                  )}
+                                </Stack>
+                                {f.message && (
+                                  <Typography variant="body2">{f.message}</Typography>
+                                )}
+                              </Box>
+                            ))}
+                          </Stack>
+                        )}
+                        {/* Structured output (when no findings) */}
+                        {!findings && output && (
+                          <Box
+                            component="pre"
+                            sx={{
+                              m: 0,
+                              p: 1.5,
+                              backgroundColor: 'background.default',
+                              borderRadius: 1,
+                              overflow: 'auto',
+                              ...monoStyle,
+                              fontSize: '0.78rem',
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                            }}
+                          >
+                            {JSON.stringify(output, null, 2)}
                           </Box>
-                        ))}
-                      </Stack>
-                    )}
-                    {!findings && output && (
-                      <Box
-                        component="pre"
-                        sx={{
-                          m: 0,
-                          p: 1.5,
-                          backgroundColor: 'background.default',
-                          borderRadius: 1,
-                          overflow: 'auto',
-                          ...monoStyle,
-                          fontSize: '0.78rem',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                        }}
-                      >
-                        {JSON.stringify(output, null, 2)}
-                      </Box>
-                    )}
-                    {stage.status === 'EXECUTING' && stage.liveOutput && (
-                      <Box
-                        component="pre"
-                        sx={{
-                          m: 0,
-                          mb: 2,
-                          p: 1.5,
-                          backgroundColor: '#1e1e1e',
-                          color: '#d4d4d4',
-                          borderRadius: 1,
-                          overflow: 'auto',
-                          maxHeight: 400,
-                          ...monoStyle,
-                          fontSize: '0.75rem',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                        }}
-                      >
-                        {stage.liveOutput}
-                      </Box>
-                    )}
-                    {!output && stage.rawOutput && (
-                      <Box
-                        component="pre"
-                        sx={{
-                          m: 0,
-                          p: 1.5,
-                          backgroundColor: 'background.default',
-                          borderRadius: 1,
-                          overflow: 'auto',
-                          ...monoStyle,
-                          fontSize: '0.78rem',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                        }}
-                      >
-                        {stage.rawOutput}
-                      </Box>
-                    )}
-                  </AccordionDetails>
-                </Accordion>
-              )
+                        )}
+                        {/* Live output stream */}
+                        {effectiveStatus === 'EXECUTING' && stage.liveOutput && (
+                          <Box
+                            component="pre"
+                            sx={{
+                              m: 0,
+                              mt: 1,
+                              p: 1.5,
+                              backgroundColor: '#1e1e1e',
+                              color: '#d4d4d4',
+                              borderRadius: 1,
+                              overflow: 'auto',
+                              maxHeight: 400,
+                              ...monoStyle,
+                              fontSize: '0.75rem',
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                            }}
+                          >
+                            {stage.liveOutput}
+                          </Box>
+                        )}
+                        {/* Raw output fallback */}
+                        {!output && stage.rawOutput && (
+                          <Box
+                            component="pre"
+                            sx={{
+                              m: 0,
+                              p: 1.5,
+                              backgroundColor: 'background.default',
+                              borderRadius: 1,
+                              overflow: 'auto',
+                              ...monoStyle,
+                              fontSize: '0.78rem',
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                            }}
+                          >
+                            {stage.rawOutput}
+                          </Box>
+                        )}
+                      </AccordionDetails>
+                    </Accordion>
+                  )
 
-              // After each completed stage, emit an evaluation block if a condition message is present
-              if (conditionMessage && stage.status === 'COMPLETED') {
-                items.push(
-                  <Box
-                    key={`eval-${stage.id}`}
-                    sx={{
-                      px: 2,
-                      py: 1,
-                      my: 0.5,
-                      borderLeft: '4px solid',
-                      borderColor: 'info.main',
-                      backgroundColor: 'action.hover',
-                      borderRadius: '0 4px 4px 0',
-                    }}
-                  >
-                    <Stack direction="row" spacing={1} alignItems="baseline">
-                      <Typography variant="caption" fontWeight={700} color="info.main" sx={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        Evaluation
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {conditionMessage}
-                      </Typography>
-                    </Stack>
-                  </Box>
-                )
-              }
-            }
+                  // Evaluation block between stages
+                  if (conditionMessage && stage.status === 'COMPLETED') {
+                    items.push(
+                      <Box
+                        key={`eval-${stage.id}`}
+                        sx={{
+                          px: 2,
+                          py: 1,
+                          borderLeft: '4px solid',
+                          borderColor: 'info.main',
+                          backgroundColor: 'action.hover',
+                          borderRadius: '0 4px 4px 0',
+                        }}
+                      >
+                        <Stack direction="row" spacing={1} alignItems="baseline">
+                          <Typography variant="caption" fontWeight={700} color="info.main" sx={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                            Evaluation
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {conditionMessage}
+                          </Typography>
+                        </Stack>
+                      </Box>
+                    )
+                  }
+                }
 
-            return items
-          })()}
-        </Box>
+                return items
+              })()}
+            </Stack>
+          </CardContent>
+        </Card>
       )}
 
       {/* Context inspector */}

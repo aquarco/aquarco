@@ -262,7 +262,7 @@ export const Query = {
   },
 
   async dashboardStats(_: unknown, __: unknown, ctx: Context) {
-    const [totals, byPipeline, byRepo, agents, tokens] = await Promise.all([
+    const [totals, byPipeline, byRepo, agents, tokens, cost] = await Promise.all([
       ctx.pool.query<Record<string, unknown>>(`
         SELECT
           COUNT(*) FILTER (WHERE TRUE) AS total,
@@ -287,6 +287,11 @@ export const Query = {
         FROM stages
         WHERE started_at >= CURRENT_DATE
       `),
+      ctx.pool.query<{ total: string }>(`
+        SELECT COALESCE(SUM(cost_usd), 0) AS total
+        FROM stages
+        WHERE started_at >= CURRENT_DATE
+      `),
     ])
 
     const t = totals.rows[0]
@@ -299,6 +304,7 @@ export const Query = {
       blockedTasks: parseInt(t.blocked as string, 10),
       activeAgents: parseInt(agents.rows[0].count, 10),
       totalTokensToday: parseInt(tokens.rows[0].total, 10),
+      totalCostToday: parseFloat(cost.rows[0].total),
       tasksByPipeline: byPipeline.rows.map((r) => ({
         pipeline: r.pipeline as string,
         count: parseInt(r.count as string, 10),
@@ -417,6 +423,9 @@ export function mapStage(row: Record<string, unknown>) {
     rawOutput: row.raw_output ?? null,
     tokensInput: row.tokens_input ?? null,
     tokensOutput: row.tokens_output ?? null,
+    costUsd: row.cost_usd ?? null,
+    cacheReadTokens: row.cache_read_tokens ?? null,
+    cacheWriteTokens: row.cache_write_tokens ?? null,
     errorMessage: row.error_message ?? null,
     retryCount: row.retry_count,
     liveOutput: row.live_output ?? null,
