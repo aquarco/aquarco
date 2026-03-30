@@ -303,8 +303,9 @@ class TaskQueue:
         validation_items_out: list[dict[str, Any]] | None = None,
     ) -> None:
         """Upsert a completed stage record and advance the task's current_stage."""
-        # raw_output is no longer set by _execute_agent (replaced by live_output
-        # streaming). Pop to keep the interface consistent; value will be NULL in DB.
+        # raw_output is accumulated line-by-line during execution via
+        # update_stage_live_output.  The value from _execute_agent is authoritative
+        # (full NDJSON from claude_output.raw) and overwrites the streamed version.
         raw_output = output.pop("_raw_output", None)
         # Extract spending metadata before serializing structured_output.
         # Prefer cumulative values (sum across resume iterations) over
@@ -430,14 +431,14 @@ class TaskQueue:
 
         row = await self._db.fetch_one(
             """
-            SELECT live_output FROM stages
+            SELECT raw_output FROM stages
             WHERE task_id = %(id)s AND stage_key = %(sk)s
               AND status = 'executing'
             """,
             {"id": task_id, "sk": stage_key},
         )
-        if row and row["live_output"]:
-            summary = parse_ndjson_spending(row["live_output"])
+        if row and row["raw_output"]:
+            summary = parse_ndjson_spending(row["raw_output"])
             return {
                 "input_tokens": summary.total_input,
                 "cache_write_tokens": summary.total_cache_write,
@@ -578,7 +579,7 @@ class TaskQueue:
                 """
                 UPDATE stages
                 SET agent = %(agent)s, status = 'executing', started_at = NOW(),
-                    input = %(input)s::jsonb
+                    input = %(input)s::jsonb, live_output = NULL, raw_output = NULL
                 WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
                       AND iteration = %(iteration)s AND run = %(run)s
                 """,
@@ -598,7 +599,8 @@ class TaskQueue:
                 INSERT INTO stages (task_id, stage_number, category, agent, status, started_at)
                 VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s, 'executing', NOW())
                 ON CONFLICT (task_id, stage_number) DO UPDATE
-                SET agent = %(agent)s, status = 'executing', started_at = NOW()
+                SET agent = %(agent)s, status = 'executing', started_at = NOW(),
+                    live_output = NULL, raw_output = NULL
                 """,
                 {
                     "task_id": task_id,
@@ -859,11 +861,12 @@ class TaskQueue:
         run: int,
         live_output: str,
     ) -> None:
-        """Update the live_output column for an executing stage."""
+        """Append an NDJSON line to raw_output and update live_output with the latest line."""
         await self._db.execute(
             """
             UPDATE stages
-            SET live_output = %(live_output)s
+            SET live_output = %(line)s,
+                raw_output = COALESCE(raw_output || E'\\n', '') || %(line)s
             WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
                   AND iteration = %(iteration)s AND run = %(run)s
             """,
@@ -872,7 +875,7 @@ class TaskQueue:
                 "stage_key": stage_key,
                 "iteration": iteration,
                 "run": run,
-                "live_output": live_output,
+                "line": live_output,
             },
         )
 
