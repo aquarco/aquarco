@@ -22,7 +22,7 @@ from .conditions import ConditionResult, evaluate_ai_condition, evaluate_conditi
 from ..database import Database
 from ..exceptions import NoAvailableAgentError, PipelineError, RetryableError, StageError, _cooldown_for_error
 from ..logging import get_logger
-from ..models import Complexity, PipelineConfig, TaskPhase
+from ..models import Complexity, PipelineConfig, TaskStatus
 from ..task_queue import TaskQueue
 from ..utils import run_cmd as _run_cmd
 from ..utils import run_git as _run_git
@@ -125,12 +125,16 @@ class PipelineExecutor:
         2. Planning — AI agent assigns agents to categories
         3. Running — execute planned stages with iteration loops
         """
-        # Check for resume checkpoint
-        checkpoint = await self._tq.get_checkpoint(task_id)
+        # Check for resume via last_completed_stage on the task
+        task = await self._tq.get_task(task_id)
         start_stage = 0
-        if checkpoint:
-            start_stage = checkpoint["stage_number"] + 1
-            log.info("resuming_pipeline", task_id=task_id, from_stage=start_stage)
+        if task and task.last_completed_stage is not None:
+            stage_number = await self._tq.get_stage_number_for_id(
+                task.last_completed_stage
+            )
+            if stage_number is not None:
+                start_stage = stage_number + 1
+                log.info("resuming_pipeline", task_id=task_id, from_stage=start_stage)
 
         # Pipeline is required; task.pipeline has a default of 'feature-pipeline'.
         if not pipeline_name:
@@ -156,7 +160,7 @@ class PipelineExecutor:
                 planned_stages = self._build_default_plan(stages)
                 log.info("planning_skipped_fast_path", task_id=task_id)
             else:
-                await self._tq.update_task_phase(task_id, TaskPhase.PLANNING)
+                await self._tq.update_task_status(task_id, TaskStatus.PLANNING)
                 planned_stages = await self._execute_planning_phase(
                     task_id, pipeline_name, stages, context
                 )
@@ -177,7 +181,7 @@ class PipelineExecutor:
         scoped_view = await self._resolve_layered_config(task_id)
 
         # --- Phase 3: Running with iteration loops ---
-        await self._tq.update_task_phase(task_id, TaskPhase.RUNNING)
+        await self._tq.update_task_status(task_id, TaskStatus.EXECUTING)
         clone_dir = await self._resolve_clone_dir(task_id)
 
         # Create a per-task worktree so parallel tasks on the same repo
@@ -261,10 +265,8 @@ class PipelineExecutor:
         except Exception:
             log.warning("task_worktree_final_commit_failed", task_id=task_id)
 
-        await self._tq.update_task_phase(task_id, TaskPhase.COMPLETED)
         await self._create_pipeline_pr(task_id, branch_name, work_dir, {})
         await self._tq.complete_task(task_id)
-        await self._tq.delete_checkpoint(task_id)
         log.info("pipeline_completed", task_id=task_id, pipeline=pipeline_name)
 
     # -----------------------------------------------------------------------
@@ -325,6 +327,13 @@ class PipelineExecutor:
             output = await self._execute_agent(
                 "planner-agent", task_id, planner_context, -1
             )
+        except RetryableError as e:
+            await self._tq.record_stage_failed(
+                task_id, -1, str(e),
+                stage_id=planning_stage_id,
+                stage_key=planning_stage_key,
+            )
+            raise
         except Exception as e:
             await self._tq.record_stage_failed(
                 task_id, -1, str(e),
@@ -509,7 +518,7 @@ class PipelineExecutor:
                             completed_stage_id = stage_ids[sk]
                             break
                 if completed_stage_id is not None:
-                    await self._tq.checkpoint_pipeline(task_id, completed_stage_id)
+                    await self._tq.update_checkpoint(task_id, completed_stage_id)
                     prev_completed_stage_id = completed_stage_id
                 await _auto_commit(clone_dir, task_id, stage_num, category)
 
@@ -636,7 +645,7 @@ class PipelineExecutor:
 
             except RetryableError as e:
                 if prev_completed_stage_id is not None:
-                    await self._tq.checkpoint_pipeline(task_id, prev_completed_stage_id)
+                    await self._tq.update_checkpoint(task_id, prev_completed_stage_id)
                 cooldown_minutes, max_retries = _cooldown_for_error(e)
                 await self._tq.postpone_task(
                     task_id, str(e),
@@ -679,7 +688,7 @@ class PipelineExecutor:
                     # Retry by checkpointing and postponing so the task is
                     # re-picked and the stage gets a new run with session resume.
                     if prev_completed_stage_id is not None:
-                        await self._tq.checkpoint_pipeline(task_id, prev_completed_stage_id)
+                        await self._tq.update_checkpoint(task_id, prev_completed_stage_id)
                     await self._tq.postpone_task(
                         task_id, str(e),
                         cooldown_minutes=1,
@@ -1281,7 +1290,12 @@ class PipelineExecutor:
 
         if head_branch:
             # PR review: comment on existing PR
-            await _auto_commit(clone_dir, task_id, task.current_stage, "review")
+            stage_num = 0
+            if task.last_completed_stage is not None:
+                sn = await self._tq.get_stage_number_for_id(task.last_completed_stage)
+                if sn is not None:
+                    stage_num = sn
+            await _auto_commit(clone_dir, task_id, stage_num, "review")
             await _push_if_ahead(clone_dir, head_branch)
             source_ref = task.source_ref
             if source_ref:

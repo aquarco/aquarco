@@ -68,6 +68,7 @@ async def test_rerun_task_creates_new_task(
         "source_ref": "issue-42",
         "repository": "test-repo",
         "pipeline": "feature-pipeline",
+        "pipeline_version": "1.0.0",
         "initial_context": {"key": "value"},
     }
 
@@ -100,6 +101,7 @@ async def test_rerun_task_increments_counter(
         "source_ref": "ref-1",
         "repository": "repo",
         "pipeline": "pipeline",
+        "pipeline_version": None,
         "initial_context": None,
     }
 
@@ -133,6 +135,7 @@ async def test_rerun_task_fallback_to_task_id(
         "source_ref": "",
         "repository": "repo",
         "pipeline": "pipeline",
+        "pipeline_version": None,
         "initial_context": None,
     }
 
@@ -145,21 +148,16 @@ async def test_rerun_task_fallback_to_task_id(
 
 
 @pytest.mark.asyncio
-async def test_close_task_sets_status_and_deletes_checkpoint(
+async def test_close_task_sets_status(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
-    """close_task updates status to closed and deletes checkpoint."""
+    """close_task updates status to closed."""
     await task_queue.close_task("task-1")
 
-    assert mock_db.execute.call_count == 2
+    assert mock_db.execute.call_count == 1
 
-    # First: update status
     status_sql = mock_db.execute.call_args_list[0][0][0]
     assert "status = 'closed'" in status_sql
-
-    # Second: delete checkpoint
-    cp_sql = mock_db.execute.call_args_list[1][0][0]
-    assert "DELETE FROM pipeline_checkpoints" in cp_sql
 
 
 # --- store_pr_info ---

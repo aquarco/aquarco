@@ -73,6 +73,7 @@ async def test_get_next_task_found(
         "id": "task-1",
         "title": "Next Task",
         "pipeline": "pr-review-pipeline",
+        "pipeline_version": None,
         "repository": "test-repo",
         "source": "github-prs",
         "source_ref": "5",
@@ -83,8 +84,8 @@ async def test_get_next_task_found(
         "updated_at": None,
         "started_at": None,
         "completed_at": None,
-        "assigned_agent": None,
-        "current_stage": 0,
+        "last_completed_stage": None,
+        "checkpoint_data": {},
         "retry_count": 0,
         "error_message": None,
     }
@@ -112,7 +113,7 @@ async def test_update_task_status_executing(
 
     call_args = mock_db.execute.call_args
     sql = call_args[0][0]
-    assert "started_at = NOW()" in sql
+    assert "started_at" in sql
     assert "error_message = NULL" in sql
 
 
@@ -171,16 +172,12 @@ async def test_store_stage_output(
     output = {"summary": "looks good", "issues": []}
     await task_queue.store_stage_output("task-1", 2, "review", "reviewer-agent", output)
 
-    # Two calls: INSERT stage + UPDATE task current_stage
-    assert mock_db.execute.call_count == 2
+    # One call: INSERT stage (no longer advances current_stage)
+    assert mock_db.execute.call_count == 1
 
     # First call: insert stage
     first_sql = mock_db.execute.call_args_list[0][0][0]
     assert "INSERT INTO stages" in first_sql
-
-    # Second call: advance current_stage
-    second_params = mock_db.execute.call_args_list[1][0][1]
-    assert second_params["next_stage"] == 3
 
 
 @pytest.mark.asyncio
@@ -339,13 +336,26 @@ async def test_store_stage_output_spending_missing_fields_default_none(
 
 
 @pytest.mark.asyncio
-async def test_assign_agent(task_queue: TaskQueue, mock_db: AsyncMock) -> None:
-    await task_queue.assign_agent("task-1", "analyzer-agent")
+async def test_update_checkpoint(task_queue: TaskQueue, mock_db: AsyncMock) -> None:
+    await task_queue.update_checkpoint("task-1", 42, {"branch": "feature/x"})
 
     call_args = mock_db.execute.call_args
+    sql = call_args[0][0]
+    assert "last_completed_stage" in sql
+    assert "checkpoint_data" in sql
     params = call_args[0][1]
-    assert params["agent"] == "analyzer-agent"
+    assert params["stage_id"] == 42
     assert params["id"] == "task-1"
+
+
+@pytest.mark.asyncio
+async def test_update_checkpoint_no_data(task_queue: TaskQueue, mock_db: AsyncMock) -> None:
+    await task_queue.update_checkpoint("task-1", 42)
+
+    call_args = mock_db.execute.call_args
+    sql = call_args[0][0]
+    assert "last_completed_stage" in sql
+    assert "checkpoint_data" not in sql
 
 
 @pytest.mark.asyncio
@@ -387,27 +397,21 @@ async def test_get_poll_cursor_not_found(
 
 
 @pytest.mark.asyncio
-async def test_checkpoint_pipeline(
+async def test_get_stage_number_for_id(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
-    await task_queue.checkpoint_pipeline("task-1", 3, {"branch": "feature/x"})
-
-    call_args = mock_db.execute.call_args
-    sql = call_args[0][0]
-    assert "pipeline_checkpoints" in sql
-    params = call_args[0][1]
-    assert params["stage_id"] == 3
+    mock_db.fetch_val.return_value = 3
+    result = await task_queue.get_stage_number_for_id(42)
+    assert result == 3
 
 
 @pytest.mark.asyncio
-async def test_delete_checkpoint(
+async def test_get_stage_number_for_id_not_found(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
-    await task_queue.delete_checkpoint("task-1")
-
-    call_args = mock_db.execute.call_args
-    sql = call_args[0][0]
-    assert "DELETE FROM pipeline_checkpoints" in sql
+    mock_db.fetch_val.return_value = None
+    result = await task_queue.get_stage_number_for_id(999)
+    assert result is None
 
 
 @pytest.mark.asyncio
@@ -504,14 +508,15 @@ async def test_get_task_found(
         "source": "github-issues",
         "source_ref": "10",
         "pipeline": "feature-pipeline",
+        "pipeline_version": None,
         "repository": "repo",
         "initial_context": {},
         "created_at": None,
         "updated_at": None,
         "started_at": None,
         "completed_at": None,
-        "assigned_agent": None,
-        "current_stage": 0,
+        "last_completed_stage": None,
+        "checkpoint_data": {},
         "retry_count": 0,
         "error_message": None,
     }
@@ -563,18 +568,13 @@ async def test_get_task_context_none(
 
 
 @pytest.mark.asyncio
-async def test_get_checkpoint(
+async def test_update_task_status_planning(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
-    """get_checkpoint returns the checkpoint row."""
-    mock_db.fetch_one.return_value = {
-        "task_id": "task-1",
-        "last_completed_stage": 42,
-        "stage_number": 2,
-        "checkpoint_data": {},
-        "created_at": None,
-    }
-    result = await task_queue.get_checkpoint("task-1")
-    assert result is not None
-    assert result["last_completed_stage"] == 42
-    assert result["stage_number"] == 2
+    """PLANNING status sets started_at and clears error_message."""
+    await task_queue.update_task_status("task-1", TaskStatus.PLANNING)
+
+    call_args = mock_db.execute.call_args
+    sql = call_args[0][0]
+    assert "started_at" in sql
+    assert "error_message = NULL" in sql

@@ -137,6 +137,8 @@ async def _evaluate_single_condition(
             return None
         try:
             return await ai_evaluator(prompt, context)
+        except RetryableError:
+            raise  # Let transient API errors (429/500/529) propagate for postpone
         except Exception as e:
             log.warning("ai_condition_eval_error", prompt=prompt, error=str(e))
             return None

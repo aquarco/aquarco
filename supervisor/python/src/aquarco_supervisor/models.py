@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 class TaskStatus(str, enum.Enum):
     PENDING = "pending"
     QUEUED = "queued"
+    PLANNING = "planning"
     EXECUTING = "executing"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -37,13 +38,6 @@ class CloneStatus(str, enum.Enum):
     READY = "ready"
     ERROR = "error"
 
-
-class TaskPhase(str, enum.Enum):
-    TRIGGER = "trigger"
-    PLANNING = "planning"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
 
 
 
@@ -95,11 +89,11 @@ class Task(BaseModel):
     id: str
     title: str
     status: TaskStatus = TaskStatus.PENDING
-    phase: TaskPhase = TaskPhase.TRIGGER
     priority: int = 50
     source: str | None = ""
     source_ref: str | None = ""
     pipeline: str = "feature-pipeline"
+    pipeline_version: str | None = None
     repository: str | None = ""
     initial_context: dict[str, Any] | None = Field(default_factory=dict)
     planned_stages: list[dict[str, Any]] | None = None
@@ -107,8 +101,8 @@ class Task(BaseModel):
     updated_at: datetime | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    assigned_agent: str | None = None
-    current_stage: int = 0
+    last_completed_stage: int | None = None  # FK to stages.id
+    checkpoint_data: dict[str, Any] = Field(default_factory=dict)
     retry_count: int = 0
     rate_limit_count: int = 0
     error_message: str | None = None
@@ -181,12 +175,6 @@ class PollState(BaseModel):
     cursor: str = ""
     state_data: dict[str, Any] = Field(default_factory=dict)
 
-
-class PipelineCheckpoint(BaseModel):
-    task_id: str
-    last_completed_stage: int  # FK to stages.id
-    checkpoint_data: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime | None = None
 
 
 

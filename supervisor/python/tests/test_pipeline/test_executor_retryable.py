@@ -85,10 +85,10 @@ def _make_executor(
 
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_task_context = AsyncMock(return_value={})
-    mock_tq.checkpoint_pipeline = AsyncMock()
+    mock_tq.update_checkpoint = AsyncMock()
     mock_tq.postpone_task = AsyncMock()
     mock_tq.fail_task = AsyncMock()
-    mock_tq.update_task_phase = AsyncMock()
+    mock_tq.update_task_status = AsyncMock()
     mock_tq.store_stage_output = AsyncMock()
     mock_tq.create_stage = AsyncMock()
 
@@ -259,7 +259,7 @@ async def test_running_phase_stage_error_postpones_for_retry(
     assert failed is True
     mock_tq.postpone_task.assert_awaited_once()
     # No checkpoint when the first stage fails — no prior completed stage to reference
-    mock_tq.checkpoint_pipeline.assert_not_awaited()
+    mock_tq.update_checkpoint.assert_not_awaited()
     mock_tq.fail_task.assert_not_awaited()
 
 
@@ -267,7 +267,7 @@ async def test_running_phase_stage_error_postpones_for_retry(
 async def test_running_phase_retryable_checkpoints_before_postpone(
     sample_pipelines: Any,
 ) -> None:
-    """checkpoint_pipeline is called before postpone_task on retryable errors
+    """update_checkpoint is called before postpone_task on retryable errors
     when there is a previously completed stage."""
     executor, mock_tq, _ = _make_executor(sample_pipelines)
 
@@ -291,7 +291,7 @@ async def test_running_phase_retryable_checkpoints_before_postpone(
         raise OverloadedError("529")
 
     call_order: list[str] = []
-    mock_tq.checkpoint_pipeline.side_effect = lambda *a, **kw: call_order.append("checkpoint") or None
+    mock_tq.update_checkpoint.side_effect = lambda *a, **kw: call_order.append("checkpoint") or None
     mock_tq.postpone_task.side_effect = lambda *a, **kw: call_order.append("postpone") or None
 
     with patch(

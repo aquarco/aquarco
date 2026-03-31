@@ -8,7 +8,7 @@ from typing import Any
 
 from .database import Database
 from .logging import get_logger
-from .models import Task, TaskPhase, TaskStatus
+from .models import Task, TaskStatus
 
 log = get_logger("task-queue")
 
@@ -68,10 +68,12 @@ class TaskQueue:
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
             )
-            RETURNING id, title, pipeline, repository, source, source_ref,
-                      status, phase, priority, initial_context, planned_stages,
+            RETURNING id, title, pipeline, pipeline_version, repository,
+                      source, source_ref,
+                      status, priority, initial_context, planned_stages,
                       created_at, updated_at,
-                      started_at, completed_at, assigned_agent, current_stage,
+                      started_at, completed_at,
+                      last_completed_stage, checkpoint_data,
                       retry_count, error_message,
                       parent_task_id, pr_number, branch_name
             """
@@ -84,11 +86,11 @@ class TaskQueue:
         """Update task status with appropriate timestamp handling."""
         params = {"id": task_id, "status": status.value}
 
-        if status == TaskStatus.EXECUTING:
+        if status in (TaskStatus.EXECUTING, TaskStatus.PLANNING):
             query = """
                 UPDATE tasks
                 SET status = %(status)s, updated_at = NOW(),
-                    started_at = NOW(), error_message = NULL
+                    started_at = COALESCE(started_at, NOW()), error_message = NULL
                 WHERE id = %(id)s
             """
         elif status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.TIMEOUT):
@@ -118,10 +120,12 @@ class TaskQueue:
         """Fetch a task by ID."""
         row = await self._db.fetch_one(
             """
-            SELECT id, title, status, phase, priority, source, source_ref,
-                   pipeline, repository, initial_context, planned_stages,
+            SELECT id, title, status, priority, source, source_ref,
+                   pipeline, pipeline_version, repository,
+                   initial_context, planned_stages,
                    created_at, updated_at,
-                   started_at, completed_at, assigned_agent, current_stage,
+                   started_at, completed_at,
+                   last_completed_stage, checkpoint_data,
                    retry_count, error_message,
                    parent_task_id, pr_number, branch_name
             FROM tasks WHERE id = %(id)s
@@ -301,7 +305,7 @@ class TaskQueue:
         iteration: int = 1,
         run: int = 1,
     ) -> None:
-        """Upsert a completed stage record and advance the task's current_stage."""
+        """Upsert a completed stage record."""
         # raw_output is accumulated line-by-line during execution via
         # update_stage_live_output.  The value from _execute_agent is authoritative
         # (full NDJSON from claude_output.raw) and overwrites the streamed version.
@@ -417,13 +421,6 @@ class TaskQueue:
                     **spending_params,
                 },
             )
-        await self._db.execute(
-            """
-            UPDATE tasks SET current_stage = %(next_stage)s, updated_at = NOW()
-            WHERE id = %(task_id)s
-            """,
-            {"task_id": task_id, "next_stage": stage_num + 1},
-        )
 
     async def get_task_spending(self, task_id: str) -> dict[str, Any]:
         """Aggregate spending across all completed stages for a task."""
@@ -482,18 +479,30 @@ class TaskQueue:
             return parsed
         return dict(result)
 
-    async def assign_agent(self, task_id: str, agent_name: str) -> None:
-        """Assign an agent to a task and set status to executing."""
-        await self._db.execute(
-            """
-            UPDATE tasks
-            SET assigned_agent = %(agent)s, status = 'executing',
-                started_at = COALESCE(started_at, NOW()), updated_at = NOW()
-            WHERE id = %(id)s
-            """,
-            {"id": task_id, "agent": agent_name},
-        )
-        log.info("agent_assigned", task_id=task_id, agent=agent_name)
+    async def update_checkpoint(
+        self, task_id: str, stage_id: int, data: dict[str, Any] | None = None
+    ) -> None:
+        """Update the task's last_completed_stage and optional checkpoint_data."""
+        if data is not None:
+            await self._db.execute(
+                """
+                UPDATE tasks
+                SET last_completed_stage = %(stage_id)s,
+                    checkpoint_data = %(data)s::jsonb,
+                    updated_at = NOW()
+                WHERE id = %(id)s
+                """,
+                {"id": task_id, "stage_id": stage_id, "data": json.dumps(data)},
+            )
+        else:
+            await self._db.execute(
+                """
+                UPDATE tasks
+                SET last_completed_stage = %(stage_id)s, updated_at = NOW()
+                WHERE id = %(id)s
+                """,
+                {"id": task_id, "stage_id": stage_id},
+            )
 
     async def get_timed_out_tasks(self, timeout_minutes: int = 60) -> list[str]:
         """Get IDs of tasks that have been executing longer than the timeout."""
@@ -781,17 +790,6 @@ class TaskQueue:
 
     # --- Phase & Planning ---
 
-    async def update_task_phase(self, task_id: str, phase: TaskPhase) -> None:
-        """Update the pipeline phase for a task."""
-        await self._db.execute(
-            """
-            UPDATE tasks SET phase = %(phase)s, updated_at = NOW()
-            WHERE id = %(id)s
-            """,
-            {"id": task_id, "phase": phase.value},
-        )
-        log.info("task_phase_updated", task_id=task_id, phase=phase.value)
-
     async def store_planned_stages(
         self, task_id: str, planned_stages: list[dict[str, Any]]
     ) -> None:
@@ -1056,7 +1054,8 @@ class TaskQueue:
 
         original = await self._db.fetch_one(
             """
-            SELECT id, title, source, source_ref, repository, pipeline, initial_context
+            SELECT id, title, source, source_ref, repository,
+                   pipeline, pipeline_version, initial_context
             FROM tasks WHERE id = %(id)s
             """,
             {"id": task_id},
@@ -1073,10 +1072,10 @@ class TaskQueue:
             """
             INSERT INTO tasks
                 (id, title, source, source_ref, repository, pipeline,
-                 initial_context, parent_task_id)
+                 pipeline_version, initial_context, parent_task_id)
             VALUES (%(new_id)s, %(title)s, %(source)s, %(source_ref)s,
-                    %(repository)s, %(pipeline)s, %(context)s::jsonb,
-                    %(parent_id)s)
+                    %(repository)s, %(pipeline)s, %(pipeline_version)s,
+                    %(context)s::jsonb, %(parent_id)s)
             """,
             {
                 "new_id": new_id,
@@ -1085,6 +1084,7 @@ class TaskQueue:
                 "source_ref": original["source_ref"],
                 "repository": original["repository"],
                 "pipeline": original["pipeline"],
+                "pipeline_version": original["pipeline_version"],
                 "context": json.dumps(original["initial_context"] or {}),
                 "parent_id": task_id,
             },
@@ -1093,16 +1093,12 @@ class TaskQueue:
         return new_id
 
     async def close_task(self, task_id: str) -> None:
-        """Mark a task as closed and delete its checkpoint."""
+        """Mark a task as closed."""
         await self._db.execute(
             """
             UPDATE tasks SET status = 'closed', updated_at = NOW()
             WHERE id = %(id)s
             """,
-            {"id": task_id},
-        )
-        await self._db.execute(
-            "DELETE FROM pipeline_checkpoints WHERE task_id = %(id)s",
             {"id": task_id},
         )
         log.info("task_closed", task_id=task_id)
@@ -1144,51 +1140,10 @@ class TaskQueue:
         )
         return int(result) if result else 0
 
-    # --- Pipeline Checkpoints ---
-
-    async def checkpoint_pipeline(
-        self, task_id: str, stage_id: int, data: dict[str, Any] | None = None
-    ) -> None:
-        """Save or update a pipeline execution checkpoint.
-
-        ``stage_id`` is the ``stages.id`` PK of the last completed stage row.
-        """
-        await self._db.execute(
-            """
-            INSERT INTO pipeline_checkpoints
-                (task_id, last_completed_stage, checkpoint_data, created_at)
-            VALUES (%(id)s, %(stage_id)s, %(data)s::jsonb, NOW())
-            ON CONFLICT (task_id) DO UPDATE
-            SET last_completed_stage = %(stage_id)s,
-                checkpoint_data = %(data)s::jsonb,
-                created_at = NOW()
-            """,
-            {"id": task_id, "stage_id": stage_id, "data": json.dumps(data or {})},
+    async def get_stage_number_for_id(self, stage_id: int) -> int | None:
+        """Resolve a stages.id to its stage_number."""
+        result = await self._db.fetch_val(
+            "SELECT stage_number FROM stages WHERE id = %(id)s",
+            {"id": stage_id},
         )
-
-    async def get_checkpoint(self, task_id: str) -> dict[str, Any] | None:
-        """Get a pipeline checkpoint for a task.
-
-        Returns the checkpoint with ``stage_number`` resolved from the
-        referenced stages row so the executor can compute the resume index.
-        """
-        return await self._db.fetch_one(
-            """
-            SELECT pc.task_id,
-                   pc.last_completed_stage,
-                   s.stage_number,
-                   pc.checkpoint_data,
-                   pc.created_at
-            FROM pipeline_checkpoints pc
-            JOIN stages s ON s.id = pc.last_completed_stage
-            WHERE pc.task_id = %(id)s
-            """,
-            {"id": task_id},
-        )
-
-    async def delete_checkpoint(self, task_id: str) -> None:
-        """Delete a pipeline checkpoint."""
-        await self._db.execute(
-            "DELETE FROM pipeline_checkpoints WHERE task_id = %(id)s",
-            {"id": task_id},
-        )
+        return int(result) if result is not None else None

@@ -258,7 +258,7 @@ class Supervisor:
             return
 
         try:
-            await self._tq.assign_agent(task_id, "pending-assignment")
+            await self._tq.update_task_status(task_id, TaskStatus.EXECUTING)
             await self._executor.execute_pipeline(pipeline, task_id, initial_context)
         except RetryableError as e:
             # Defensively postpone the task in case the error propagated

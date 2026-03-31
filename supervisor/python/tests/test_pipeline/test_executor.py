@@ -297,7 +297,7 @@ async def test_execute_pipeline_unknown_pipeline_raises(sample_pipelines: Any) -
     """A pipeline name not in config raises PipelineError."""
     mock_db = AsyncMock(spec=Database)
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_checkpoint = AsyncMock(return_value=None)
+    mock_tq.get_stage_number_for_id = AsyncMock(return_value=None)
 
     executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
 
@@ -313,7 +313,7 @@ async def test_execute_pipeline_no_pipeline_name_uses_task_pipeline(
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_checkpoint = AsyncMock(return_value=None)
+    mock_tq.get_stage_number_for_id = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
 
     mock_task = MagicMock()
@@ -321,6 +321,7 @@ async def test_execute_pipeline_no_pipeline_name_uses_task_pipeline(
     mock_task.title = "Review something"
     mock_task.initial_context = {}
     mock_task.source_ref = None
+    mock_task.last_completed_stage = None
     mock_tq.get_task = AsyncMock(return_value=mock_task)
 
     mock_registry = AsyncMock()
@@ -569,13 +570,14 @@ async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_checkpoint = AsyncMock(return_value=None)
+    mock_tq.get_stage_number_for_id = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
 
     task = MagicMock()
     task.title = "Add widget"
     task.initial_context = {}
     task.source_ref = None
+    task.last_completed_stage = None
     mock_tq.get_task = AsyncMock(return_value=task)
 
     mock_registry = AsyncMock()
@@ -617,7 +619,6 @@ async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
         await executor.execute_pipeline("feature-pipeline", "task-1", {})
 
     mock_tq.complete_task.assert_awaited_once_with("task-1")
-    mock_tq.delete_checkpoint.assert_awaited_once_with("task-1")
 
 
 @pytest.mark.asyncio
@@ -626,13 +627,14 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_checkpoint = AsyncMock(return_value={"last_completed_stage": 99, "stage_number": 0})
+    mock_tq.get_stage_number_for_id = AsyncMock(return_value=0)  # stage_number for the last completed stage
     mock_tq.get_task_context = AsyncMock(return_value={})
 
     task = MagicMock()
     task.title = "Resume task"
     task.initial_context = {}
     task.source_ref = None
+    task.last_completed_stage = 99  # stages.id of the last completed stage
     # Resuming requires planned_stages on the task
     task.planned_stages = [
         {"category": "analyze", "agents": ["agent"], "parallel": False, "validation": []},
@@ -686,12 +688,13 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_checkpoint = AsyncMock(return_value=None)
+    mock_tq.get_stage_number_for_id = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
 
     task = MagicMock()
     task.title = "Failing task"
     task.initial_context = {}
+    task.last_completed_stage = None
     mock_tq.get_task = AsyncMock(return_value=task)
 
     mock_registry = AsyncMock()
@@ -728,7 +731,7 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
     # Required stage failures are now retried via postpone (not permanent fail)
     mock_tq.postpone_task.assert_awaited_once()
     # No checkpoint when the first stage fails — no prior completed stage to reference
-    mock_tq.checkpoint_pipeline.assert_not_awaited()
+    mock_tq.update_checkpoint.assert_not_awaited()
     mock_tq.complete_task.assert_not_called()
 
 
@@ -738,12 +741,13 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_checkpoint = AsyncMock(return_value=None)
+    mock_tq.get_stage_number_for_id = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
 
     task = MagicMock()
     task.title = "Optional stage task"
     task.initial_context = {}
+    task.last_completed_stage = None
     mock_tq.get_task = AsyncMock(return_value=task)
 
     mock_registry = AsyncMock()

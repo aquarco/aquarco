@@ -202,7 +202,7 @@ async def test_dispatch_pending_tasks_launches_task(sample_config: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_run_task_success(sample_config: Any) -> None:
-    """_run_task calls assign_agent and execute_pipeline."""
+    """_run_task sets status to executing and calls execute_pipeline."""
     supervisor = Supervisor(sample_config, {})
 
     mock_tq = AsyncMock()
@@ -213,9 +213,7 @@ async def test_run_task_success(sample_config: Any) -> None:
 
     await supervisor._run_task("task-001", "feature-pipeline", {"key": "val"})
 
-    mock_tq.assign_agent.assert_awaited_once_with("task-001", "pending-assignment")
-    # update_task_status is NOT called — assign_agent already sets executing
-    mock_tq.update_task_status.assert_not_called()
+    mock_tq.update_task_status.assert_awaited_once()
     mock_executor.execute_pipeline.assert_awaited_once_with(
         "feature-pipeline", "task-001", {"key": "val"}
     )

@@ -245,16 +245,16 @@ async def test_get_max_iteration_no_rows(
 
 
 @pytest.mark.asyncio
-async def test_update_task_phase(
+async def test_update_task_status_executing_via_status(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
-    from aquarco_supervisor.models import TaskPhase
+    from aquarco_supervisor.models import TaskStatus
 
-    await task_queue.update_task_phase("task-1", TaskPhase.RUNNING)
+    await task_queue.update_task_status("task-1", TaskStatus.EXECUTING)
 
     call_args = mock_db.execute.call_args
     params = call_args[0][1]
-    assert params["phase"] == "running"
+    assert params["status"] == "executing"
 
 
 # --- store_planned_stages ---
