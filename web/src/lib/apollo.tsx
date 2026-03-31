@@ -6,7 +6,7 @@ import { type ReactNode, useMemo } from 'react'
 function makeClient() {
   const uri =
     typeof window !== 'undefined'
-      ? (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/graphql')
+      ? (process.env.NEXT_PUBLIC_API_URL ?? '/api/graphql')
       : 'http://api:4000/graphql'
 
   return new ApolloClient({

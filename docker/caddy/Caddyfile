@@ -1,0 +1,36 @@
+{
+    auto_https off
+    admin 0.0.0.0:2019
+}
+
+:8080 {
+    # GraphQL API — strip /api prefix
+    handle_path /api/* {
+        reverse_proxy api:4000
+    }
+
+    # Adminer — strip /adminer prefix
+    handle_path /adminer/* {
+        reverse_proxy adminer:8080
+    }
+
+    # Grafana — keep prefix (Grafana serves from subpath)
+    handle /grafana/* {
+        reverse_proxy grafana:3000
+    }
+
+    # Prometheus — keep prefix
+    handle /prometheus/* {
+        reverse_proxy prometheus:9090
+    }
+
+    # Repo previews — placeholder
+    handle /repo/* {
+        respond "Repository preview not yet available" 503
+    }
+
+    # Default: Web UI (must be last)
+    handle {
+        reverse_proxy web:3000
+    }
+}

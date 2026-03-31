@@ -8,6 +8,8 @@ volumes:
   pgdata:
   api_modules:
   web_modules:
+  caddy_data:
+  caddy_config:
 
 services:
 
@@ -56,7 +58,7 @@ services:
     networks:
       - aquarco
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     volumes:
       - ../api/src:/app/src
       - ../api/package.json:/app/package.json
@@ -84,8 +86,7 @@ services:
     command: sh -c "npm install && npm run dev"
     networks:
       - aquarco
-    ports:
-      - "8080:3000"
+    # No external ports — Caddy reverse proxy handles routing
     volumes:
       - ../web/src:/app/src
       - ../web/public:/app/public
@@ -94,8 +95,25 @@ services:
       - ../web/next.config.js:/app/next.config.js
       - web_modules:/app/node_modules
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000/graphql}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/graphql}
       NODE_ENV: ${NODE_ENV:-development}
       WATCHPACK_POLLING: "true"
     depends_on:
+      - api
+
+  # ── Caddy Reverse Proxy ─────────────────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    networks:
+      - aquarco
+    ports:
+      - "8080:8080"
+      - "127.0.0.1:2019:2019"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
       - api
