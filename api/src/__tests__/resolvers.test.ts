@@ -169,8 +169,9 @@ describe('Query.task', () => {
     updated_at: '2026-01-01T00:00:00Z',
     started_at: null,
     completed_at: null,
-    assigned_agent: null,
-    current_stage: 0,
+    last_completed_stage: null,
+    checkpoint_data: {},
+    pipeline_version: null,
     retry_count: 0,
     error_message: null,
   }
@@ -225,8 +226,9 @@ describe('Query.tasks', () => {
     updated_at: '2026-01-01T00:00:00Z',
     started_at: null,
     completed_at: null,
-    assigned_agent: null,
-    current_stage: 0,
+    last_completed_stage: null,
+    checkpoint_data: {},
+    pipeline_version: null,
     retry_count: 0,
     error_message: null,
   }
@@ -464,7 +466,7 @@ describe('Query.pipelineStatus', () => {
   const taskRow: Record<string, unknown> = {
     id: 'task-1',
     pipeline: 'feature-pipeline',
-    current_stage: 1,
+    last_completed_stage: 1,
     status: 'executing',
   }
   const stageRow: Record<string, unknown> = {
@@ -515,7 +517,7 @@ describe('Query.pipelineStatus', () => {
     expect(result).not.toBeNull()
     expect(result!.taskId).toBe('task-1')
     expect(result!.pipeline).toBe('feature-pipeline')
-    expect(result!.currentStage).toBe(1)
+    expect(result!.lastCompletedStageId).toBe(1)
     expect(result!.totalStages).toBe(1)
     expect(result!.status).toBe('EXECUTING')
     expect(result!.stages).toHaveLength(1)

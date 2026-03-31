@@ -94,14 +94,15 @@ type Task {
   source: String!
   sourceRef: String
   pipeline: String!
+  pipelineVersion: String
   repository: Repository!
   initialContext: JSON
   createdAt: DateTime!
   updatedAt: DateTime!
   startedAt: DateTime
   completedAt: DateTime
-  assignedAgent: String
-  currentStage: Int!
+  lastCompletedStageId: Int
+  checkpointData: JSON
   retryCount: Int!
   errorMessage: String
   parentTaskId: ID
@@ -177,7 +178,7 @@ type ContextEntry {
 type PipelineStatus {
   taskId: ID!
   pipeline: String
-  currentStage: Int!
+  lastCompletedStageId: Int
   totalStages: Int!
   stages: [Stage!]!
   status: TaskStatus!
@@ -255,6 +256,7 @@ input RegisterRepositoryInput {
 enum TaskStatus {
   PENDING
   QUEUED
+  PLANNING
   EXECUTING
   COMPLETED
   FAILED

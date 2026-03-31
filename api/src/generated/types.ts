@@ -129,6 +129,7 @@ export type DashboardStats = {
   pendingTasks: Scalars['Int']['output'];
   tasksByPipeline: Array<PipelineCount>;
   tasksByRepository: Array<RepositoryCount>;
+  totalCostToday: Scalars['Float']['output'];
   totalTasks: Scalars['Int']['output'];
   totalTokensToday: Scalars['Int']['output'];
 };
@@ -321,7 +322,7 @@ export type PipelineStageDefinition = {
 
 export type PipelineStatus = {
   __typename?: 'PipelineStatus';
-  currentStage: Scalars['Int']['output'];
+  lastCompletedStageId?: Maybe<Scalars['Int']['output']>;
   pipeline?: Maybe<Scalars['String']['output']>;
   stages: Array<Stage>;
   status: TaskStatus;
@@ -460,8 +461,11 @@ export type Stage = {
   __typename?: 'Stage';
   agent?: Maybe<Scalars['String']['output']>;
   agentVersion?: Maybe<Scalars['String']['output']>;
+  cacheReadTokens?: Maybe<Scalars['Int']['output']>;
+  cacheWriteTokens?: Maybe<Scalars['Int']['output']>;
   category: Scalars['String']['output'];
   completedAt?: Maybe<Scalars['DateTime']['output']>;
+  costUsd?: Maybe<Scalars['Float']['output']>;
   errorMessage?: Maybe<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
   iteration: Scalars['Int']['output'];
@@ -505,17 +509,18 @@ export type SubscriptionTaskUpdatedArgs = {
 
 export type Task = {
   __typename?: 'Task';
-  assignedAgent?: Maybe<Scalars['String']['output']>;
   branchName?: Maybe<Scalars['String']['output']>;
+  checkpointData?: Maybe<Scalars['JSON']['output']>;
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   context: Array<ContextEntry>;
   createdAt: Scalars['DateTime']['output'];
-  currentStage: Scalars['Int']['output'];
   errorMessage?: Maybe<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
   initialContext?: Maybe<Scalars['JSON']['output']>;
+  lastCompletedStageId?: Maybe<Scalars['Int']['output']>;
   parentTaskId?: Maybe<Scalars['ID']['output']>;
   pipeline: Scalars['String']['output'];
+  pipelineVersion?: Maybe<Scalars['String']['output']>;
   prNumber?: Maybe<Scalars['Int']['output']>;
   priority: Scalars['Int']['output'];
   repository: Repository;
@@ -526,6 +531,7 @@ export type Task = {
   startedAt?: Maybe<Scalars['DateTime']['output']>;
   status: TaskStatus;
   title: Scalars['String']['output'];
+  totalCostUsd?: Maybe<Scalars['Float']['output']>;
   updatedAt: Scalars['DateTime']['output'];
 };
 
@@ -548,6 +554,7 @@ export enum TaskStatus {
   Executing = 'executing',
   Failed = 'failed',
   Pending = 'pending',
+  Planning = 'PLANNING',
   Queued = 'queued',
   RateLimited = 'rate_limited',
   Timeout = 'timeout'
@@ -641,6 +648,7 @@ export type ResolversTypes = ResolversObject<{
   DashboardStats: ResolverTypeWrapper<DashboardStats>;
   DateTime: ResolverTypeWrapper<Scalars['DateTime']['output']>;
   Error: ResolverTypeWrapper<Error>;
+  Float: ResolverTypeWrapper<Scalars['Float']['output']>;
   GithubAuthStatus: ResolverTypeWrapper<GithubAuthStatus>;
   GithubDeviceCode: ResolverTypeWrapper<GithubDeviceCode>;
   GithubLoginResult: ResolverTypeWrapper<GithubLoginResult>;
@@ -688,6 +696,7 @@ export type ResolversParentTypes = ResolversObject<{
   DashboardStats: DashboardStats;
   DateTime: Scalars['DateTime']['output'];
   Error: Error;
+  Float: Scalars['Float']['output'];
   GithubAuthStatus: GithubAuthStatus;
   GithubDeviceCode: GithubDeviceCode;
   GithubLoginResult: GithubLoginResult;
@@ -799,6 +808,7 @@ export type DashboardStatsResolvers<ContextType = Context, ParentType extends Re
   pendingTasks?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   tasksByPipeline?: Resolver<Array<ResolversTypes['PipelineCount']>, ParentType, ContextType>;
   tasksByRepository?: Resolver<Array<ResolversTypes['RepositoryCount']>, ParentType, ContextType>;
+  totalCostToday?: Resolver<ResolversTypes['Float'], ParentType, ContextType>;
   totalTasks?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   totalTokensToday?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
@@ -905,7 +915,7 @@ export type PipelineStageDefinitionResolvers<ContextType = Context, ParentType e
 }>;
 
 export type PipelineStatusResolvers<ContextType = Context, ParentType extends ResolversParentTypes['PipelineStatus'] = ResolversParentTypes['PipelineStatus']> = ResolversObject<{
-  currentStage?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  lastCompletedStageId?: Resolver<Maybe<ResolversTypes['Int']>, ParentType, ContextType>;
   pipeline?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   stages?: Resolver<Array<ResolversTypes['Stage']>, ParentType, ContextType>;
   status?: Resolver<ResolversTypes['TaskStatus'], ParentType, ContextType>;
@@ -991,8 +1001,11 @@ export type RepositoryPayloadResolvers<ContextType = Context, ParentType extends
 export type StageResolvers<ContextType = Context, ParentType extends ResolversParentTypes['Stage'] = ResolversParentTypes['Stage']> = ResolversObject<{
   agent?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   agentVersion?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  cacheReadTokens?: Resolver<Maybe<ResolversTypes['Int']>, ParentType, ContextType>;
+  cacheWriteTokens?: Resolver<Maybe<ResolversTypes['Int']>, ParentType, ContextType>;
   category?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   completedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
+  costUsd?: Resolver<Maybe<ResolversTypes['Float']>, ParentType, ContextType>;
   errorMessage?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
   iteration?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
@@ -1018,17 +1031,18 @@ export type SubscriptionResolvers<ContextType = Context, ParentType extends Reso
 }>;
 
 export type TaskResolvers<ContextType = Context, ParentType extends ResolversParentTypes['Task'] = ResolversParentTypes['Task']> = ResolversObject<{
-  assignedAgent?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   branchName?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  checkpointData?: Resolver<Maybe<ResolversTypes['JSON']>, ParentType, ContextType>;
   completedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   context?: Resolver<Array<ResolversTypes['ContextEntry']>, ParentType, ContextType>;
   createdAt?: Resolver<ResolversTypes['DateTime'], ParentType, ContextType>;
-  currentStage?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   errorMessage?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
   initialContext?: Resolver<Maybe<ResolversTypes['JSON']>, ParentType, ContextType>;
+  lastCompletedStageId?: Resolver<Maybe<ResolversTypes['Int']>, ParentType, ContextType>;
   parentTaskId?: Resolver<Maybe<ResolversTypes['ID']>, ParentType, ContextType>;
   pipeline?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  pipelineVersion?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   prNumber?: Resolver<Maybe<ResolversTypes['Int']>, ParentType, ContextType>;
   priority?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   repository?: Resolver<ResolversTypes['Repository'], ParentType, ContextType>;
@@ -1039,6 +1053,7 @@ export type TaskResolvers<ContextType = Context, ParentType extends ResolversPar
   startedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   status?: Resolver<ResolversTypes['TaskStatus'], ParentType, ContextType>;
   title?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  totalCostUsd?: Resolver<Maybe<ResolversTypes['Float']>, ParentType, ContextType>;
   updatedAt?: Resolver<ResolversTypes['DateTime'], ParentType, ContextType>;
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
@@ -1055,7 +1070,7 @@ export type TaskPayloadResolvers<ContextType = Context, ParentType extends Resol
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
 
-export type TaskStatusResolvers = { BLOCKED: 'blocked', CLOSED: 'closed', COMPLETED: 'completed', EXECUTING: 'executing', FAILED: 'failed', PENDING: 'pending', QUEUED: 'queued', RATE_LIMITED: 'rate_limited', TIMEOUT: 'timeout' };
+export type TaskStatusResolvers = { BLOCKED: 'blocked', CLOSED: 'closed', COMPLETED: 'completed', EXECUTING: 'executing', FAILED: 'failed', PENDING: 'pending', PLANNING?: 'PLANNING', QUEUED: 'queued', RATE_LIMITED: 'rate_limited', TIMEOUT: 'timeout' };
 
 export type Resolvers<ContextType = Context> = ResolversObject<{
   AgentDefinition?: AgentDefinitionResolvers<ContextType>;

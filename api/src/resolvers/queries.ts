@@ -182,7 +182,7 @@ export const Query = {
     return {
       taskId: task.id,
       pipeline: task.pipeline ?? null,
-      currentStage: task.current_stage,
+      lastCompletedStageId: task.last_completed_stage ?? null,
       totalStages,
       stages,
       status: (task.status as string).toUpperCase(),

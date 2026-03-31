@@ -248,10 +248,10 @@ export const Mutation = {
          )
          INSERT INTO tasks
            (id, title, source, source_ref, repository, pipeline,
-            initial_context, parent_task_id)
+            pipeline_version, initial_context, parent_task_id)
          SELECT
            $2 || '-rerun-' || rc.n,
-           $3, $4, $5, $6, $7, $8, $1
+           $3, $4, $5, $6, $7, $8, $9, $1
          FROM rerun_count rc
          RETURNING *`,
         [
@@ -262,6 +262,7 @@ export const Mutation = {
           orig.source_ref,
           orig.repository,
           orig.pipeline,
+          orig.pipeline_version ?? null,
           orig.initial_context ? JSON.stringify(orig.initial_context) : null,
         ]
       )
@@ -274,12 +275,6 @@ export const Mutation = {
 
   async closeTask(_: unknown, args: { id: string }, ctx: Context) {
     try {
-      // Delete checkpoint first, before marking as closed
-      await ctx.pool.query(
-        'DELETE FROM pipeline_checkpoints WHERE task_id = $1',
-        [args.id]
-      )
-
       // Only close tasks that are not currently executing
       const result = await ctx.pool.query<Record<string, unknown>>(
         `UPDATE tasks

@@ -75,7 +75,7 @@ const baseStageRow: StageRow = {
 const taskRow: Record<string, unknown> = {
   id: 'task-42',
   pipeline: 'feature-pipeline',
-  current_stage: 1,
+  last_completed_stage: 1,
   status: 'executing',
 }
 

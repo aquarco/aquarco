@@ -50,8 +50,9 @@ const baseTaskRow: Record<string, unknown> = {
   updated_at: '2026-01-01T00:00:00Z',
   started_at: null,
   completed_at: null,
-  assigned_agent: null,
-  current_stage: 0,
+  last_completed_stage: null,
+  checkpoint_data: {},
+  pipeline_version: null,
   retry_count: 0,
   error_message: null,
   parent_task_id: null,
@@ -548,7 +549,7 @@ describe('Mutation.rerunTask', () => {
 
     // The INSERT query should use a CTE for atomicity
     const insertSql = pool.query.mock.calls[1][0] as string
-    expect(insertSql).toContain('WITH rerun_count AS')
+    expect(insertSql).toContain('WITH locked_siblings AS')
     expect(insertSql).toContain('FOR UPDATE')
   })
 
@@ -597,38 +598,22 @@ describe('Mutation.rerunTask', () => {
 // ── closeTask ──────────────────────────────────────────────────────────────────
 
 describe('Mutation.closeTask', () => {
-  it('should close a completed task and delete checkpoint', async () => {
+  it('should close task by updating status', async () => {
     const closedRow = { ...baseTaskRow, status: 'closed' }
     const pool = mockPool([
-      { rows: [] },           // DELETE checkpoint
       { rows: [closedRow] },  // UPDATE RETURNING
     ])
     const ctx = makeCtx(pool)
 
     const result = await Mutation.closeTask(null, { id: 'task-1' }, ctx)
 
-    expect(result.errors).toHaveLength(0)
-    expect(result.task!.status).toBe('CLOSED')
-  })
-
-  it('should delete checkpoint before closing task', async () => {
-    const closedRow = { ...baseTaskRow, status: 'closed' }
-    const pool = mockPool([
-      { rows: [] },           // DELETE checkpoint
-      { rows: [closedRow] },  // UPDATE RETURNING
-    ])
-    const ctx = makeCtx(pool)
-
-    await Mutation.closeTask(null, { id: 'task-1' }, ctx)
-
-    // First call should be the checkpoint DELETE
     const firstSql = pool.query.mock.calls[0][0] as string
-    expect(firstSql).toContain('DELETE FROM pipeline_checkpoints')
+    expect(firstSql).toContain("status = 'closed'")
+    expect(result.task).toBeTruthy()
   })
 
   it('should refuse to close an executing task', async () => {
     const pool = mockPool([
-      { rows: [] },                          // DELETE checkpoint
       { rows: [] },                          // UPDATE — no match (status guard)
       { rows: [{ status: 'executing' }] },   // exists check
     ])
@@ -642,7 +627,6 @@ describe('Mutation.closeTask', () => {
 
   it('should return error payload when task not found', async () => {
     const pool = mockPool([
-      { rows: [] }, // DELETE checkpoint
       { rows: [] }, // UPDATE — no match
       { rows: [] }, // exists check — not found
     ])
