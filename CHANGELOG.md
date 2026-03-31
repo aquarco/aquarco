@@ -1,5 +1,25 @@
 # Changelog
 
+## [2026-03-31] — Aquarco CLI (#5)
+
+### Added
+- **`aquarco` CLI** (`cli/`) — host-side Python CLI (Typer + Rich + httpx) for managing the Aquarco VM from macOS without SSHing manually
+- **`aquarco install`** — one-command bootstrap: checks prerequisites (VirtualBox, Vagrant), runs `vagrant up`, and verifies stack health
+- **`aquarco update`** — pulls latest source, Docker images, runs migrations, restarts services, and re-provisions the VM. Supports `--dry-run`, `--skip-migrations`, and `--skip-provision` flags
+- **`aquarco auth claude`** — initiates Claude OAuth PKCE flow via the GraphQL API, opens browser for authorization
+- **`aquarco auth github`** — initiates GitHub device flow login via the GraphQL API
+- **`aquarco auth status`** — checks authentication status for both Claude and GitHub
+- **`aquarco watch add <url>`** — registers a repository for autonomous watching via `registerRepository` GraphQL mutation. Options: `--name`, `--branch`, `--poller`
+- **`aquarco watch list`** — lists all watched repositories with clone status and poller info
+- **`aquarco watch remove <name>`** — removes a watched repository
+- **`aquarco run <title> --repo <name>`** — creates a task for agent execution via `createTask` mutation. Options: `--pipeline`, `--priority`, `--context` (JSON string or `@filepath`), `--follow`
+- **`aquarco status`** — dashboard overview with task counts, active agents, and cost. Options: `--json`, `--limit`
+- **`aquarco status <task-id>`** — detailed task view with stage history. Options: `--follow`, `--json`
+- **`aquarco ui`** — starts web UI services (web + API + Postgres + Caddy). Option: `--open` to launch browser
+- **`aquarco ui stop`** — stops the web UI services
+- **Shared modules**: `VagrantHelper` (SSH/provision), `GraphQLClient` (httpx-based), `AquarcoConfig` (Vagrantfile discovery), `console` (Rich formatting), `health` (endpoint checks)
+- Installable via `pip install -e cli/` — registers `aquarco` console script
+
 ## [2026-03-31] — Unified reverse proxy routing via Caddy (#2)
 
 ### Added

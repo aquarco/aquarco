@@ -7,11 +7,38 @@ implement, test, review), and submit pull requests — all inside an isolated VM
 ## Quick Start
 
 ```bash
-cd vagrant
-vagrant up          # Provision Ubuntu 24.04 VM (~5 min)
+pip install -e cli/        # Install the aquarco CLI
+aquarco install            # Bootstrap the VM (~5 min)
+aquarco auth github        # Authenticate GitHub
+aquarco auth claude        # Authenticate Claude
+aquarco watch add https://github.com/user/repo  # Watch a repo
 ```
 
-Open http://localhost:8080, log in to GitHub and Claude, then add a repository.
+Open http://localhost:8080 or run `aquarco ui --open` to launch the dashboard.
+
+## CLI Reference
+
+The `aquarco` CLI runs on the **host** (macOS) and manages the VM via Vagrant SSH and the GraphQL API.
+
+Install: `pip install -e cli/` (requires Python 3.10+)
+
+| Command | Description |
+|---------|-------------|
+| `aquarco install` | Bootstrap the Aquarco VM (checks VirtualBox + Vagrant, runs `vagrant up`, verifies health) |
+| `aquarco update` | Update VM: pull source, Docker images, run migrations, restart services |
+| `aquarco auth claude` | Authenticate Claude via OAuth PKCE flow |
+| `aquarco auth github` | Authenticate GitHub via device flow |
+| `aquarco auth status` | Check Claude and GitHub auth status |
+| `aquarco watch add <url>` | Register a repository for autonomous watching |
+| `aquarco watch list` | List all watched repositories |
+| `aquarco watch remove <name>` | Remove a watched repository |
+| `aquarco run <title> -r <repo>` | Create a task for agent execution |
+| `aquarco status` | Dashboard overview (task counts, agents, cost) |
+| `aquarco status <id>` | Detailed task status with stage history |
+| `aquarco ui` | Start web UI services |
+| `aquarco ui stop` | Stop web UI services |
+
+Common flags: `--follow` / `-f` (stream task progress), `--json` (machine-readable output), `--dry-run` (preview update steps).
 
 ## Architecture
 
@@ -381,6 +408,24 @@ Agent definitions live in `config/agents/definitions/` (K8s-style YAML) and
 | `/review`                     | Multi-agent review: QA + Security + Testing |
 | `/deploy-check`               | Pre-deployment validation checklist         |
 | `/prd`                        | Show human-readable PRD summary             |
+
+### Host-side CLI (`cli/`)
+
+| Module | Purpose |
+|--------|---------|
+| `main.py` | Typer app, command registration, `--version` |
+| `commands/install.py` | Prerequisite checks, `vagrant up`, health verification |
+| `commands/update.py` | Git pull, Docker pull, migrations, service restart, `--dry-run` |
+| `commands/auth.py` | Claude OAuth + GitHub device flow via GraphQL API |
+| `commands/watch.py` | Repository add/list/remove via GraphQL mutations |
+| `commands/run.py` | Task creation with optional `--follow` progress polling |
+| `commands/status.py` | Dashboard + task detail views, `--json` output |
+| `commands/ui.py` | Start/stop web UI Docker services |
+| `vagrant.py` | `VagrantHelper` — SSH, provision, status via `vagrant` CLI |
+| `graphql_client.py` | httpx-based GraphQL client targeting `localhost:8080/api/graphql` |
+| `config.py` | `AquarcoConfig` — discovers Vagrantfile, resolves paths |
+| `console.py` | Rich console helpers (tables, error/info/success output) |
+| `health.py` | HTTP health checks for web, API, and PostgreSQL |
 
 ## Development
 
