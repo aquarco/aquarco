@@ -36,3 +36,32 @@ class TestInstallCommand:
         assert result.exit_code == 0
         mock_vagrant.up.assert_called_once_with(provision=True)
         assert "successfully" in result.output.lower()
+
+    @patch("aquarco_cli.commands.install.print_health_table", return_value=False)
+    @patch("aquarco_cli.commands.install.VagrantHelper")
+    @patch("aquarco_cli.commands.install.shutil.which", return_value="/usr/bin/mock")
+    def test_install_unhealthy(self, mock_which, mock_vagrant_cls, mock_health):
+        mock_vagrant = mock_vagrant_cls.return_value
+        mock_vagrant.vagrant_dir = "/fake"
+        result = runner.invoke(app, ["install"])
+        assert result.exit_code == 1
+        assert "not healthy" in result.output.lower()
+
+    @patch("aquarco_cli.commands.install.VagrantHelper")
+    @patch("aquarco_cli.commands.install.shutil.which", return_value="/usr/bin/mock")
+    def test_install_vagrant_up_failure(self, mock_which, mock_vagrant_cls):
+        from aquarco_cli.vagrant import VagrantError
+        mock_vagrant = mock_vagrant_cls.return_value
+        mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.up.side_effect = VagrantError("VM failed to start")
+        result = runner.invoke(app, ["install"])
+        assert result.exit_code == 1
+        assert "failed" in result.output.lower()
+
+    @patch("aquarco_cli.commands.install.shutil.which")
+    def test_both_missing(self, mock_which):
+        mock_which.return_value = None
+        result = runner.invoke(app, ["install"])
+        assert result.exit_code == 1
+        assert "VirtualBox" in result.output
+        assert "Vagrant" in result.output

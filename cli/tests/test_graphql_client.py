@@ -59,3 +59,43 @@ class TestGraphQLClient:
         respx.post(API_URL).mock(side_effect=httpx.ConnectError("Connection refused"))
         with pytest.raises(httpx.ConnectError):
             self.client.execute("query { dashboardStats { totalTasks } }")
+
+    @respx.mock
+    def test_execute_empty_data(self):
+        """When 'data' key is missing, return empty dict."""
+        respx.post(API_URL).respond(json={})
+        result = self.client.execute("query { something }")
+        assert result == {}
+
+    @respx.mock
+    def test_execute_no_variables_omits_key(self):
+        route = respx.post(API_URL).respond(json={"data": {"ok": True}})
+        self.client.execute("query { ok }")
+        import json
+        payload = json.loads(route.calls[0].request.content)
+        assert "variables" not in payload
+
+
+class TestGraphQLError:
+    def test_error_message_extraction(self):
+        errors = [{"message": "error one"}, {"message": "error two"}]
+        exc = GraphQLError(errors)
+        assert "error one" in str(exc)
+        assert "error two" in str(exc)
+        assert exc.errors == errors
+
+    def test_error_without_message_key(self):
+        errors = [{"code": "INTERNAL"}]
+        exc = GraphQLError(errors)
+        assert "INTERNAL" in str(exc)
+
+
+class TestTerminalStatuses:
+    def test_terminal_statuses_contains_expected_values(self):
+        from aquarco_cli.graphql_client import TERMINAL_STATUSES
+        assert "COMPLETED" in TERMINAL_STATUSES
+        assert "FAILED" in TERMINAL_STATUSES
+        assert "TIMEOUT" in TERMINAL_STATUSES
+        assert "CLOSED" in TERMINAL_STATUSES
+        assert "PENDING" not in TERMINAL_STATUSES
+        assert "EXECUTING" not in TERMINAL_STATUSES
