@@ -78,17 +78,16 @@ ON CONFLICT (poller_name) DO NOTHING;
 -- ---------------------------------------------------------------------------
 
 INSERT INTO tasks (
-    id, title, category, status, priority,
+    id, title, status, priority,
     source, source_ref, pipeline, repository,
     initial_context, created_at, updated_at,
-    current_stage, retry_count
+    retry_count
 )
 VALUES
     -- 1. Pending task — just arrived, not yet queued
     (
         'github-issue-101',
         'Add rate limiting to GraphQL API',
-        'implementation',
         'pending',
         30,
         'github-issue', '101',
@@ -97,14 +96,13 @@ VALUES
         '{"issue_number": 101, "issue_title": "Add rate limiting to GraphQL API", "body": "We need per-user rate limiting on the GraphQL endpoint.", "labels": ["enhancement", "backend"]}'::jsonb,
         NOW() - INTERVAL '10 minutes',
         NOW() - INTERVAL '10 minutes',
-        0, 0
+        0
     ),
 
     -- 2. Queued task — picked up by supervisor, waiting for agent slot
     (
         'github-issue-98',
         'Review PR: fix null pointer in task router',
-        'review',
         'queued',
         10,
         'github-pr', '42',
@@ -113,14 +111,13 @@ VALUES
         '{"pr_number": 42, "pr_title": "fix null pointer in task router", "diff_url": "https://github.com/example-org/aquarco/pull/42.diff"}'::jsonb,
         NOW() - INTERVAL '20 minutes',
         NOW() - INTERVAL '2 minutes',
-        0, 0
+        0
     ),
 
     -- 3. Executing task — currently running in stage 1
     (
         'github-issue-95',
         'Analyse performance regression in pipeline executor',
-        'analyze',
         'executing',
         20,
         'github-issue', '95',
@@ -129,14 +126,13 @@ VALUES
         '{"issue_number": 95, "labels": ["performance", "regression"], "milestone": "v1.0"}'::jsonb,
         NOW() - INTERVAL '45 minutes',
         NOW() - INTERVAL '3 minutes',
-        1, 0
+        0
     ),
 
     -- 4. Completed task
     (
         'github-issue-80',
         'Write unit tests for supervisor retry logic',
-        'test',
         'completed',
         50,
         'github-issue', '80',
@@ -145,14 +141,13 @@ VALUES
         '{"issue_number": 80, "labels": ["testing"]}'::jsonb,
         NOW() - INTERVAL '3 hours',
         NOW() - INTERVAL '1 hour',
-        2, 0
+        0
     ),
 
     -- 5. Failed task — exhausted retries
     (
         'github-issue-77',
         'Design schema for multi-tenant agent isolation',
-        'design',
         'failed',
         40,
         'github-issue', '77',
@@ -161,14 +156,13 @@ VALUES
         '{"issue_number": 77, "labels": ["design", "architecture"]}'::jsonb,
         NOW() - INTERVAL '6 hours',
         NOW() - INTERVAL '4 hours',
-        0, 3
+        3
     ),
 
     -- 6. Blocked task — waiting on external dependency
     (
         'github-issue-110',
         'Document agent definition YAML schema',
-        'docs',
         'blocked',
         60,
         'github-issue', '110',
@@ -177,7 +171,7 @@ VALUES
         '{"issue_number": 110, "labels": ["documentation"], "blocked_by": "TASK-002 schema not finalised"}'::jsonb,
         NOW() - INTERVAL '1 hour',
         NOW() - INTERVAL '30 minutes',
-        0, 0
+        0
     )
 ON CONFLICT (id) DO NOTHING;
 
@@ -302,21 +296,21 @@ VALUES
 ON CONFLICT (task_id, key) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
--- Pipeline checkpoint for the executing task
+-- Update executing task with checkpoint data (last_completed_stage)
 -- ---------------------------------------------------------------------------
 
-INSERT INTO pipeline_checkpoints (task_id, last_completed_stage, checkpoint_data)
-VALUES
-    (
-        'github-issue-95',
-        (SELECT id FROM stages WHERE task_id = 'github-issue-95' AND stage_number = 0 LIMIT 1),
-        '{
-            "branch": "fix/perf-regression-95",
-            "workspace": "/workspace/github-issue-95",
-            "env": {
-                "TASK_ID": "github-issue-95",
-                "PIPELINE": "analysis-pipeline"
-            }
-        }'::jsonb
-    )
-ON CONFLICT (task_id) DO NOTHING;
+UPDATE tasks
+SET last_completed_stage = (
+        SELECT id FROM stages
+        WHERE task_id = 'github-issue-95' AND stage_number = 0
+        LIMIT 1
+    ),
+    checkpoint_data = '{
+        "branch": "fix/perf-regression-95",
+        "workspace": "/workspace/github-issue-95",
+        "env": {
+            "TASK_ID": "github-issue-95",
+            "PIPELINE": "analysis-pipeline"
+        }
+    }'::jsonb
+WHERE id = 'github-issue-95';
