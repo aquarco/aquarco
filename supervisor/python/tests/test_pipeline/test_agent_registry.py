@@ -1184,9 +1184,12 @@ async def test_sync_agent_instances_inserts_new_agents_with_zero_counts(
         sql = call[0][0]
         # The INSERT VALUES should include 0 for both active_count and total_executions
         assert "VALUES" in sql
-        assert "0, 0" in sql.replace(" ", "").replace("\n", "") or (
-            "0" in sql
-        ), "INSERT should set active_count=0 and total_executions=0 for new agents"
+        # Use regex for a robust check that doesn't depend on whitespace
+        import re
+        values_match = re.search(r"VALUES\s*\(.+,\s*0\s*,\s*0\s*\)", sql, re.DOTALL)
+        assert values_match, (
+            "INSERT should set active_count=0 and total_executions=0 for new agents"
+        )
 
 
 @pytest.mark.asyncio
@@ -1211,3 +1214,76 @@ async def test_sync_does_not_use_do_nothing(
         assert "DO NOTHING" not in sql, (
             "Must NOT use DO NOTHING — stale active_count must be reset to 0"
         )
+
+
+# ---------------------------------------------------------------------------
+# get_agent_max_turns / get_agent_max_cost — coverage for resource accessors
+# ---------------------------------------------------------------------------
+
+
+def test_get_agent_max_turns(tmp_path: Path) -> None:
+    """get_agent_max_turns returns configured value or default 30."""
+    mock_db = AsyncMock(spec=Database)
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {
+        "custom": {"resources": {"maxTurns": 50}},
+        "default": {},
+    }
+    assert reg.get_agent_max_turns("custom") == 50
+    assert reg.get_agent_max_turns("default") == 30
+    assert reg.get_agent_max_turns("unknown") == 30
+
+
+def test_get_agent_max_cost(tmp_path: Path) -> None:
+    """get_agent_max_cost returns configured value or default 5.0."""
+    mock_db = AsyncMock(spec=Database)
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {
+        "expensive": {"resources": {"maxCost": 10.0}},
+        "default": {},
+    }
+    assert reg.get_agent_max_cost("expensive") == 10.0
+    assert reg.get_agent_max_cost("default") == 5.0
+    assert reg.get_agent_max_cost("unknown") == 5.0
+
+
+# ---------------------------------------------------------------------------
+# get_agent_prompt_file — path traversal rejection
+# ---------------------------------------------------------------------------
+
+
+def test_get_agent_prompt_file_rejects_path_traversal(tmp_path: Path) -> None:
+    """Prompt file paths that escape the prompts directory are rejected."""
+    mock_db = AsyncMock(spec=Database)
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    reg = AgentRegistry(mock_db, str(tmp_path), str(prompts_dir))
+    reg._agents = {
+        "evil": {"promptFile": "../../etc/passwd"},
+    }
+    with pytest.raises(AgentRegistryError, match="escapes prompts directory"):
+        reg.get_agent_prompt_file("evil")
+
+
+# ---------------------------------------------------------------------------
+# _load_autoloaded_agents — exception path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_load_autoloaded_agents_handles_db_failure(
+    tmp_path: Path,
+) -> None:
+    """When the DB query fails, autoloaded agents loading is silently skipped."""
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_all.side_effect = Exception("DB connection lost")
+    mock_db.execute.return_value = None
+
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+
+    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    # Should not raise — exception is caught and logged
+    await reg.load(str(tmp_path / "nonexistent.json"))
+    # Registry should be empty (no agents discovered, no autoloaded)
+    assert reg._agents == {}
