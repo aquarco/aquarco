@@ -22,6 +22,7 @@ services:
     restart: unless-stopped
     networks:
       - aquarco
+    # No external ports — Caddy reverse proxy handles routing via /adminer/*
     environment:
       ADMINER_DEFAULT_SERVER: postgres
       ADMINER_DESIGN: pepa-linha-dark
