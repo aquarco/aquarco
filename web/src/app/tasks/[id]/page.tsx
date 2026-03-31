@@ -78,8 +78,9 @@ interface Task {
   updatedAt: string
   startedAt: string | null
   completedAt: string | null
-  assignedAgent: string | null
-  currentStage: number
+  lastCompletedStageId: number | null
+  checkpointData: Record<string, unknown> | null
+  pipelineVersion: string | null
   retryCount: number
   errorMessage: string | null
   parentTaskId: string | null
@@ -531,18 +532,26 @@ export default function TaskDetailPage() {
   }
   const uniqueStages = Array.from(uniqueStagesMap.values()).sort((a, b) => a.stageNumber - b.stageNumber)
 
-  // Determine which stage is actually active using the task's currentStage field
-  // (more reliable than stage.status which may still be PENDING when the agent is running)
-  const activeStep = task.status === 'EXECUTING'
-    ? uniqueStages.findIndex((s) => s.stageNumber === task.currentStage)
+  // Derive the current executing stage number from lastCompletedStageId.
+  // lastCompletedStageId is a stages.id FK — find the matching stage row to get its stageNumber,
+  // then the next stageNumber is the one currently executing.
+  const lastCompletedStage = task.lastCompletedStageId != null
+    ? stages.find((s) => Number(s.id) === task.lastCompletedStageId)
+    : null
+  const currentStageNumber = lastCompletedStage != null
+    ? (uniqueStages.find((s) => s.stageNumber > lastCompletedStage.stageNumber)?.stageNumber ?? lastCompletedStage.stageNumber + 1)
+    : 0
+
+  const activeStep = task.status === 'EXECUTING' || task.status === 'PLANNING'
+    ? uniqueStages.findIndex((s) => s.stageNumber === currentStageNumber)
     : uniqueStages.findIndex(
         (s) => s.status === 'EXECUTING' || (s.status !== 'COMPLETED' && s.status !== 'SKIPPED')
       )
 
   // Build a set of stage numbers that should display as EXECUTING based on task state
   const effectiveExecutingStages = new Set<number>()
-  if (task.status === 'EXECUTING') {
-    effectiveExecutingStages.add(task.currentStage)
+  if (task.status === 'EXECUTING' || task.status === 'PLANNING') {
+    effectiveExecutingStages.add(currentStageNumber)
   }
 
   return (
@@ -643,7 +652,7 @@ export default function TaskDetailPage() {
             {/* Metadata — row 2: progress */}
             <Grid item xs={6} sm={4} md={3}>
               <Typography variant="caption" color="text.secondary">Current Stage</Typography>
-              <Typography variant="body2">{task.currentStage}</Typography>
+              <Typography variant="body2">{currentStageNumber}</Typography>
             </Grid>
             <Grid item xs={6} sm={4} md={3}>
               <Typography variant="caption" color="text.secondary">Retry Count</Typography>

@@ -51,7 +51,6 @@ export const GET_TASKS = gql`
         createdAt
         updatedAt
         pipeline
-        assignedAgent
         totalCostUsd
       }
       totalCount
@@ -76,8 +75,9 @@ export const GET_TASK = gql`
       updatedAt
       startedAt
       completedAt
-      assignedAgent
-      currentStage
+      lastCompletedStageId
+      checkpointData
+      pipelineVersion
       retryCount
       errorMessage
       parentTaskId

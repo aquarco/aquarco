@@ -5,6 +5,7 @@ import Chip, { type ChipProps } from '@mui/material/Chip'
 type StatusValue =
   | 'PENDING'
   | 'QUEUED'
+  | 'PLANNING'
   | 'EXECUTING'
   | 'COMPLETED'
   | 'FAILED'
@@ -23,6 +24,7 @@ function getColorForStatus(status: StatusValue): ChipProps['color'] {
     case 'PENDING':
     case 'QUEUED':
       return 'default'
+    case 'PLANNING':
     case 'EXECUTING':
       return 'warning'
     case 'COMPLETED':

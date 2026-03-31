@@ -29,7 +29,7 @@ import { monoStyle } from '@/lib/theme'
 import { formatDate, formatElapsed } from '@/lib/format'
 import { formatCost } from '@/lib/spending'
 
-const TASK_STATUSES = ['PENDING', 'QUEUED', 'EXECUTING', 'COMPLETED', 'FAILED', 'TIMEOUT', 'BLOCKED']
+const TASK_STATUSES = ['PENDING', 'QUEUED', 'PLANNING', 'EXECUTING', 'COMPLETED', 'FAILED', 'TIMEOUT', 'BLOCKED']
 
 interface Task {
   id: string
@@ -39,7 +39,6 @@ interface Task {
   createdAt: string
   updatedAt: string
   pipeline?: string | null
-  assignedAgent?: string | null
   totalCostUsd?: number | null
   completedAt?: string | null
 }
@@ -144,14 +143,13 @@ export default function TasksPage() {
               <TableCell>Pipeline</TableCell>
               <TableCell>Cost</TableCell>
               <TableCell>Updated</TableCell>
-              <TableCell>Agent</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading
               ? [...Array(rowsPerPage > 10 ? 10 : rowsPerPage)].map((_, i) => (
                   <TableRow key={i}>
-                    {[...Array(8)].map((_, j) => (
+                    {[...Array(7)].map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton variant="text" />
                       </TableCell>
@@ -183,11 +181,10 @@ export default function TasksPage() {
                       </Typography>
                     </TableCell>
                     <TableCell title={formatDate(task.updatedAt)}>
-                      {['COMPLETED', 'FAILED', 'TIMEOUT'].includes(task.status?.toUpperCase())
+                      {['COMPLETED', 'FAILED', 'TIMEOUT', 'CLOSED'].includes(task.status?.toUpperCase())
                         ? formatDate(task.completedAt || task.updatedAt)
                         : formatElapsed(task.updatedAt)}
                     </TableCell>
-                    <TableCell>{task.assignedAgent ?? '—'}</TableCell>
                   </TableRow>
                 ))}
           </TableBody>
