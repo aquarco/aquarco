@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ..cli.claude import execute_claude
+from ..exceptions import RetryableError
 from ..logging import get_logger
 
 log = get_logger("conditions")
