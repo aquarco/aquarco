@@ -8,7 +8,7 @@ from pathlib import Path
 
 import typer
 
-from aquarco_cli.console import console, print_error, print_info, print_success
+from aquarco_cli.console import console, handle_api_error, print_error, print_info, print_success
 from aquarco_cli.graphql_client import (
     MUTATION_CREATE_TASK,
     QUERY_PIPELINE_STATUS,
@@ -18,15 +18,6 @@ from aquarco_cli.graphql_client import (
 app = typer.Typer()
 
 TERMINAL_STATUSES = {"COMPLETED", "FAILED", "TIMEOUT", "CLOSED"}
-
-
-def _handle_api_error(exc: Exception) -> None:
-    if "Connection refused" in str(exc) or "ConnectError" in type(exc).__name__:
-        print_error(
-            "Cannot reach the Aquarco API. Is the VM running? Try 'aquarco install' or 'aquarco ui'."
-        )
-    else:
-        print_error(str(exc))
 
 
 @app.callback(invoke_without_command=True)
@@ -49,7 +40,11 @@ def run(
             if not filepath.exists():
                 print_error(f"Context file not found: {filepath}")
                 raise typer.Exit(code=1)
-            initial_context = json.loads(filepath.read_text())
+            try:
+                initial_context = json.loads(filepath.read_text())
+            except json.JSONDecodeError as exc:
+                print_error(f"Invalid JSON in context file {filepath}: {exc}")
+                raise typer.Exit(code=1) from exc
         else:
             try:
                 initial_context = json.loads(context)
@@ -74,7 +69,7 @@ def run(
     try:
         data = client.execute(MUTATION_CREATE_TASK, variables)
     except Exception as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc)
         raise typer.Exit(code=1) from exc
 
     payload = data["createTask"]

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Sequence
 
-from aquarco_cli.config import cfg
+from aquarco_cli.config import get_config
 
 
 class VagrantError(Exception):
@@ -17,8 +18,9 @@ class VagrantHelper:
     """Convenience wrapper around the ``vagrant`` CLI."""
 
     def __init__(self, vagrant_dir: Path | None = None, vm_name: str = "") -> None:
-        self.vagrant_dir = vagrant_dir or cfg.resolve_vagrant_dir()
-        self.vm_name = vm_name or cfg.vm_name
+        _cfg = get_config()
+        self.vagrant_dir = vagrant_dir or _cfg.resolve_vagrant_dir()
+        self.vm_name = vm_name or _cfg.vm_name
 
     # ------------------------------------------------------------------
     # Low-level
@@ -32,9 +34,11 @@ class VagrantHelper:
         check: bool = True,
         capture: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        cmd = ["vagrant", *args]
-        if self.vm_name:
-            cmd.append(self.vm_name)
+        # Insert vm_name right after the subcommand verb (args[0])
+        if self.vm_name and args:
+            cmd = ["vagrant", args[0], self.vm_name, *args[1:]]
+        else:
+            cmd = ["vagrant", *args]
 
         kwargs: dict = {"cwd": str(self.vagrant_dir)}
 
@@ -78,9 +82,13 @@ class VagrantHelper:
     def halt(self) -> None:
         self._run(["halt"], stream=True)
 
+    def provision(self) -> None:
+        """Re-provision the VM.  Streams output."""
+        self._run(["provision"], stream=True)
+
     def ssh(self, command: str, *, stream: bool = False) -> subprocess.CompletedProcess[str]:
         """Run a command inside the VM via ``vagrant ssh -c``."""
-        return self._run(["ssh", "-c", command], stream=stream, check=True)
+        return self._run(["ssh", "-c", shlex.quote(command)], stream=stream, check=True)
 
     def is_running(self) -> bool:
         try:

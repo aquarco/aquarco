@@ -57,5 +57,19 @@ class CliConfig:
         return current
 
 
-# Singleton — importable everywhere
-cfg = CliConfig()
+# Lazy singleton — reads env vars on first access, not at import time
+_cfg: CliConfig | None = None
+
+
+def get_config() -> CliConfig:
+    """Return the singleton CliConfig, creating it lazily on first call."""
+    global _cfg  # noqa: PLW0603
+    if _cfg is None:
+        _cfg = CliConfig()
+    return _cfg
+
+
+def reset_config() -> None:
+    """Reset the singleton (useful for tests)."""
+    global _cfg  # noqa: PLW0603
+    _cfg = None

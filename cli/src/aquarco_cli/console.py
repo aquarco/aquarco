@@ -31,3 +31,13 @@ def make_table(title: str, columns: list[tuple[str, str]]) -> Table:
     for name, style in columns:
         table.add_column(name, style=style)
     return table
+
+
+def handle_api_error(exc: Exception) -> None:
+    """Print a user-friendly message for common API connectivity issues."""
+    if "Connection refused" in str(exc) or "ConnectError" in type(exc).__name__:
+        print_error(
+            "Cannot reach the Aquarco API. Is the VM running? Try 'aquarco install' or 'aquarco ui'."
+        )
+    else:
+        print_error(str(exc))

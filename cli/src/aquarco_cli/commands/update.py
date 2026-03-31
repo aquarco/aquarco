@@ -6,6 +6,7 @@ import subprocess
 
 import typer
 
+from aquarco_cli.config import get_config
 from aquarco_cli.console import console, print_error, print_info, print_success, print_warning
 from aquarco_cli.health import print_health_table
 from aquarco_cli.vagrant import VagrantHelper
@@ -50,11 +51,14 @@ def update(
         console.print(f"\n  {len(steps) + (0 if skip_provision else 1) + 1}. Health checks")
         return
 
-    # Step 0: git pull on host
+    # Step 0: git pull on host (run from repo root, not CWD)
+    repo_root = get_config().resolve_vagrant_dir().parent
     print_info("Pulling latest source code on host...")
     try:
         subprocess.run(
-            ["git", "pull", "--ff-only"], check=True, capture_output=True, text=True
+            ["git", "pull", "--ff-only"],
+            check=True, capture_output=True, text=True,
+            cwd=str(repo_root),
         )
     except subprocess.CalledProcessError as exc:
         print_warning(f"git pull failed: {exc.stderr.strip()}")
@@ -74,7 +78,7 @@ def update(
     if not skip_provision:
         print_info("Re-provisioning VM...")
         try:
-            vagrant._run(["provision"], stream=True)
+            vagrant.provision()
         except Exception as exc:
             print_warning(f"Provisioning failed: {exc}")
 

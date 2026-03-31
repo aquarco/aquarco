@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import typer
 
-from aquarco_cli.console import console, make_table, print_error, print_success
+from aquarco_cli.console import console, handle_api_error, make_table, print_error, print_success
 from aquarco_cli.graphql_client import (
     MUTATION_REGISTER_REPOSITORY,
     MUTATION_REMOVE_REPOSITORY,
@@ -23,15 +23,6 @@ def _repo_name_from_url(url: str) -> str:
     # e.g. "user/repo" -> "repo", "user/repo.git" -> "repo"
     name = path.rsplit("/", 1)[-1] if "/" in path else path
     return name.removesuffix(".git")
-
-
-def _handle_api_error(exc: Exception) -> None:
-    if "Connection refused" in str(exc) or "ConnectError" in type(exc).__name__:
-        print_error(
-            "Cannot reach the Aquarco API. Is the VM running? Try 'aquarco install' or 'aquarco ui'."
-        )
-    else:
-        print_error(str(exc))
 
 
 @app.command()
@@ -62,7 +53,7 @@ def add(
     try:
         data = client.execute(MUTATION_REGISTER_REPOSITORY, variables)
     except Exception as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc)
         raise typer.Exit(code=1) from exc
 
     payload = data["registerRepository"]
@@ -82,7 +73,7 @@ def list_repos() -> None:
     try:
         data = client.execute(QUERY_REPOSITORIES)
     except Exception as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc)
         raise typer.Exit(code=1) from exc
 
     repos = data["repositories"]
@@ -128,7 +119,7 @@ def remove(
     try:
         data = client.execute(MUTATION_REMOVE_REPOSITORY, {"name": name})
     except Exception as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc)
         raise typer.Exit(code=1) from exc
 
     payload = data["removeRepository"]

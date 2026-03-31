@@ -7,7 +7,7 @@ import webbrowser
 
 import typer
 
-from aquarco_cli.console import console, make_table, print_error, print_info, print_success
+from aquarco_cli.console import console, handle_api_error, make_table, print_error, print_info, print_success
 from aquarco_cli.graphql_client import (
     MUTATION_CLAUDE_LOGIN_START,
     MUTATION_CLAUDE_SUBMIT_CODE,
@@ -22,15 +22,6 @@ from aquarco_cli.graphql_client import (
 app = typer.Typer(help="Manage authentication for Claude and GitHub.")
 
 
-def _handle_api_error(exc: Exception) -> None:
-    if "Connection refused" in str(exc) or "ConnectError" in type(exc).__name__:
-        print_error(
-            "Cannot reach the Aquarco API. Is the VM running? Try 'aquarco install' or 'aquarco ui'."
-        )
-    else:
-        print_error(str(exc))
-
-
 @app.command()
 def status() -> None:
     """Check authentication status for Claude and GitHub."""
@@ -39,7 +30,7 @@ def status() -> None:
         claude = client.execute(QUERY_CLAUDE_AUTH_STATUS)
         github = client.execute(QUERY_GITHUB_AUTH_STATUS)
     except Exception as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc)
         raise typer.Exit(code=1) from exc
 
     cs = claude["claudeAuthStatus"]
@@ -71,7 +62,7 @@ def claude() -> None:
     try:
         data = client.execute(MUTATION_CLAUDE_LOGIN_START)
     except Exception as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc)
         raise typer.Exit(code=1) from exc
 
     info = data["claudeLoginStart"]
@@ -104,7 +95,7 @@ def github() -> None:
     try:
         data = client.execute(MUTATION_GITHUB_LOGIN_START)
     except Exception as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc)
         raise typer.Exit(code=1) from exc
 
     info = data["githubLoginStart"]

@@ -59,7 +59,8 @@ class TestVagrantHelper:
         args = mock_run.call_args[0][0]
         assert "ssh" in args
         assert "-c" in args
-        assert "echo hello" in args
+        # shlex.quote wraps the command for shell injection protection
+        assert "'echo hello'" in args
 
     @patch("aquarco_cli.vagrant.subprocess.run")
     def test_ssh_raises_on_failure(self, mock_run):

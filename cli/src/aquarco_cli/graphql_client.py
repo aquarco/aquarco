@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from aquarco_cli.config import cfg
+from aquarco_cli.config import get_config
 
 
 class GraphQLError(Exception):
@@ -22,8 +22,9 @@ class GraphQLClient:
     """Thin synchronous wrapper around the Aquarco GraphQL API."""
 
     def __init__(self, url: str | None = None, timeout: float | None = None) -> None:
-        self.url = url or cfg.api_url
-        self.timeout = timeout or cfg.http_timeout
+        _cfg = get_config()
+        self.url = url or _cfg.api_url
+        self.timeout = timeout or _cfg.http_timeout
 
     def execute(
         self, query: str, variables: dict[str, Any] | None = None

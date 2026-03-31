@@ -8,7 +8,7 @@ from typing import Optional
 
 import typer
 
-from aquarco_cli.console import console, make_table, print_error, print_info
+from aquarco_cli.console import console, handle_api_error, make_table, print_error, print_info, print_warning
 from aquarco_cli.graphql_client import (
     QUERY_DASHBOARD_STATS,
     QUERY_PIPELINE_STATUS,
@@ -21,14 +21,7 @@ app = typer.Typer()
 
 TERMINAL_STATUSES = {"COMPLETED", "FAILED", "TIMEOUT", "CLOSED"}
 
-
-def _handle_api_error(exc: Exception) -> None:
-    if "Connection refused" in str(exc) or "ConnectError" in type(exc).__name__:
-        print_error(
-            "Cannot reach the Aquarco API. Is the VM running? Try 'aquarco install' or 'aquarco ui'."
-        )
-    else:
-        print_error(str(exc))
+MAX_FOLLOW_ERRORS = 5
 
 
 def _status_style(status: str) -> str:
@@ -151,6 +144,9 @@ def status(
     """Show task overview or detailed task status."""
     client = GraphQLClient()
 
+    if follow and not task_id:
+        print_warning("--follow is only supported with a specific task ID; ignoring.")
+
     try:
         if task_id:
             if json_output:
@@ -162,12 +158,21 @@ def status(
 
             if follow:
                 print_info("Following task (Ctrl+C to stop)...")
+                consecutive_errors = 0
                 try:
                     while True:
                         time.sleep(2)
                         try:
                             ps = client.execute(QUERY_PIPELINE_STATUS, {"taskId": task_id})
-                        except Exception:
+                            consecutive_errors = 0
+                        except Exception as poll_exc:
+                            consecutive_errors += 1
+                            print_warning(f"Poll error: {poll_exc}")
+                            if consecutive_errors >= MAX_FOLLOW_ERRORS:
+                                print_error(
+                                    f"Too many consecutive errors ({MAX_FOLLOW_ERRORS}), stopping."
+                                )
+                                raise typer.Exit(code=1) from poll_exc
                             continue
                         ps_data = ps.get("pipelineStatus")
                         if ps_data and ps_data["status"] in TERMINAL_STATUSES:
@@ -184,5 +189,5 @@ def status(
 
             _print_dashboard(client, limit)
     except Exception as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc)
         raise typer.Exit(code=1) from exc
