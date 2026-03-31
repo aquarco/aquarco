@@ -173,6 +173,13 @@ class ScopedAgentView:
         # Fall back to first (default) prompts dir even if file doesn't exist
         return (self._resolved.prompt_dirs[0] / prompt_file_name).resolve()
 
+    def get_agent_model(self, agent_name: str) -> str | None:
+        """Get the model for an agent from resolved config, or None if not set."""
+        spec = self._resolved.agents.get(agent_name, {})
+        s = spec.get("spec", spec)
+        model: str | None = s.get("model")
+        return model or None
+
     def get_agent_timeout(self, agent_name: str) -> int:
         spec = self._resolved.agents.get(agent_name, {})
         s = spec.get("spec", spec)

@@ -241,6 +241,7 @@ async def execute_claude(
     max_turns: int = 30,
     resume_session_id: str | None = None,
     on_live_output: Callable[[str], Awaitable[None]] | None = None,
+    model: str | None = None,
 ) -> ClaudeOutput:
     """Invoke the Claude CLI and return structured output.
 
@@ -324,6 +325,10 @@ async def execute_claude(
                 "--system-prompt-file", str(prompt_file),
             ]
 
+        if model:
+            args.extend(["--model", model])
+
+        if not resume_session_id:
             if allowed_tools:
                 args.extend(["--allowedTools", ",".join(allowed_tools)])
             if denied_tools:

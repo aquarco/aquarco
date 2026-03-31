@@ -469,6 +469,7 @@ async def evaluate_ai_condition(
     extra_env: dict[str, str] | None = None,
     prompt_file: "Path | None" = None,
     on_live_output: "Callable[[str], Awaitable[None]] | None" = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate an AI condition by asking Claude CLI a yes/no question.
 
@@ -480,6 +481,7 @@ async def evaluate_ai_condition(
             When ``None``, an inline fallback prompt is written to a temp file.
         max_turns: Max conversation turns (from agent definition).
         on_live_output: Optional callback for live output streaming.
+        model: Claude model to use. When ``None``, the CLI uses its default.
 
     Returns a dict with at least ``answer`` (bool) and ``message`` (str),
     plus spending metadata (``_cost_usd``, ``_input_tokens``, etc.) and
@@ -527,6 +529,7 @@ async def evaluate_ai_condition(
             output_schema=_AI_CONDITION_SCHEMA,
             max_turns=max_turns,
             on_live_output=on_live_output,
+            model=model,
         )
     finally:
         if sys_prompt_tmp:

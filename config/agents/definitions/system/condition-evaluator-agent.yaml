@@ -9,6 +9,8 @@ metadata:
     domain: orchestration
 
 spec:
+  model: claude-haiku-4-5
+
   role: condition-evaluator
 
   promptFile: condition-evaluator-agent.md

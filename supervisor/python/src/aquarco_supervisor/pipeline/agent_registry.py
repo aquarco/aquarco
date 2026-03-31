@@ -246,6 +246,12 @@ class AgentRegistry:
             )
         return resolved
 
+    def get_agent_model(self, agent_name: str) -> str | None:
+        """Get the model for an agent, or None if not set (CLI default)."""
+        spec = self._agents.get(agent_name, {})
+        model: str | None = spec.get("model")
+        return model or None
+
     def get_agent_timeout(self, agent_name: str) -> int:
         """Get timeout in minutes for an agent."""
         spec = self._agents.get(agent_name, {})

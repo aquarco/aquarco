@@ -9,6 +9,8 @@ metadata:
     domain: design
 
 spec:
+  model: claude-sonnet-4-6
+
   categories:
     - design
 

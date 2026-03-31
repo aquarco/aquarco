@@ -567,6 +567,7 @@ class PipelineExecutor:
                                 extra_env=_cond_cfg.get_agent_environment(_cond_agent),
                                 prompt_file=_cond_cfg.get_agent_prompt_file(_cond_agent),
                                 on_live_output=_cond_live_cb,
+                                model=_cond_cfg.get_agent_model(_cond_agent),
                             )
                             answer = bool(output.get("answer"))
                             message = str(output.get("message", ""))
@@ -1060,6 +1061,7 @@ class PipelineExecutor:
         timeout_minutes = cfg.get_agent_timeout(agent_name)
         max_turns = cfg.get_agent_max_turns(agent_name)
         max_cost = cfg.get_agent_max_cost(agent_name)
+        model = cfg.get_agent_model(agent_name)
         clone_dir = work_dir or await self._resolve_clone_dir(task_id)
 
         agent_context = {
@@ -1095,6 +1097,7 @@ class PipelineExecutor:
                 max_turns=max_turns,
                 resume_session_id=resume_session_id,
                 on_live_output=on_live_output,
+                model=model,
             )
 
             output = claude_output.structured

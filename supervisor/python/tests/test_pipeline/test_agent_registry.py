@@ -128,6 +128,18 @@ async def test_agent_is_available(
     assert await reg.agent_is_available("analyzer") is True
 
 
+def test_get_agent_model(tmp_path: Path) -> None:
+    mock_db = AsyncMock(spec=Database)
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg._agents = {
+        "with-model": {"model": "claude-sonnet-4-6"},
+        "no-model": {"resources": {"timeoutMinutes": 10}},
+    }
+    assert reg.get_agent_model("with-model") == "claude-sonnet-4-6"
+    assert reg.get_agent_model("no-model") is None
+    assert reg.get_agent_model("unknown") is None
+
+
 def test_get_agent_timeout(tmp_path: Path) -> None:
     mock_db = AsyncMock(spec=Database)
     reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
