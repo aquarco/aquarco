@@ -54,7 +54,7 @@ class TestVagrantHelper:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="output", stderr="",
         )
-        result = self.helper.ssh("echo hello")
+        self.helper.ssh("echo hello")
         mock_run.assert_called_once()
         args = mock_run.call_args[0][0]
         assert "ssh" in args

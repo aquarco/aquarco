@@ -5,9 +5,8 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import httpx
-import pytest
 
-from aquarco_cli.health import ServiceHealth, check_stack_health, _check_http, _check_tcp
+from aquarco_cli.health import _check_http, _check_tcp
 
 
 class TestHealthProbes:

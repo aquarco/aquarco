@@ -13,7 +13,6 @@ from aquarco_cli.graphql_client import (
     MUTATION_CREATE_TASK,
     QUERY_PIPELINE_STATUS,
     GraphQLClient,
-    GraphQLError,
 )
 
 app = typer.Typer()

@@ -12,7 +12,6 @@ from aquarco_cli.graphql_client import (
     MUTATION_REMOVE_REPOSITORY,
     QUERY_REPOSITORIES,
     GraphQLClient,
-    GraphQLError,
 )
 
 app = typer.Typer(help="Manage watched repositories.")

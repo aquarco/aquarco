@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 from typing import Sequence
 
 from aquarco_cli.config import cfg
-from aquarco_cli.console import print_error
 
 
 class VagrantError(Exception):

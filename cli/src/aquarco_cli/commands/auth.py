@@ -9,7 +9,6 @@ import typer
 
 from aquarco_cli.console import console, make_table, print_error, print_info, print_success
 from aquarco_cli.graphql_client import (
-    MUTATION_CLAUDE_LOGIN_POLL,
     MUTATION_CLAUDE_LOGIN_START,
     MUTATION_CLAUDE_SUBMIT_CODE,
     MUTATION_GITHUB_LOGIN_POLL,
