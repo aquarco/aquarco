@@ -315,6 +315,7 @@ and system prompt path. Agents are split into two subdirectories:
 
 Key fields under `spec`:
 
+- `model` — Claude model to use for this agent (e.g., `claude-sonnet-4-6`, `claude-haiku-4-5`). When omitted, the CLI uses its default model. Can be overridden per-repo via the config overlay system.
 - `tools.allowed` / `tools.denied` — tool access control for Claude CLI
 - `environment` — env vars passed to Claude CLI subprocess
 - `promptFile` — filename (relative to `prompts/`) of the agent's markdown prompt template
