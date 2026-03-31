@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shlex
 import subprocess
 from pathlib import Path
 from typing import Sequence
@@ -87,8 +86,15 @@ class VagrantHelper:
         self._run(["provision"], stream=True)
 
     def ssh(self, command: str, *, stream: bool = False) -> subprocess.CompletedProcess[str]:
-        """Run a command inside the VM via ``vagrant ssh -c``."""
-        return self._run(["ssh", "-c", shlex.quote(command)], stream=stream, check=True)
+        """Run a command inside the VM via ``vagrant ssh -c``.
+
+        .. warning::
+            ``command`` is passed directly to the remote shell so that callers
+            can use shell operators (``&&``, ``|``, ``;``).  Callers **must not**
+            pass unsanitised user input — all current call-sites use hardcoded
+            command strings.
+        """
+        return self._run(["ssh", "-c", command], stream=stream, check=True)
 
     def is_running(self) -> bool:
         try:

@@ -9,7 +9,7 @@ import typer
 from aquarco_cli.config import get_config
 from aquarco_cli.console import console, print_error, print_info, print_success, print_warning
 from aquarco_cli.health import print_health_table
-from aquarco_cli.vagrant import VagrantHelper
+from aquarco_cli.vagrant import VagrantError, VagrantHelper
 
 app = typer.Typer()
 
@@ -70,7 +70,7 @@ def update(
         print_info(f"{name}...")
         try:
             vagrant.ssh(cmd, stream=True)
-        except Exception as exc:
+        except (VagrantError, subprocess.CalledProcessError, OSError) as exc:
             print_error(f"Step failed: {name} — {exc}")
             print_warning("Continuing with remaining steps...")
 
@@ -79,7 +79,7 @@ def update(
         print_info("Re-provisioning VM...")
         try:
             vagrant.provision()
-        except Exception as exc:
+        except (VagrantError, subprocess.CalledProcessError, OSError) as exc:
             print_warning(f"Provisioning failed: {exc}")
 
     # Health checks

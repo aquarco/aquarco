@@ -188,3 +188,7 @@ mutation { githubLoginStart { userCode verificationUri expiresIn } }
 MUTATION_GITHUB_LOGIN_POLL = """
 mutation { githubLoginPoll { success username error } }
 """
+
+# -- Shared constants --------------------------------------------------------
+
+TERMINAL_STATUSES = {"COMPLETED", "FAILED", "TIMEOUT", "CLOSED"}

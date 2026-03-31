@@ -14,12 +14,11 @@ from aquarco_cli.graphql_client import (
     QUERY_PIPELINE_STATUS,
     QUERY_TASK,
     QUERY_TASKS,
+    TERMINAL_STATUSES,
     GraphQLClient,
 )
 
 app = typer.Typer()
-
-TERMINAL_STATUSES = {"COMPLETED", "FAILED", "TIMEOUT", "CLOSED"}
 
 MAX_FOLLOW_ERRORS = 5
 
@@ -55,7 +54,7 @@ def _print_dashboard(client: GraphQLClient, limit: int) -> None:
     summary_table.add_row("Blocked", str(stats["blockedTasks"]))
     summary_table.add_row("Total", str(stats["totalTasks"]))
     summary_table.add_row("Active Agents", str(stats["activeAgents"]))
-    summary_table.add_row("Cost Today", f"${stats['totalCostToday']:.2f}")
+    summary_table.add_row("Cost Today", f"${float(stats.get('totalCostToday') or 0):.2f}")
     console.print(summary_table)
 
     # Recent tasks
@@ -73,7 +72,7 @@ def _print_dashboard(client: GraphQLClient, limit: int) -> None:
             task_table.add_row(
                 str(t["id"]),
                 t["title"][:50],
-                t["repository"]["name"],
+                (t.get("repository") or {}).get("name", "-"),
                 _status_style(t["status"]),
                 t["pipeline"],
                 t.get("createdAt", "-"),
@@ -92,7 +91,7 @@ def _print_task_detail(client: GraphQLClient, task_id: str) -> None:
     console.print(f"\n[bold]Task {task['id']}[/bold]\n")
     console.print(f"  Title:      {task['title']}")
     console.print(f"  Status:     {_status_style(task['status'])}")
-    console.print(f"  Repository: {task['repository']['name']}")
+    console.print(f"  Repository: {(task.get('repository') or {}).get('name', '-')}")
     console.print(f"  Pipeline:   {task['pipeline']}")
     console.print(f"  Priority:   {task['priority']}")
     console.print(f"  Source:     {task['source']}")

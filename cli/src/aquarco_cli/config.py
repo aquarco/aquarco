@@ -33,20 +33,24 @@ class CliConfig:
         default_factory=lambda: os.environ.get("AQUARCO_VM_NAME", "")
     )
 
+    _MAX_PARENT_DEPTH: int = 10
+
     def resolve_vagrant_dir(self) -> Path:
         """Return the path to the directory containing the Vagrantfile.
 
         Resolution order:
         1. Explicit AQUARCO_VAGRANT_DIR env var
-        2. ``vagrant/`` subdirectory of the repo root (auto-detected)
+        2. ``vagrant/`` subdirectory of the repo root (auto-detected, up to
+           :attr:`_MAX_PARENT_DEPTH` levels)
         3. Current working directory as last resort
         """
         if self.vagrant_dir:
             return Path(self.vagrant_dir).resolve()
 
-        # Walk up from cwd looking for vagrant/Vagrantfile
+        # Walk up from cwd looking for vagrant/Vagrantfile (bounded)
         current = Path.cwd()
-        for parent in [current, *current.parents]:
+        ancestors = [current, *current.parents]
+        for parent in ancestors[: self._MAX_PARENT_DEPTH]:
             candidate = parent / "vagrant" / "Vagrantfile"
             if candidate.exists():
                 return (parent / "vagrant").resolve()

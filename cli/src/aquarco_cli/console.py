@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import httpx
 from rich.console import Console
 from rich.table import Table
 
@@ -35,7 +36,7 @@ def make_table(title: str, columns: list[tuple[str, str]]) -> Table:
 
 def handle_api_error(exc: Exception) -> None:
     """Print a user-friendly message for common API connectivity issues."""
-    if "Connection refused" in str(exc) or "ConnectError" in type(exc).__name__:
+    if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException)):
         print_error(
             "Cannot reach the Aquarco API. Is the VM running? Try 'aquarco install' or 'aquarco ui'."
         )

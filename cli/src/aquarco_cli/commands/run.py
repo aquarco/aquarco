@@ -8,16 +8,17 @@ from pathlib import Path
 
 import typer
 
-from aquarco_cli.console import console, handle_api_error, print_error, print_info, print_success
+from aquarco_cli.console import console, handle_api_error, print_error, print_info, print_success, print_warning
 from aquarco_cli.graphql_client import (
     MUTATION_CREATE_TASK,
     QUERY_PIPELINE_STATUS,
+    TERMINAL_STATUSES,
     GraphQLClient,
 )
 
 app = typer.Typer()
 
-TERMINAL_STATUSES = {"COMPLETED", "FAILED", "TIMEOUT", "CLOSED"}
+MAX_FOLLOW_ERRORS = 5
 
 
 @app.callback(invoke_without_command=True)
@@ -88,12 +89,21 @@ def run(
     # Poll for progress
     print_info("Following task progress (Ctrl+C to stop)...")
     last_stage = -1
+    consecutive_errors = 0
     try:
         while True:
             time.sleep(2)
             try:
                 ps_data = client.execute(QUERY_PIPELINE_STATUS, {"taskId": task_id})
-            except Exception:
+                consecutive_errors = 0
+            except Exception as poll_exc:
+                consecutive_errors += 1
+                print_warning(f"Poll error: {poll_exc}")
+                if consecutive_errors >= MAX_FOLLOW_ERRORS:
+                    print_error(
+                        f"Too many consecutive errors ({MAX_FOLLOW_ERRORS}), stopping."
+                    )
+                    raise typer.Exit(code=1) from poll_exc
                 continue
 
             ps = ps_data.get("pipelineStatus")
