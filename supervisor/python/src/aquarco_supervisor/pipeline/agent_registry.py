@@ -126,13 +126,19 @@ class AgentRegistry:
             log.debug("autoloaded_agents_load_skipped", reason="DB query failed or table missing")
 
     async def _sync_agent_instances(self) -> None:
-        """Ensure all agents have rows in agent_instances table."""
+        """Ensure all agents have rows in agent_instances table.
+
+        On startup, reset active_count to 0 for all known agents since any
+        previously active agents are dead after a supervisor restart.
+        Preserves total_executions and last_execution_at.
+        """
         for name in self._agents:
             await self._db.execute(
                 """
                 INSERT INTO agent_instances (agent_name, active_count, total_executions)
                 VALUES (%(name)s, 0, 0)
-                ON CONFLICT (agent_name) DO NOTHING
+                ON CONFLICT (agent_name) DO UPDATE
+                SET active_count = 0
                 """,
                 {"name": name},
             )

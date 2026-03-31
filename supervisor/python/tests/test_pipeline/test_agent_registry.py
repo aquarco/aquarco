@@ -1086,3 +1086,128 @@ async def test_discover_agents_flat_scan_spec_is_shallow_copy(
     reloaded = yaml.safe_load(yaml_file.read_text())
     assert reloaded["spec"]["categories"] == ["flat"]
     assert "_injected_key" not in reloaded["spec"]
+
+
+# ---------------------------------------------------------------------------
+# _sync_agent_instances — active_count reset on startup (issue #56)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sync_agent_instances_resets_active_count_on_startup(
+    mock_db: AsyncMock, registry_file: Path, tmp_path: Path
+) -> None:
+    """On load, _sync_agent_instances issues ON CONFLICT DO UPDATE SET active_count = 0.
+
+    This ensures stale active_count values from a previous supervisor run
+    (where agents may have been killed mid-execution) are reset to 0.
+    """
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    await reg.load(str(registry_file))
+
+    # _sync_agent_instances is called during load; check the SQL used
+    execute_calls = [
+        call for call in mock_db.execute.call_args_list
+        if "agent_instances" in str(call)
+    ]
+    assert len(execute_calls) >= 1, "Expected at least one agent_instances INSERT"
+
+    for call in execute_calls:
+        sql = call[0][0]
+        assert "ON CONFLICT" in sql
+        assert "SET active_count = 0" in sql, (
+            "Expected ON CONFLICT to SET active_count = 0 (not DO NOTHING)"
+        )
+
+
+@pytest.mark.asyncio
+async def test_sync_agent_instances_called_for_each_agent(
+    mock_db: AsyncMock, registry_file: Path, tmp_path: Path
+) -> None:
+    """_sync_agent_instances must issue one INSERT per registered agent."""
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    await reg.load(str(registry_file))
+
+    # Registry file has 3 agents: analyzer, implementer, reviewer
+    sync_calls = [
+        call for call in mock_db.execute.call_args_list
+        if "agent_instances" in str(call) and "INSERT" in str(call)
+    ]
+    assert len(sync_calls) == 3
+
+    synced_names = {call[0][1]["name"] for call in sync_calls}
+    assert synced_names == {"analyzer", "implementer", "reviewer"}
+
+
+@pytest.mark.asyncio
+async def test_sync_agent_instances_preserves_total_executions(
+    mock_db: AsyncMock, registry_file: Path, tmp_path: Path
+) -> None:
+    """The ON CONFLICT clause must NOT reset total_executions or last_execution_at.
+
+    Only active_count should be set to 0; the other columns should be preserved.
+    """
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    await reg.load(str(registry_file))
+
+    sync_calls = [
+        call for call in mock_db.execute.call_args_list
+        if "agent_instances" in str(call) and "ON CONFLICT" in str(call)
+    ]
+
+    for call in sync_calls:
+        sql = call[0][0]
+        # Must NOT reset total_executions
+        assert "total_executions" not in sql.split("DO UPDATE")[1], (
+            "ON CONFLICT clause should not modify total_executions"
+        )
+        # Must NOT reset last_execution_at
+        assert "last_execution_at" not in sql.split("DO UPDATE")[1], (
+            "ON CONFLICT clause should not modify last_execution_at"
+        )
+
+
+@pytest.mark.asyncio
+async def test_sync_agent_instances_inserts_new_agents_with_zero_counts(
+    mock_db: AsyncMock, registry_file: Path, tmp_path: Path
+) -> None:
+    """New agents (no conflict) get active_count=0 and total_executions=0."""
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    await reg.load(str(registry_file))
+
+    sync_calls = [
+        call for call in mock_db.execute.call_args_list
+        if "agent_instances" in str(call) and "INSERT" in str(call)
+    ]
+
+    for call in sync_calls:
+        sql = call[0][0]
+        # The INSERT VALUES should include 0 for both active_count and total_executions
+        assert "VALUES" in sql
+        assert "0, 0" in sql.replace(" ", "").replace("\n", "") or (
+            "0" in sql
+        ), "INSERT should set active_count=0 and total_executions=0 for new agents"
+
+
+@pytest.mark.asyncio
+async def test_sync_does_not_use_do_nothing(
+    mock_db: AsyncMock, registry_file: Path, tmp_path: Path
+) -> None:
+    """Regression test: ON CONFLICT must NOT use DO NOTHING (the old buggy behavior).
+
+    The old code used DO NOTHING which left stale active_count values from
+    previous runs, causing agents to appear at capacity and blocking dispatch.
+    """
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    await reg.load(str(registry_file))
+
+    sync_calls = [
+        call for call in mock_db.execute.call_args_list
+        if "agent_instances" in str(call) and "ON CONFLICT" in str(call)
+    ]
+
+    for call in sync_calls:
+        sql = call[0][0]
+        assert "DO NOTHING" not in sql, (
+            "Must NOT use DO NOTHING — stale active_count must be reset to 0"
+        )
