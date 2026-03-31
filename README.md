@@ -17,15 +17,16 @@ Open http://localhost:8080, log in to GitHub and Claude, then add a repository.
 
 ```
 ┌─ Host (macOS) ────────────────────────────────────────────────────┐
-│  vagrant/Vagrantfile          Port forwards: 8080,4000,15432,...  │
+│  vagrant/Vagrantfile          Port forwards: 8080, 15432         │
 │                                                                   │
 │  ┌─ VirtualBox VM (Ubuntu 24.04) ──────────────────────────────┐  │
 │  │                                                             │  │
 │  │  ┌─ Docker Compose ──────────────────────────────────────┐  │  │
-│  │  │  postgres:16  (5432)    ← data storage                 │  │  │
-│  │  │  migrations   (oneshot) ← yoyo apply on each start     │  │  │
-│  │  │  api:node:20  (4000)    ← GraphQL, auth handlers      │  │  │
-│  │  │  web:node:20  (8080)    ← Next.js dashboard           │  │  │
+│  │  │  caddy:2       (8080)    ← reverse proxy (single port)│  │  │
+│  │  │  postgres:16   (5432)    ← data storage                │  │  │
+│  │  │  migrations    (oneshot) ← yoyo apply on each start    │  │  │
+│  │  │  api:node:20   (4000)    ← GraphQL, auth handlers     │  │  │
+│  │  │  web:node:20   (3000)    ← Next.js dashboard          │  │  │
 │  │  └───────────────────────────────────────────────────────┘  │  │
 │  │                                                             │  │
 │  │  ┌─ Systemd Services (agent:agent) ──────────────────────┐  │  │
@@ -43,10 +44,11 @@ Open http://localhost:8080, log in to GitHub and Claude, then add a repository.
 
 | Service    | Image              | Port            | User     | Purpose                          |
 |------------|--------------------|-----------------|----------|----------------------------------|
+| caddy      | caddy:2-alpine     | 8080 (external) | root     | Reverse proxy (single entry point)|
 | postgres   | postgres:16-alpine | 5432 (internal) | postgres | Database                         |
 | migrations | python:3.12-alpine | —               | root     | yoyo-migrations (runs on each up)|
-| api        | node:20-alpine     | 4000            | node     | GraphQL API, auth endpoints      |
-| web        | node:20-alpine     | 8080 (→3000)    | node     | Next.js dashboard                |
+| api        | node:20-alpine     | 4000 (internal) | node     | GraphQL API, auth endpoints      |
+| web        | node:20-alpine     | 3000 (internal) | node     | Next.js dashboard                |
 
 Source code is bind-mounted for hot reload; `node_modules` use named volumes.
 
@@ -74,14 +76,22 @@ Async Python process running the main loop every ~5 seconds:
 
 ## Port Forwarding (VM → Host)
 
-| Guest | Host  | Service    |
-|-------|-------|------------|
-| 8080  | 8080  | Web UI     |
-| 4000  | 4000  | GraphQL API|
-| 5432  | 15432 | PostgreSQL |
-| 9090  | 9090  | Prometheus |
-| 3000  | 13000 | Grafana    |
-| 8081  | 8081  | Adminer    |
+All services are accessed through the Caddy reverse proxy on a single port:
+
+| Guest | Host  | Service              |
+|-------|-------|----------------------|
+| 8080  | 8080  | Caddy reverse proxy  |
+| 5432  | 15432 | PostgreSQL (direct)  |
+
+### URL Routing (via Caddy on port 8080)
+
+| URL Path         | Backend Service  | Notes                    |
+|------------------|------------------|--------------------------|
+| `/`              | web:3000         | Next.js dashboard        |
+| `/api/*`         | api:4000         | GraphQL API (path stripped)|
+| `/adminer/*`     | adminer:8080     | DB admin (path stripped) |
+| `/grafana/*`     | grafana:3000     | Grafana (subpath-aware)  |
+| `/prometheus/*`  | prometheus:9090  | Prometheus (subpath-aware)|
 
 ## File Layout
 
