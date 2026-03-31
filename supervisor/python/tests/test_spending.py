@@ -8,7 +8,7 @@ from aquarco_supervisor.spending import (
     SpendingSummary,
     TurnSpending,
     parse_ndjson_spending,
-    _get_pricing,
+    get_pricing,
 )
 
 
@@ -130,24 +130,24 @@ def test_malformed_lines_skipped() -> None:
     assert len(result.turns) == 1
 
 
-def test_get_pricing_opus() -> None:
-    p = _get_pricing("claude-opus-4-6")
+def testget_pricing_opus() -> None:
+    p = get_pricing("claude-opus-4-6")
     assert p["input"] == 5
     assert p["output"] == 25
 
 
-def test_get_pricing_sonnet_default() -> None:
-    p = _get_pricing("claude-sonnet-4-6")
+def testget_pricing_sonnet_default() -> None:
+    p = get_pricing("claude-sonnet-4-6")
     assert p["input"] == 3
     assert p["output"] == 15
 
 
-def test_get_pricing_haiku() -> None:
-    p = _get_pricing("claude-haiku-4-5")
+def testget_pricing_haiku() -> None:
+    p = get_pricing("claude-haiku-4-5")
     assert p["input"] == 1
     assert p["output"] == 5
 
 
-def test_get_pricing_unknown_defaults_to_sonnet() -> None:
-    p = _get_pricing("unknown-model")
+def testget_pricing_unknown_defaults_to_sonnet() -> None:
+    p = get_pricing("unknown-model")
     assert p["input"] == 3

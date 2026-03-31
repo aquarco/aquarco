@@ -396,7 +396,7 @@ async def test_checkpoint_pipeline(
     sql = call_args[0][0]
     assert "pipeline_checkpoints" in sql
     params = call_args[0][1]
-    assert params["stage"] == 3
+    assert params["stage_id"] == 3
 
 
 @pytest.mark.asyncio
@@ -569,10 +569,12 @@ async def test_get_checkpoint(
     """get_checkpoint returns the checkpoint row."""
     mock_db.fetch_one.return_value = {
         "task_id": "task-1",
-        "last_completed_stage": 2,
+        "last_completed_stage": 42,
+        "stage_number": 2,
         "checkpoint_data": {},
         "created_at": None,
     }
     result = await task_queue.get_checkpoint("task-1")
     assert result is not None
-    assert result["last_completed_stage"] == 2
+    assert result["last_completed_stage"] == 42
+    assert result["stage_number"] == 2

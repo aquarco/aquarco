@@ -10,7 +10,6 @@ and maxRepeats to limit how many times a jump target can be visited.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
@@ -20,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..cli.claude import execute_claude
 from ..logging import get_logger
 
 log = get_logger("conditions")
@@ -463,174 +463,86 @@ async def evaluate_ai_condition(
     task_id: str = "",
     stage_num: int = 0,
     timeout_seconds: int = 120,
+    max_turns: int = 1,
     extra_env: dict[str, str] | None = None,
-    prompts_dir: "Path | None" = None,
-) -> tuple[bool, str]:
+    prompt_file: "Path | None" = None,
+    on_live_output: "Callable[[str], Awaitable[None]] | None" = None,
+) -> dict[str, Any]:
     """Evaluate an AI condition by asking Claude CLI a yes/no question.
 
-    Constructs a minimal prompt with the condition question and accumulated
-    pipeline context, then invokes Claude CLI with --max-turns 1 (no tools)
-    and a structured output schema.
+    Delegates to ``execute_claude`` so that spending, live output streaming,
+    and error classification (rate limits, 429/500/529) are handled uniformly.
 
     Args:
-        prompts_dir: Optional path to the agents/prompts/ directory.  When
-            provided and ``condition-evaluator-agent.md`` exists there, its
-            content is used as the system prompt instead of the inline fallback.
+        prompt_file: Path to the system prompt file for the condition evaluator.
+            When ``None``, an inline fallback prompt is written to a temp file.
+        max_turns: Max conversation turns (from agent definition).
+        on_live_output: Optional callback for live output streaming.
 
-    Returns (answer, message) — boolean result and descriptive message for the
-    next pipeline stage.
+    Returns a dict with at least ``answer`` (bool) and ``message`` (str),
+    plus spending metadata (``_cost_usd``, ``_input_tokens``, etc.) and
+    ``_raw_output`` from the CLI.
     """
+    # Build the context dict that execute_claude will write as stdin JSON
     context_json = json.dumps(context, indent=2, default=str)
+    eval_context = {
+        "condition": prompt,
+        "pipeline_context": context_json,
+    }
 
-    # Try to load system prompt from the condition-evaluator agent definition
-    system_prompt: str | None = None
-    if prompts_dir is not None:
-        prompt_path = Path(prompts_dir) / "condition-evaluator-agent.md"
-        if prompt_path.exists():
-            try:
-                # The file-based prompt is used verbatim — no {schema_json}
-                # substitution is applied (unlike the inline fallback below).
-                # The schema is embedded statically in the .md file.
-                # test_condition_evaluator_md_schema_matches_inline_schema
-                # guards against drift between the two.
-                system_prompt = prompt_path.read_text()
-                log.debug("ai_condition_prompt_loaded", path=str(prompt_path))
-            except OSError:
-                pass
-
-    if system_prompt is None:
-        system_prompt = _INLINE_SYSTEM_PROMPT.format(
+    # Resolve system prompt file
+    sys_prompt_tmp: str | None = None
+    resolved_prompt_file: Path
+    if prompt_file is not None and prompt_file.exists():
+        resolved_prompt_file = prompt_file
+    else:
+        # Write inline fallback to temp file
+        fallback = _INLINE_SYSTEM_PROMPT.format(
             schema_json=json.dumps(_AI_CONDITION_SCHEMA, indent=2)
         )
+        fd_sys, sys_path = tempfile.mkstemp(suffix=".md", prefix="ai-cond-sys-")
+        with os.fdopen(fd_sys, "w") as f:
+            f.write(fallback)
+        sys_prompt_tmp = sys_path
+        resolved_prompt_file = Path(sys_path)
 
-    stdin_content = (
-        f"## Condition to evaluate\n\n{prompt}\n\n"
-        f"## Pipeline context\n\n```json\n{context_json}\n```"
+    log.info(
+        "ai_condition_evaluating",
+        task_id=task_id,
+        stage=stage_num,
+        prompt=prompt[:100],
     )
 
-    # Write system prompt and stdin to temp files
-    fd_sys, sys_path = tempfile.mkstemp(suffix=".md", prefix="ai-cond-sys-")
-    fd_in, in_path = tempfile.mkstemp(suffix=".txt", prefix="ai-cond-in-")
     try:
-        with os.fdopen(fd_sys, "w") as f:
-            f.write(system_prompt)
-        with os.fdopen(fd_in, "w") as f:
-            f.write(stdin_content)
-
-        safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id) if task_id else "cond"
-        args = [
-            "claude",
-            "--print",
-            "--dangerously-skip-permissions",
-            "--output-format", "stream-json",
-            "--max-turns", "1",
-            "--system-prompt-file", sys_path,
-            "--json-schema", json.dumps(_AI_CONDITION_SCHEMA),
-        ]
-
-        proc_env: dict[str, str] | None = None
-        if extra_env:
-            proc_env = {**os.environ, **extra_env}
-
-        log.info(
-            "ai_condition_evaluating",
+        claude_output = await execute_claude(
+            prompt_file=resolved_prompt_file,
+            context=eval_context,
+            work_dir=work_dir,
+            timeout_seconds=timeout_seconds,
             task_id=task_id,
-            stage=stage_num,
-            prompt=prompt[:100],
+            stage_num=stage_num,
+            extra_env=extra_env,
+            output_schema=_AI_CONDITION_SCHEMA,
+            max_turns=max_turns,
+            on_live_output=on_live_output,
         )
-
-        with open(in_path) as stdin_f:
-            proc = await asyncio.create_subprocess_exec(
-                *args,
-                stdin=stdin_f,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=work_dir,
-                env=proc_env,
-            )
-
-            # Read stdout (NDJSON stream) and stderr concurrently to avoid deadlock
-            async def _read_stdout_lines() -> list[str]:
-                result: list[str] = []
-                assert proc.stdout is not None
-                async for raw_line in proc.stdout:
-                    line = raw_line.decode("utf-8", errors="replace").rstrip("\n").rstrip("\r")
-                    if line.strip():
-                        result.append(line)
-                return result
-
-            stdout_task: asyncio.Task[list[str]] = asyncio.create_task(_read_stdout_lines())
-            stderr_task: asyncio.Task[bytes] = asyncio.create_task(
-                proc.stderr.read()  # type: ignore[union-attr]
-            )
-
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(stdout_task), timeout=timeout_seconds
-                )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                stdout_task.cancel()
-                stderr_task.cancel()
-                for t in (stdout_task, stderr_task):
-                    try:
-                        await t
-                    except (asyncio.CancelledError, Exception):
-                        pass
-                log.warning("ai_condition_timeout", task_id=task_id, prompt=prompt[:100])
-                return (False, "Condition evaluation timed out")
-
-            ndjson_lines: list[str] = []
-            try:
-                ndjson_lines = stdout_task.result()
-            except Exception:
-                pass
-
-            stderr_bytes = b""
-            if stderr_task.done():
-                try:
-                    stderr_bytes = stderr_task.result()
-                except Exception:
-                    pass
-            else:
-                stderr_task.cancel()
-                try:
-                    await stderr_task
-                except (asyncio.CancelledError, Exception):
-                    pass
-
-            await proc.wait()
-
-        if proc.returncode != 0:
-            stderr_text = stderr_bytes.decode("utf-8", errors="replace")[:500]
-            log.warning(
-                "ai_condition_cli_error",
-                task_id=task_id,
-                returncode=proc.returncode,
-                stderr=stderr_text,
-            )
-            return (False, f"Condition evaluation CLI error (rc={proc.returncode})")
-
-        # Parse NDJSON stream: find the result message and extract 'answer'
-        from ..cli.claude import _parse_ndjson_output  # noqa: PLC0415
-
-        output_dict = _parse_ndjson_output(ndjson_lines, task_id, stage_num)
-        answer = output_dict.get("answer")
-        result = bool(answer)
-        message = str(output_dict.get("message", ""))
-        log.info(
-            "ai_condition_result",
-            task_id=task_id,
-            prompt=prompt[:100],
-            answer=result,
-            message=message[:200],
-        )
-        return (result, message)
-
     finally:
-        for p in (sys_path, in_path):
+        if sys_prompt_tmp:
             try:
-                os.unlink(p)
+                os.unlink(sys_prompt_tmp)
             except OSError:
                 pass
+
+    output = claude_output.structured
+    output["_raw_output"] = claude_output.raw
+
+    answer = bool(output.get("answer"))
+    message = str(output.get("message", ""))
+    log.info(
+        "ai_condition_result",
+        task_id=task_id,
+        prompt=prompt[:100],
+        answer=answer,
+        message=message[:200],
+    )
+    return output

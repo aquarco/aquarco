@@ -532,45 +532,24 @@ async def test_execute_claude_result_seen_ignores_bad_returncode(tmp_path: Path)
 
 
 # ---------------------------------------------------------------------------
-# Tests: evaluate_ai_condition uses stream-json
+# Tests: evaluate_ai_condition delegates to execute_claude
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_evaluate_ai_condition_uses_stream_json(tmp_path: Path) -> None:
-    """evaluate_ai_condition uses --output-format stream-json."""
+async def test_evaluate_ai_condition_delegates_to_execute_claude(tmp_path: Path) -> None:
+    """evaluate_ai_condition delegates to execute_claude and returns structured output."""
+    from aquarco_supervisor.cli.claude import ClaudeOutput
     from aquarco_supervisor.pipeline.conditions import evaluate_ai_condition
 
-    result_event = {
-        "type": "result",
-        "subtype": "success",
-        "structured_output": {"answer": True, "message": "Condition met"},
-    }
+    mock_output = ClaudeOutput(
+        structured={"answer": True, "message": "Condition met", "_cost_usd": 0.01},
+        raw='{"type":"result","structured_output":{"answer":true,"message":"Condition met"}}',
+    )
 
-    class _MockLineReader:
-        def __init__(self) -> None:
-            self._data = [(json.dumps(result_event) + "\n").encode()]
-        def __aiter__(self) -> "_MockLineReader":
-            return self
-        async def __anext__(self) -> bytes:
-            if not self._data:
-                raise StopAsyncIteration
-            return self._data.pop(0)
-
-    captured_args: list[Any] = []
-
-    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
-        captured_args.extend(args)
-        proc = MagicMock()
-        proc.returncode = 0
-        proc.stdout = _MockLineReader()
-        proc.stderr = AsyncMock()
-        proc.stderr.read = AsyncMock(return_value=b"")
-        proc.wait = AsyncMock()
-        return proc
-
-    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
-         patch("os.fdopen", MagicMock()), \
-         patch("os.unlink"):
+    with patch(
+        "aquarco_supervisor.pipeline.conditions.execute_claude",
+        AsyncMock(return_value=mock_output),
+    ) as mock_exec:
         result = await evaluate_ai_condition(
             prompt="Is this good?",
             context={"summary": "test"},
@@ -579,7 +558,8 @@ async def test_evaluate_ai_condition_uses_stream_json(tmp_path: Path) -> None:
             stage_num=0,
         )
 
-    args_str = " ".join(str(a) for a in captured_args)
-    assert "--output-format" in args_str
-    assert "stream-json" in args_str
-    assert result == (True, "Condition met")
+    assert result["answer"] is True
+    assert result["message"] == "Condition met"
+    assert result["_cost_usd"] == 0.01
+    assert "_raw_output" in result
+    mock_exec.assert_called_once()

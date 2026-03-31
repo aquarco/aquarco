@@ -298,6 +298,11 @@ async def execute_claude(
             if _dry_run_script.exists():
                 _claude_bin = str(_dry_run_script)
 
+        _SESSION_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{8,128}$')
+        if resume_session_id and not _SESSION_ID_RE.match(resume_session_id):
+            log.warning("invalid_session_id_format", session_id=resume_session_id[:64])
+            resume_session_id = None
+
         if resume_session_id:
             args = [
                 _claude_bin,
@@ -412,24 +417,31 @@ async def execute_claude(
                 stderr_tail=raw_stderr,
             )
 
+            # Try to salvage session_id from NDJSON lines so the executor
+            # can resume the conversation on retry instead of starting fresh.
+            _sid = _extract_session_id_from_lines(lines)
+
             if _is_rate_limited_in_lines(lines) or _is_rate_limited(debug_log):
                 raise RateLimitError(
                     f"Claude API rate limited (429) "
-                    f"(task={task_id}, stage={stage_num})"
+                    f"(task={task_id}, stage={stage_num})",
+                    session_id=_sid,
                 )
 
             # Detect internal server errors (500)
             if _is_server_error_in_lines(lines) or _is_server_error(debug_log):
                 raise ServerError(
                     f"Claude API internal server error (500) "
-                    f"(task={task_id}, stage={stage_num})"
+                    f"(task={task_id}, stage={stage_num})",
+                    session_id=_sid,
                 )
 
             # Detect platform overload errors (529)
             if _is_overloaded_in_lines(lines) or _is_overloaded(debug_log):
                 raise OverloadedError(
                     f"Claude API overloaded (529) "
-                    f"(task={task_id}, stage={stage_num})"
+                    f"(task={task_id}, stage={stage_num})",
+                    session_id=_sid,
                 )
 
             raise AgentExecutionError(
@@ -470,10 +482,29 @@ def _parse_ndjson_output(lines: list[str], task_id: str, stage_num: int) -> dict
 
     # Find the result message
     result_msg = _find_result_message(messages)
+
+    # Prefer structured_output from result event (non-verbose mode)
+    if result_msg and (result_msg.get("structured_output") or result_msg.get("result")):
+        extracted = _extract_from_result_message(result_msg)
+        if not extracted.get("_no_structured_output"):
+            return extracted
+
+    # Fallback 1: look for StructuredOutput tool_use in assistant messages
+    # (with --verbose + --json-schema, the structured output is delivered as
+    # a StructuredOutput tool call, not in the result event)
+    so_output = _extract_structured_output_tool_use(messages)
+    if so_output is not None:
+        # Merge execution metadata from result_msg if available
+        if result_msg:
+            meta = _extract_result_metadata(result_msg)
+            so_output.update(meta)
+        return so_output
+
+    # Result message exists but has no structured data — extract what we can
     if result_msg:
         return _extract_from_result_message(result_msg)
 
-    # Fallback: concatenate all assistant text blocks
+    # Fallback 2: concatenate all assistant text blocks
     texts = []
     for msg in messages:
         if isinstance(msg, dict) and msg.get("role") == "assistant":
@@ -490,6 +521,23 @@ def _parse_ndjson_output(lines: list[str], task_id: str, stage_num: int) -> dict
         if structured is not None:
             return structured
     return {"_no_structured_output": True, "_result_text": result_text[:2000]}
+
+
+def _extract_session_id_from_lines(lines: list[str]) -> str | None:
+    """Scan NDJSON lines for the last message containing a session_id.
+
+    The session_id appears in result events and possibly init/system events.
+    When the CLI exits non-zero (rate limit, server error), there may be no
+    result event but earlier messages might still carry the session_id.
+    """
+    for line in reversed(lines):
+        try:
+            msg = json.loads(line)
+            if isinstance(msg, dict) and "session_id" in msg:
+                return msg["session_id"]
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return None
 
 
 def _is_rate_limited_in_lines(lines: list[str]) -> bool:
@@ -575,6 +623,59 @@ def _find_result_message(messages: list[Any]) -> dict[str, Any] | None:
         if isinstance(msg, dict) and msg.get("type") == "result":
             return msg
     return None
+
+
+def _extract_structured_output_tool_use(messages: list[Any]) -> dict[str, Any] | None:
+    """Extract input from the last StructuredOutput tool_use in assistant messages.
+
+    With --verbose + --json-schema, Claude delivers structured output via a
+    StructuredOutput tool call rather than in the result event.
+    """
+    for msg in reversed(messages):
+        if not isinstance(msg, dict):
+            continue
+        # --verbose wraps assistant messages as {type: "assistant", message: {role: "assistant", content: [...]}}
+        inner = msg.get("message", msg)
+        if not isinstance(inner, dict):
+            continue
+        if inner.get("role") != "assistant":
+            continue
+        content = inner.get("content", [])
+        if not isinstance(content, list):
+            continue
+        for block in reversed(content):
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool_use"
+                and block.get("name") == "StructuredOutput"
+            ):
+                inp = block.get("input")
+                if isinstance(inp, dict):
+                    return dict(inp)
+    return None
+
+
+def _extract_result_metadata(msg: dict[str, Any]) -> dict[str, Any]:
+    """Extract execution metadata from a result message (prefixed with _)."""
+    meta: dict[str, Any] = {}
+    if "subtype" in msg:
+        meta["_subtype"] = msg["subtype"]
+    if "total_cost_usd" in msg:
+        meta["_cost_usd"] = msg["total_cost_usd"]
+    if "usage" in msg:
+        usage = msg["usage"]
+        if isinstance(usage, dict):
+            meta["_input_tokens"] = usage.get("input_tokens", 0)
+            meta["_cache_read_tokens"] = usage.get("cache_read_input_tokens", 0)
+            meta["_cache_write_tokens"] = usage.get("cache_creation_input_tokens", 0)
+            meta["_output_tokens"] = usage.get("output_tokens", 0)
+    if "duration_ms" in msg:
+        meta["_duration_ms"] = msg["duration_ms"]
+    if "num_turns" in msg:
+        meta["_num_turns"] = msg["num_turns"]
+    if "session_id" in msg:
+        meta["_session_id"] = msg["session_id"]
+    return meta
 
 
 def _extract_from_result_message(msg: dict[str, Any]) -> dict[str, Any]:

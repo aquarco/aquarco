@@ -221,15 +221,18 @@ async def test_get_tasks_pending_close_empty(
 async def test_create_rerun_stage(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
-    await task_queue.create_rerun_stage(
+    mock_db.fetch_val = AsyncMock(return_value=99)
+    result = await task_queue.create_rerun_stage(
         "task-1", 2, "review", "review-agent",
         "2:review:review-agent", 1, 3,
     )
 
-    call_args = mock_db.execute.call_args
+    assert result == 99
+    call_args = mock_db.fetch_val.call_args
     sql = call_args[0][0]
     params = call_args[0][1]
     assert "INSERT INTO stages" in sql
+    assert "RETURNING id" in sql
     assert params["run"] == 3
     assert params["stage_key"] == "2:review:review-agent"
     assert params["iteration"] == 1

@@ -38,22 +38,38 @@ async def test_create_iteration_stage_uses_on_conflict(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
     """SQL must include ON CONFLICT DO NOTHING for crash recovery idempotency."""
+    mock_db.fetch_val = AsyncMock(return_value=10)
     await task_queue.create_iteration_stage("task-1", 0, "review", "agent-1", 2)
 
-    call_args = mock_db.execute.call_args
+    call_args = mock_db.fetch_val.call_args
     sql = call_args[0][0]
     assert "ON CONFLICT DO NOTHING" in sql
 
 
 @pytest.mark.asyncio
-async def test_create_iteration_stage_returns_stage_key_format(
+async def test_create_iteration_stage_returns_stage_key_and_id(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
-    """Stage key follows the format: {stage_num}:{category}:{agent}."""
-    result = await task_queue.create_iteration_stage(
+    """Returns (stage_key, id) tuple."""
+    mock_db.fetch_val = AsyncMock(return_value=42)
+    stage_key, row_id = await task_queue.create_iteration_stage(
         "task-1", 3, "test", "test-agent", 2,
     )
-    assert result == "3:test:test-agent"
+    assert stage_key == "3:test:test-agent"
+    assert row_id == 42
+
+
+@pytest.mark.asyncio
+async def test_create_iteration_stage_returns_none_on_conflict(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Returns (stage_key, None) when row already exists."""
+    mock_db.fetch_val = AsyncMock(return_value=None)
+    stage_key, row_id = await task_queue.create_iteration_stage(
+        "task-1", 3, "test", "test-agent", 2,
+    )
+    assert stage_key == "3:test:test-agent"
+    assert row_id is None
 
 
 @pytest.mark.asyncio
@@ -61,9 +77,10 @@ async def test_create_iteration_stage_passes_correct_params(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
     """All parameters are correctly passed to the SQL query."""
+    mock_db.fetch_val = AsyncMock(return_value=10)
     await task_queue.create_iteration_stage("task-42", 1, "impl", "impl-agent", 5)
 
-    params = mock_db.execute.call_args[0][1]
+    params = mock_db.fetch_val.call_args[0][1]
     assert params["task_id"] == "task-42"
     assert params["stage"] == 1
     assert params["category"] == "impl"
@@ -77,9 +94,10 @@ async def test_create_iteration_stage_inserts_pending_status(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
     """New iteration stages start with 'pending' status."""
+    mock_db.fetch_val = AsyncMock(return_value=10)
     await task_queue.create_iteration_stage("task-1", 0, "review", "agent", 3)
 
-    sql = mock_db.execute.call_args[0][0]
+    sql = mock_db.fetch_val.call_args[0][0]
     assert "'pending'" in sql
 
 
@@ -92,14 +110,31 @@ async def test_create_iteration_stage_inserts_pending_status(
 async def test_create_system_stage_uses_on_conflict(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
-    """System stages also use ON CONFLICT DO NOTHING."""
-    await task_queue.create_system_stage(
+    """System stages also use ON CONFLICT DO NOTHING and return id."""
+    mock_db.fetch_val = AsyncMock(return_value=55)
+    result = await task_queue.create_system_stage(
         "task-1", -1, "planning", "planner-agent",
         stage_key="-1:planning:planner-agent",
     )
 
-    sql = mock_db.execute.call_args[0][0]
+    assert result == 55
+    sql = mock_db.fetch_val.call_args[0][0]
     assert "ON CONFLICT DO NOTHING" in sql
+    assert "RETURNING id" in sql
+
+
+@pytest.mark.asyncio
+async def test_create_system_stage_returns_none_on_conflict(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Returns None when the row already exists."""
+    mock_db.fetch_val = AsyncMock(return_value=None)
+    result = await task_queue.create_system_stage(
+        "task-1", -1, "planning", "planner-agent",
+        stage_key="-1:planning:planner-agent",
+    )
+
+    assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -111,13 +146,15 @@ async def test_create_system_stage_uses_on_conflict(
 async def test_create_rerun_stage_passes_run_number(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
-    """Rerun stage includes the run number in parameters."""
-    await task_queue.create_rerun_stage(
+    """Rerun stage includes the run number in parameters and returns id."""
+    mock_db.fetch_val = AsyncMock(return_value=77)
+    result = await task_queue.create_rerun_stage(
         "task-1", 0, "review", "review-agent",
         "0:review:review-agent", iteration=1, run=3,
     )
 
-    params = mock_db.execute.call_args[0][1]
+    assert result == 77
+    params = mock_db.fetch_val.call_args[0][1]
     assert params["run"] == 3
     assert params["iteration"] == 1
     assert params["stage_key"] == "0:review:review-agent"
@@ -132,9 +169,10 @@ async def test_create_rerun_stage_passes_run_number(
 async def test_get_latest_stage_run_returns_row(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
-    """Returns the latest run for a stage."""
+    """Returns the latest run for a stage, including id."""
     mock_db.fetch_one.return_value = {
-        "status": "completed", "run": 2, "error_message": None,
+        "id": 10, "status": "completed", "run": 2,
+        "error_message": None, "session_id": None,
     }
 
     result = await task_queue.get_latest_stage_run(
@@ -142,6 +180,7 @@ async def test_get_latest_stage_run_returns_row(
     )
 
     assert result is not None
+    assert result["id"] == 10
     assert result["status"] == "completed"
     assert result["run"] == 2
 

@@ -30,7 +30,7 @@ _MODEL_PRICING: dict[str, dict[str, float]] = {
 _DEFAULT_PRICING = _MODEL_PRICING["sonnet"]
 
 
-def _get_pricing(model: str) -> dict[str, float]:
+def get_pricing(model: str) -> dict[str, float]:
     """Return pricing dict for a model name string."""
     lower = model.lower()
     if "opus" in lower:
@@ -139,7 +139,7 @@ def parse_ndjson_spending(ndjson_text: str) -> SpendingSummary:
                 summary.total_output = usage.get("output_tokens", summary.total_output)
 
     # Estimate cost from tokens if no authoritative cost available
-    pricing = _get_pricing(summary.model or "")
+    pricing = get_pricing(summary.model or "")
     summary.estimated_cost_usd = (
         summary.total_input * pricing["input"] / 1_000_000
         + summary.total_cache_write * pricing["cache_write"] / 1_000_000

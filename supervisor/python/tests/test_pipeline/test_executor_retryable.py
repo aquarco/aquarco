@@ -85,13 +85,11 @@ def _make_executor(
 
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_task_context = AsyncMock(return_value={})
-    mock_tq.get_open_validation_items = AsyncMock(return_value=[])
     mock_tq.checkpoint_pipeline = AsyncMock()
     mock_tq.postpone_task = AsyncMock()
     mock_tq.fail_task = AsyncMock()
     mock_tq.update_task_phase = AsyncMock()
     mock_tq.store_stage_output = AsyncMock()
-    mock_tq.create_iteration_stage = AsyncMock()
     mock_tq.create_stage = AsyncMock()
 
     mock_registry = MagicMock()
@@ -237,10 +235,10 @@ async def test_running_phase_retryable_does_not_call_fail_task(
 
 
 @pytest.mark.asyncio
-async def test_running_phase_stage_error_calls_fail_task_not_postpone(
+async def test_running_phase_stage_error_postpones_for_retry(
     sample_pipelines: Any,
 ) -> None:
-    """A non-retryable StageError routes to fail_task, never to postpone_task."""
+    """A non-retryable StageError on a required stage postpones for retry."""
     executor, mock_tq, _ = _make_executor(sample_pipelines)
 
     planned = _minimal_planned_stages()
@@ -259,19 +257,38 @@ async def test_running_phase_stage_error_calls_fail_task_not_postpone(
         )
 
     assert failed is True
-    mock_tq.fail_task.assert_awaited_once()
-    mock_tq.postpone_task.assert_not_awaited()
+    mock_tq.postpone_task.assert_awaited_once()
+    # No checkpoint when the first stage fails — no prior completed stage to reference
+    mock_tq.checkpoint_pipeline.assert_not_awaited()
+    mock_tq.fail_task.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_running_phase_retryable_checkpoints_before_postpone(
     sample_pipelines: Any,
 ) -> None:
-    """checkpoint_pipeline is called before postpone_task on retryable errors."""
+    """checkpoint_pipeline is called before postpone_task on retryable errors
+    when there is a previously completed stage."""
     executor, mock_tq, _ = _make_executor(sample_pipelines)
 
-    planned = _minimal_planned_stages()
-    stage_defs = _minimal_stage_defs()
+    # Two stages: first succeeds, second hits retryable error
+    planned = [
+        {"category": "analyze", "agents": ["agent"], "parallel": False, "validation": []},
+        {"category": "implementation", "agents": ["agent"], "parallel": False, "validation": []},
+    ]
+    stage_defs = [
+        {"name": "analyze", "category": "analyze", "required": True, "conditions": []},
+        {"name": "implement", "category": "implementation", "required": True, "conditions": []},
+    ]
+
+    call_count = 0
+
+    async def _stage_side_effect(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return {"result": "ok"}, 100  # first stage succeeds, returns (output, stage_id)
+        raise OverloadedError("529")
 
     call_order: list[str] = []
     mock_tq.checkpoint_pipeline.side_effect = lambda *a, **kw: call_order.append("checkpoint") or None
@@ -280,18 +297,23 @@ async def test_running_phase_retryable_checkpoints_before_postpone(
     with patch(
         "aquarco_supervisor.pipeline.executor.PipelineExecutor._execute_planned_stage",
         new_callable=AsyncMock,
-        side_effect=OverloadedError("529"),
+        side_effect=_stage_side_effect,
     ), patch(
         "aquarco_supervisor.pipeline.executor._git_checkout",
+        new_callable=AsyncMock,
+    ), patch(
+        "aquarco_supervisor.pipeline.executor._auto_commit",
         new_callable=AsyncMock,
     ):
         await executor._execute_running_phase(
             "task-order", planned, stage_defs, "/repos/test", "branch-x"
         )
 
-    assert "checkpoint" in call_order
+    assert call_order.count("checkpoint") >= 2  # success checkpoint + error checkpoint
     assert "postpone" in call_order
-    assert call_order.index("checkpoint") < call_order.index("postpone")
+    # The error-path checkpoint must come before postpone
+    last_checkpoint_idx = len(call_order) - 1 - call_order[::-1].index("checkpoint")
+    assert last_checkpoint_idx < call_order.index("postpone")
 
 
 @pytest.mark.asyncio
@@ -307,7 +329,7 @@ async def test_running_phase_success_does_not_postpone(
     with patch(
         "aquarco_supervisor.pipeline.executor.PipelineExecutor._execute_planned_stage",
         new_callable=AsyncMock,
-        return_value={"result": "ok"},
+        return_value=({"result": "ok"}, 99),
     ), patch(
         "aquarco_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,

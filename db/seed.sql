@@ -309,7 +309,7 @@ INSERT INTO pipeline_checkpoints (task_id, last_completed_stage, checkpoint_data
 VALUES
     (
         'github-issue-95',
-        0,
+        (SELECT id FROM stages WHERE task_id = 'github-issue-95' AND stage_number = 0 LIMIT 1),
         '{
             "branch": "fix/perf-regression-95",
             "workspace": "/workspace/github-issue-95",

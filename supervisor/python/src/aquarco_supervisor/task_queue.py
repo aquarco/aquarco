@@ -8,7 +8,7 @@ from typing import Any
 
 from .database import Database
 from .logging import get_logger
-from .models import Task, TaskPhase, TaskStatus, ValidationItem
+from .models import Task, TaskPhase, TaskStatus
 
 log = get_logger("task-queue")
 
@@ -296,11 +296,10 @@ class TaskQueue:
         agent: str,
         output: dict[str, Any],
         *,
+        stage_id: int | None = None,
         stage_key: str | None = None,
         iteration: int = 1,
         run: int = 1,
-        validation_items_in: list[dict[str, Any]] | None = None,
-        validation_items_out: list[dict[str, Any]] | None = None,
     ) -> None:
         """Upsert a completed stage record and advance the task's current_stage."""
         # raw_output is accumulated line-by-line during execution via
@@ -328,16 +327,38 @@ class TaskQueue:
             "cache_read": cache_read,
             "cache_write": cache_write,
         }
-        if stage_key:
-            # New path: use stage_key + iteration + run for upsert
+        if stage_id is not None:
             await self._db.execute(
                 """
                 UPDATE stages
                 SET agent = %(agent)s, status = 'completed',
                     structured_output = %(output)s::jsonb,
                     raw_output = %(raw)s,
-                    validation_items_in = %(vi_in)s::jsonb,
-                    validation_items_out = %(vi_out)s::jsonb,
+                    live_output = NULL,
+                    cost_usd = %(cost_usd)s,
+                    tokens_input = %(tokens_in)s,
+                    tokens_output = %(tokens_out)s,
+                    cache_read_tokens = %(cache_read)s,
+                    cache_write_tokens = %(cache_write)s,
+                    started_at = COALESCE(stages.started_at, NOW()),
+                    completed_at = NOW()
+                WHERE id = %(id)s
+                """,
+                {
+                    "id": stage_id,
+                    "agent": agent,
+                    "output": structured_json,
+                    "raw": raw_output,
+                    **spending_params,
+                },
+            )
+        elif stage_key:
+            await self._db.execute(
+                """
+                UPDATE stages
+                SET agent = %(agent)s, status = 'completed',
+                    structured_output = %(output)s::jsonb,
+                    raw_output = %(raw)s,
                     live_output = NULL,
                     cost_usd = %(cost_usd)s,
                     tokens_input = %(tokens_in)s,
@@ -357,8 +378,6 @@ class TaskQueue:
                     "agent": agent,
                     "output": structured_json,
                     "raw": raw_output,
-                    "vi_in": json.dumps(validation_items_in) if validation_items_in else None,
-                    "vi_out": json.dumps(validation_items_out) if validation_items_out else None,
                     **spending_params,
                 },
             )
@@ -533,14 +552,17 @@ class TaskQueue:
         stage_key: str,
         iteration: int = 1,
         run: int = 1,
-    ) -> None:
+    ) -> int | None:
         """Insert a stage row for a system agent (planner, condition-evaluator).
 
         Unlike planned pipeline stages (created by create_planned_pending_stages),
         system agent stages are not pre-created.  This method INSERTs the row so
         that subsequent record_stage_executing / store_stage_output UPDATEs find it.
+
+        Returns the ``stages.id`` of the new row, or ``None`` when the row
+        already exists (ON CONFLICT DO NOTHING).
         """
-        await self._db.execute(
+        return await self._db.fetch_val(
             """
             INSERT INTO stages
                 (task_id, stage_number, category, agent, status,
@@ -548,6 +570,7 @@ class TaskQueue:
             VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s,
                     'pending', %(stage_key)s, %(iteration)s, %(run)s)
             ON CONFLICT DO NOTHING
+            RETURNING id
             """,
             {
                 "task_id": task_id,
@@ -567,19 +590,38 @@ class TaskQueue:
         category: str,
         agent: str,
         *,
+        stage_id: int | None = None,
         stage_key: str | None = None,
         iteration: int = 1,
         run: int = 1,
         input_context: dict[str, Any] | None = None,
     ) -> None:
         """Record that a stage is now executing."""
-        if stage_key:
+        if stage_id is not None:
+            await self._db.execute(
+                """
+                UPDATE stages
+                SET agent = %(agent)s, status = 'executing', started_at = NOW(),
+                    input = %(input)s::jsonb, live_output = NULL, raw_output = NULL,
+                    cost_usd = 0, tokens_input = 0, tokens_output = 0,
+                    cache_read_tokens = 0, cache_write_tokens = 0
+                WHERE id = %(id)s
+                """,
+                {
+                    "id": stage_id,
+                    "agent": agent,
+                    "input": json.dumps(input_context) if input_context else None,
+                },
+            )
+        elif stage_key:
             # New path: update existing row created by create_planned_pending_stages
             await self._db.execute(
                 """
                 UPDATE stages
                 SET agent = %(agent)s, status = 'executing', started_at = NOW(),
-                    input = %(input)s::jsonb, live_output = NULL, raw_output = NULL
+                    input = %(input)s::jsonb, live_output = NULL, raw_output = NULL,
+                    cost_usd = 0, tokens_input = 0, tokens_output = 0,
+                    cache_read_tokens = 0, cache_write_tokens = 0
                 WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
                       AND iteration = %(iteration)s AND run = %(run)s
                 """,
@@ -596,11 +638,16 @@ class TaskQueue:
             # Legacy path
             await self._db.execute(
                 """
-                INSERT INTO stages (task_id, stage_number, category, agent, status, started_at)
-                VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s, 'executing', NOW())
+                INSERT INTO stages (task_id, stage_number, category, agent, status, started_at,
+                                   cost_usd, tokens_input, tokens_output,
+                                   cache_read_tokens, cache_write_tokens)
+                VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s, 'executing', NOW(),
+                        0, 0, 0, 0, 0)
                 ON CONFLICT (task_id, stage_number) DO UPDATE
                 SET agent = %(agent)s, status = 'executing', started_at = NOW(),
-                    live_output = NULL, raw_output = NULL
+                    live_output = NULL, raw_output = NULL,
+                    cost_usd = 0, tokens_input = 0, tokens_output = 0,
+                    cache_read_tokens = 0, cache_write_tokens = 0
                 """,
                 {
                     "task_id": task_id,
@@ -616,16 +663,33 @@ class TaskQueue:
         stage_num: int,
         error_message: str,
         *,
+        stage_id: int | None = None,
         stage_key: str | None = None,
         iteration: int = 1,
         run: int = 1,
+        session_id: str | None = None,
     ) -> None:
         """Record that a stage has failed."""
-        if stage_key:
+        if stage_id is not None:
             await self._db.execute(
                 """
                 UPDATE stages
-                SET status = 'failed', completed_at = NOW(), error_message = %(error)s
+                SET status = 'failed', completed_at = NOW(),
+                    error_message = %(error)s, session_id = %(session_id)s
+                WHERE id = %(id)s
+                """,
+                {
+                    "id": stage_id,
+                    "error": error_message,
+                    "session_id": session_id,
+                },
+            )
+        elif stage_key:
+            await self._db.execute(
+                """
+                UPDATE stages
+                SET status = 'failed', completed_at = NOW(),
+                    error_message = %(error)s, session_id = %(session_id)s
                 WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
                       AND iteration = %(iteration)s AND run = %(run)s
                 """,
@@ -635,16 +699,23 @@ class TaskQueue:
                     "iteration": iteration,
                     "run": run,
                     "error": error_message,
+                    "session_id": session_id,
                 },
             )
         else:
             await self._db.execute(
                 """
                 UPDATE stages
-                SET status = 'failed', completed_at = NOW(), error_message = %(error)s
+                SET status = 'failed', completed_at = NOW(),
+                    error_message = %(error)s, session_id = %(session_id)s
                 WHERE task_id = %(task_id)s AND stage_number = %(stage)s
                 """,
-                {"task_id": task_id, "stage": stage_num, "error": error_message},
+                {
+                    "task_id": task_id,
+                    "stage": stage_num,
+                    "error": error_message,
+                    "session_id": session_id,
+                },
             )
 
     async def record_stage_skipped(
@@ -653,6 +724,7 @@ class TaskQueue:
         stage_num: int,
         category: str,
         *,
+        stage_id: int | None = None,
         stage_key: str | None = None,
     ) -> None:
         """Record that a stage was skipped.
@@ -661,7 +733,17 @@ class TaskQueue:
         (completed, failed) to avoid overwriting results from agents
         that already ran successfully or recorded an error.
         """
-        if stage_key:
+        if stage_id is not None:
+            await self._db.execute(
+                """
+                UPDATE stages
+                SET status = 'skipped', completed_at = NOW()
+                WHERE id = %(id)s
+                      AND status NOT IN ('completed', 'failed')
+                """,
+                {"id": stage_id},
+            )
+        elif stage_key:
             await self._db.execute(
                 """
                 UPDATE stages
@@ -724,21 +806,29 @@ class TaskQueue:
 
     async def create_planned_pending_stages(
         self, task_id: str, planned_stages: list[dict[str, Any]]
-    ) -> None:
+    ) -> dict[str, int]:
         """Create stage rows from planner output.
 
         Each planned stage entry has: category, agents[], parallel.
         Creates one row per agent per category at iteration 1.
+
+        Returns a mapping of ``stage_key -> stages.id`` for every
+        successfully inserted row.  Rows that already exist (ON CONFLICT)
+        are omitted from the mapping.
         """
+        stage_ids: dict[str, int] = {}
         for stage_num, plan in enumerate(planned_stages):
             category = plan["category"]
             raw_agents = plan.get("agents", [])
             agents = [
-                a["name"] if isinstance(a, dict) else a for a in raw_agents
+                a.get("name") or a.get("agent_name") or a
+                if isinstance(a, dict)
+                else a
+                for a in raw_agents
             ]
             for agent_name in agents:
                 stage_key = f"{stage_num}:{category}:{agent_name}"
-                await self._db.execute(
+                row_id = await self._db.fetch_val(
                     """
                     INSERT INTO stages
                         (task_id, stage_number, category, agent, status,
@@ -746,6 +836,7 @@ class TaskQueue:
                     VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s,
                             'pending', %(stage_key)s, 1)
                     ON CONFLICT DO NOTHING
+                    RETURNING id
                     """,
                     {
                         "task_id": task_id,
@@ -755,6 +846,9 @@ class TaskQueue:
                         "stage_key": stage_key,
                     },
                 )
+                if row_id is not None:
+                    stage_ids[stage_key] = row_id
+        return stage_ids
 
     async def create_iteration_stage(
         self,
@@ -763,10 +857,14 @@ class TaskQueue:
         category: str,
         agent: str,
         iteration: int,
-    ) -> str:
-        """Create a new stage row for an iteration re-run. Returns stage_key."""
+    ) -> tuple[str, int | None]:
+        """Create a new stage row for a condition-driven revisit.
+
+        Returns ``(stage_key, stages.id)``.  ``stages.id`` is ``None``
+        when the row already exists (ON CONFLICT DO NOTHING).
+        """
         stage_key = f"{stage_num}:{category}:{agent}"
-        await self._db.execute(
+        row_id = await self._db.fetch_val(
             """
             INSERT INTO stages
                 (task_id, stage_number, category, agent, status,
@@ -774,6 +872,7 @@ class TaskQueue:
             VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s,
                     'pending', %(stage_key)s, %(iteration)s)
             ON CONFLICT DO NOTHING
+            RETURNING id
             """,
             {
                 "task_id": task_id,
@@ -784,74 +883,7 @@ class TaskQueue:
                 "iteration": iteration,
             },
         )
-        return stage_key
-
-    # --- Validation Items ---
-
-    async def add_validation_item(
-        self,
-        task_id: str,
-        stage_key: str | None,
-        category: str,
-        description: str,
-    ) -> int:
-        """Insert a new open validation item. Returns its ID."""
-        row = await self._db.fetch_one(
-            """
-            INSERT INTO validation_items (task_id, stage_key, category, description)
-            VALUES (%(task_id)s, %(stage_key)s, %(category)s, %(desc)s)
-            RETURNING id
-            """,
-            {
-                "task_id": task_id,
-                "stage_key": stage_key,
-                "category": category,
-                "desc": description,
-            },
-        )
-        vi_id: int = row["id"]
-        return vi_id
-
-    async def resolve_validation_item(
-        self, item_id: int, resolved_by_stage_key: str
-    ) -> None:
-        """Mark a validation item as resolved."""
-        await self._db.execute(
-            """
-            UPDATE validation_items
-            SET status = 'resolved', resolved_by = %(resolved_by)s, resolved_at = NOW()
-            WHERE id = %(id)s
-            """,
-            {"id": item_id, "resolved_by": resolved_by_stage_key},
-        )
-
-    async def get_open_validation_items(
-        self, task_id: str, category: str | None = None
-    ) -> list[ValidationItem]:
-        """Get open validation items for a task, optionally filtered by category."""
-        if category:
-            rows = await self._db.fetch_all(
-                """
-                SELECT id, task_id, stage_key, category, description, status,
-                       resolved_by, resolved_at, created_at
-                FROM validation_items
-                WHERE task_id = %(task_id)s AND status = 'open' AND category = %(cat)s
-                ORDER BY id
-                """,
-                {"task_id": task_id, "cat": category},
-            )
-        else:
-            rows = await self._db.fetch_all(
-                """
-                SELECT id, task_id, stage_key, category, description, status,
-                       resolved_by, resolved_at, created_at
-                FROM validation_items
-                WHERE task_id = %(task_id)s AND status = 'open'
-                ORDER BY id
-                """,
-                {"task_id": task_id},
-            )
-        return [ValidationItem.model_validate(r) for r in rows]
+        return stage_key, row_id
 
     async def update_stage_live_output(
         self,
@@ -860,24 +892,85 @@ class TaskQueue:
         iteration: int,
         run: int,
         live_output: str,
+        *,
+        stage_id: int | None = None,
     ) -> None:
-        """Append an NDJSON line to raw_output and update live_output with the latest line."""
-        await self._db.execute(
-            """
-            UPDATE stages
-            SET live_output = %(line)s,
-                raw_output = COALESCE(raw_output || E'\\n', '') || %(line)s
-            WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
-                  AND iteration = %(iteration)s AND run = %(run)s
-            """,
-            {
-                "task_id": task_id,
-                "stage_key": stage_key,
-                "iteration": iteration,
-                "run": run,
-                "line": live_output,
-            },
-        )
+        """Append an NDJSON line to raw_output and update live_output with the latest line.
+
+        Also incrementally updates spending columns when the line contains
+        assistant-message token usage.
+        """
+        from .spending import get_pricing
+
+        # Parse spending deltas from this NDJSON line
+        delta_input = 0
+        delta_output = 0
+        delta_cache_read = 0
+        delta_cache_write = 0
+        delta_cost = 0.0
+        try:
+            msg = json.loads(live_output)
+            if isinstance(msg, dict) and msg.get("type") == "assistant":
+                message = msg.get("message", {})
+                usage = message.get("usage") if isinstance(message, dict) else None
+                if isinstance(usage, dict):
+                    delta_input = usage.get("input_tokens", 0)
+                    delta_output = usage.get("output_tokens", 0)
+                    delta_cache_read = usage.get("cache_read_input_tokens", 0)
+                    delta_cache_write = usage.get("cache_creation_input_tokens", 0)
+                    model = message.get("model", "") if isinstance(message, dict) else ""
+                    pricing = get_pricing(model)
+                    delta_cost = (
+                        delta_input * pricing["input"] / 1_000_000
+                        + delta_output * pricing["output"] / 1_000_000
+                        + delta_cache_read * pricing["cache_read"] / 1_000_000
+                        + delta_cache_write * pricing["cache_write"] / 1_000_000
+                    )
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass
+
+        spending_sql = """,
+                    tokens_input = COALESCE(tokens_input, 0) + %(delta_input)s,
+                    tokens_output = COALESCE(tokens_output, 0) + %(delta_output)s,
+                    cache_read_tokens = COALESCE(cache_read_tokens, 0) + %(delta_cache_read)s,
+                    cache_write_tokens = COALESCE(cache_write_tokens, 0) + %(delta_cache_write)s,
+                    cost_usd = COALESCE(cost_usd, 0) + %(delta_cost)s"""
+        spending_params = {
+            "delta_input": delta_input,
+            "delta_output": delta_output,
+            "delta_cache_read": delta_cache_read,
+            "delta_cache_write": delta_cache_write,
+            "delta_cost": delta_cost,
+        }
+
+        if stage_id is not None:
+            await self._db.execute(
+                f"""
+                UPDATE stages
+                SET live_output = %(line)s,
+                    raw_output = COALESCE(raw_output || E'\\n', '') || %(line)s{spending_sql}
+                WHERE id = %(id)s
+                """,
+                {"id": stage_id, "line": live_output, **spending_params},
+            )
+        else:
+            await self._db.execute(
+                f"""
+                UPDATE stages
+                SET live_output = %(line)s,
+                    raw_output = COALESCE(raw_output || E'\\n', '') || %(line)s{spending_sql}
+                WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
+                      AND iteration = %(iteration)s AND run = %(run)s
+                """,
+                {
+                    "task_id": task_id,
+                    "stage_key": stage_key,
+                    "iteration": iteration,
+                    "run": run,
+                    "line": live_output,
+                    **spending_params,
+                },
+            )
 
     async def get_latest_stage_run(
         self,
@@ -885,10 +978,10 @@ class TaskQueue:
         stage_key: str,
         iteration: int = 1,
     ) -> dict[str, Any] | None:
-        """Return the latest run's status and run number for a stage."""
+        """Return the latest run's id, status, run number, and session_id for a stage."""
         return await self._db.fetch_one(
             """
-            SELECT status, run, error_message
+            SELECT id, status, run, error_message, session_id
             FROM stages
             WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
                   AND iteration = %(iteration)s
@@ -907,15 +1000,16 @@ class TaskQueue:
         stage_key: str,
         iteration: int,
         run: int,
-    ) -> None:
-        """Insert a new stage row for a rerun."""
-        await self._db.execute(
+    ) -> int:
+        """Insert a new stage row for a rerun.  Returns ``stages.id``."""
+        return await self._db.fetch_val(
             """
             INSERT INTO stages
                 (task_id, stage_number, category, agent, status,
                  stage_key, iteration, run)
             VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s,
                     'pending', %(stage_key)s, %(iteration)s, %(run)s)
+            RETURNING id
             """,
             {
                 "task_id": task_id,
@@ -1053,28 +1147,41 @@ class TaskQueue:
     # --- Pipeline Checkpoints ---
 
     async def checkpoint_pipeline(
-        self, task_id: str, stage_num: int, data: dict[str, Any] | None = None
+        self, task_id: str, stage_id: int, data: dict[str, Any] | None = None
     ) -> None:
-        """Save or update a pipeline execution checkpoint."""
+        """Save or update a pipeline execution checkpoint.
+
+        ``stage_id`` is the ``stages.id`` PK of the last completed stage row.
+        """
         await self._db.execute(
             """
             INSERT INTO pipeline_checkpoints
                 (task_id, last_completed_stage, checkpoint_data, created_at)
-            VALUES (%(id)s, %(stage)s, %(data)s::jsonb, NOW())
+            VALUES (%(id)s, %(stage_id)s, %(data)s::jsonb, NOW())
             ON CONFLICT (task_id) DO UPDATE
-            SET last_completed_stage = %(stage)s,
+            SET last_completed_stage = %(stage_id)s,
                 checkpoint_data = %(data)s::jsonb,
                 created_at = NOW()
             """,
-            {"id": task_id, "stage": stage_num, "data": json.dumps(data or {})},
+            {"id": task_id, "stage_id": stage_id, "data": json.dumps(data or {})},
         )
 
     async def get_checkpoint(self, task_id: str) -> dict[str, Any] | None:
-        """Get a pipeline checkpoint for a task."""
+        """Get a pipeline checkpoint for a task.
+
+        Returns the checkpoint with ``stage_number`` resolved from the
+        referenced stages row so the executor can compute the resume index.
+        """
         return await self._db.fetch_one(
             """
-            SELECT task_id, last_completed_stage, checkpoint_data, created_at
-            FROM pipeline_checkpoints WHERE task_id = %(id)s
+            SELECT pc.task_id,
+                   pc.last_completed_stage,
+                   s.stage_number,
+                   pc.checkpoint_data,
+                   pc.created_at
+            FROM pipeline_checkpoints pc
+            JOIN stages s ON s.id = pc.last_completed_stage
+            WHERE pc.task_id = %(id)s
             """,
             {"id": task_id},
         )

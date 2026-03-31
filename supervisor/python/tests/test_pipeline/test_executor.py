@@ -315,7 +315,6 @@ async def test_execute_pipeline_no_pipeline_name_uses_task_pipeline(
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_checkpoint = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
-    mock_tq.get_open_validation_items = AsyncMock(return_value=[])
 
     mock_task = MagicMock()
     mock_task.pipeline = "feature-pipeline"
@@ -572,7 +571,6 @@ async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_checkpoint = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
-    mock_tq.get_open_validation_items = AsyncMock(return_value=[])
 
     task = MagicMock()
     task.title = "Add widget"
@@ -628,9 +626,8 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_checkpoint = AsyncMock(return_value={"last_completed_stage": 0})
+    mock_tq.get_checkpoint = AsyncMock(return_value={"last_completed_stage": 99, "stage_number": 0})
     mock_tq.get_task_context = AsyncMock(return_value={})
-    mock_tq.get_open_validation_items = AsyncMock(return_value=[])
 
     task = MagicMock()
     task.title = "Resume task"
@@ -685,13 +682,12 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
 
 @pytest.mark.asyncio
 async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> None:
-    """When a required stage fails, the task is failed and pipeline stops."""
+    """When a required stage fails, the task is postponed for retry."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_checkpoint = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
-    mock_tq.get_open_validation_items = AsyncMock(return_value=[])
 
     task = MagicMock()
     task.title = "Failing task"
@@ -729,7 +725,10 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
     ):
         await executor.execute_pipeline("feature-pipeline", "task-1", {})
 
-    mock_tq.fail_task.assert_awaited_once()
+    # Required stage failures are now retried via postpone (not permanent fail)
+    mock_tq.postpone_task.assert_awaited_once()
+    # No checkpoint when the first stage fails — no prior completed stage to reference
+    mock_tq.checkpoint_pipeline.assert_not_awaited()
     mock_tq.complete_task.assert_not_called()
 
 
@@ -741,7 +740,6 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_checkpoint = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
-    mock_tq.get_open_validation_items = AsyncMock(return_value=[])
 
     task = MagicMock()
     task.title = "Optional stage task"
@@ -857,7 +855,7 @@ async def test_execute_planned_stage_fresh_run(sample_pipelines: Any) -> None:
         new_callable=AsyncMock,
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
-        await executor._execute_planned_stage(
+        result, stage_id = await executor._execute_planned_stage(
             "task-1", 0, "implementation", "impl-agent", {}, iteration=1,
         )
 
@@ -876,8 +874,9 @@ async def test_execute_planned_stage_retry_after_failure(sample_pipelines: Any) 
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_latest_stage_run = AsyncMock(
-        return_value={"status": "failed", "run": 1, "error_message": "boom"}
+        return_value={"id": 10, "status": "failed", "run": 1, "error_message": "boom", "session_id": None}
     )
+    mock_tq.create_rerun_stage = AsyncMock(return_value=20)
     mock_registry = _make_registry_mock()
 
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
@@ -887,7 +886,7 @@ async def test_execute_planned_stage_retry_after_failure(sample_pipelines: Any) 
         new_callable=AsyncMock,
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
-        await executor._execute_planned_stage(
+        result, stage_id = await executor._execute_planned_stage(
             "task-1", 0, "implementation", "impl-agent", {}, iteration=1,
         )
 
@@ -896,9 +895,11 @@ async def test_execute_planned_stage_retry_after_failure(sample_pipelines: Any) 
     retry_kwargs = mock_tq.create_rerun_stage.call_args
     assert retry_kwargs.args[6] == 2 or retry_kwargs.kwargs.get("run") == 2 or retry_kwargs.args[-1] == 2
 
-    # record_stage_executing called with run=2
+    # record_stage_executing called with run=2 and stage_id from create_rerun_stage
     call_kwargs = mock_tq.record_stage_executing.call_args.kwargs
     assert call_kwargs["run"] == 2
+    assert call_kwargs["stage_id"] == 20
+    assert stage_id == 20
 
 
 @pytest.mark.asyncio
@@ -908,8 +909,9 @@ async def test_execute_planned_stage_retry_after_rate_limited(sample_pipelines: 
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_latest_stage_run = AsyncMock(
-        return_value={"status": "rate_limited", "run": 2, "error_message": "429"}
+        return_value={"id": 15, "status": "rate_limited", "run": 2, "error_message": "429", "session_id": None}
     )
+    mock_tq.create_rerun_stage = AsyncMock(return_value=25)
     mock_registry = _make_registry_mock()
 
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
@@ -919,7 +921,7 @@ async def test_execute_planned_stage_retry_after_rate_limited(sample_pipelines: 
         new_callable=AsyncMock,
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
-        await executor._execute_planned_stage(
+        result, stage_id = await executor._execute_planned_stage(
             "task-1", 0, "implementation", "impl-agent", {}, iteration=1,
         )
 
@@ -929,6 +931,7 @@ async def test_execute_planned_stage_retry_after_rate_limited(sample_pipelines: 
     # record_stage_executing called with run=3
     call_kwargs = mock_tq.record_stage_executing.call_args.kwargs
     assert call_kwargs["run"] == 3
+    assert stage_id == 25
 
 
 @pytest.mark.asyncio
@@ -938,7 +941,7 @@ async def test_execute_planned_stage_reuse_pending_run(sample_pipelines: Any) ->
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_latest_stage_run = AsyncMock(
-        return_value={"status": "pending", "run": 3, "error_message": None}
+        return_value={"id": 30, "status": "pending", "run": 3, "error_message": None, "session_id": None}
     )
     mock_registry = _make_registry_mock()
 
@@ -949,7 +952,7 @@ async def test_execute_planned_stage_reuse_pending_run(sample_pipelines: Any) ->
         new_callable=AsyncMock,
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
-        await executor._execute_planned_stage(
+        result, stage_id = await executor._execute_planned_stage(
             "task-1", 0, "implementation", "impl-agent", {}, iteration=1,
         )
 
@@ -958,6 +961,8 @@ async def test_execute_planned_stage_reuse_pending_run(sample_pipelines: Any) ->
     # record_stage_executing called with the existing run=3
     call_kwargs = mock_tq.record_stage_executing.call_args.kwargs
     assert call_kwargs["run"] == 3
+    assert call_kwargs["stage_id"] == 30
+    assert stage_id == 30
 
 
 # --- close_task_resources ---
@@ -1049,186 +1054,6 @@ async def test_close_task_resources_fallback_rmtree(
         await executor.close_task_resources("task-1")
 
     mock_rmtree.assert_called_once_with(mock_work_dir, ignore_errors=True)
-
-
-# ---------------------------------------------------------------------------
-# Fix: per-agent output routing to _process_validation_items
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_process_validation_items_resolves_and_adds(
-    sample_pipelines: Any,
-) -> None:
-    """_process_validation_items resolves existing items and adds new ones."""
-    # Arrange
-    mock_tq = AsyncMock(spec=TaskQueue)
-    executor = PipelineExecutor(AsyncMock(), mock_tq, AsyncMock(), sample_pipelines)
-
-    agent_output = {
-        "validation_items_resolved": [42, 99],
-        "validation_items_new": [
-            {"category": "test", "description": "Add missing test"},
-        ],
-    }
-
-    # Act
-    await executor._process_validation_items("task-1", "0:test:agent", agent_output)
-
-    # Assert
-    mock_tq.resolve_validation_item.assert_any_await(42, "0:test:agent")
-    mock_tq.resolve_validation_item.assert_any_await(99, "0:test:agent")
-    mock_tq.add_validation_item.assert_awaited_once_with(
-        "task-1", "0:test:agent", "test", "Add missing test",
-    )
-
-
-@pytest.mark.asyncio
-async def test_process_validation_items_ignores_non_int_resolved_ids(
-    sample_pipelines: Any,
-) -> None:
-    """_process_validation_items skips non-integer resolved IDs."""
-    mock_tq = AsyncMock(spec=TaskQueue)
-    executor = PipelineExecutor(AsyncMock(), mock_tq, AsyncMock(), sample_pipelines)
-
-    agent_output = {
-        "validation_items_resolved": ["not-an-int", None, 7],
-    }
-
-    await executor._process_validation_items("task-1", "0:test:agent", agent_output)
-
-    # Only the integer id=7 should be resolved
-    mock_tq.resolve_validation_item.assert_awaited_once_with(7, "0:test:agent")
-
-
-@pytest.mark.asyncio
-async def test_process_validation_items_ignores_incomplete_new_items(
-    sample_pipelines: Any,
-) -> None:
-    """_process_validation_items skips new items missing required fields."""
-    mock_tq = AsyncMock(spec=TaskQueue)
-    executor = PipelineExecutor(AsyncMock(), mock_tq, AsyncMock(), sample_pipelines)
-
-    agent_output = {
-        "validation_items_new": [
-            {"category": "test"},             # missing description
-            {"description": "No category"},   # missing category
-            "not-a-dict",                     # wrong type
-        ],
-    }
-
-    await executor._process_validation_items("task-1", "0:test:agent", agent_output)
-
-    mock_tq.add_validation_item.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_sequential_stage_passes_per_agent_output_to_validation(
-    sample_pipelines: Any,
-) -> None:
-    """Sequential execution: each agent's own output is routed to _process_validation_items,
-    not the merged stage_output accumulated from all agents in the loop."""
-    # Arrange – two agents in one sequential stage; agent-A emits a resolved item,
-    # agent-B emits a different resolved item. The bug would pass the merged output
-    # (both items) to both agents. The fix passes only agent-A's output to agent-A's
-    # validation call and only agent-B's output to agent-B's validation call.
-
-    mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
-    mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_task_context = AsyncMock(return_value={})
-    mock_tq.get_open_validation_items = AsyncMock(return_value=[])
-
-    agent_a_output = {"validation_items_resolved": [1], "_agent_name": "agent-a"}
-    agent_b_output = {"validation_items_resolved": [2], "_agent_name": "agent-b"}
-
-    call_sequence = [
-        ClaudeOutput(structured=agent_a_output, raw="{}"),
-        ClaudeOutput(structured=agent_b_output, raw="{}"),
-    ]
-
-    mock_registry = AsyncMock()
-    mock_registry.get_agent_prompt_file = MagicMock(return_value="/p.md")
-    mock_registry.get_agent_timeout = MagicMock(return_value=30)
-    mock_registry.get_allowed_tools = MagicMock(return_value=[])
-    mock_registry.get_denied_tools = MagicMock(return_value=[])
-    mock_registry.get_agent_environment = MagicMock(return_value={})
-    mock_registry.get_agent_output_schema = MagicMock(return_value=None)
-    mock_registry.should_skip_planning = MagicMock(return_value=True)
-    mock_registry.get_agents_for_category = MagicMock(return_value=["agent-a", "agent-b"])
-
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
-
-    # Override _build_default_plan so that planning fast-path produces a single
-    # stage with BOTH agents (the real impl only takes [:1]; this lets the test
-    # exercise the multi-agent sequential path without needing a planner agent).
-    executor._build_default_plan = lambda stages: [  # type: ignore[method-assign]
-        {
-            "category": "analyze",
-            "agents": ["agent-a", "agent-b"],
-            "parallel": False,
-            "validation": [],
-        }
-    ]
-
-    # Spy on _process_validation_items to capture (stage_key, agent_output) calls
-    captured_calls: list[tuple[str, dict]] = []
-
-    original_fn = executor._process_validation_items
-
-    async def _spy(task_id: str, sk: str, out: dict) -> None:  # type: ignore[override]
-        captured_calls.append((sk, out))
-        await original_fn(task_id, sk, out)
-
-    executor._process_validation_items = _spy  # type: ignore[method-assign]
-
-    task = MagicMock()
-    task.title = "Two-agent task"
-    task.initial_context = {}
-    task.source_ref = None
-    mock_tq.get_task = AsyncMock(return_value=task)
-    mock_tq.get_checkpoint = AsyncMock(return_value=None)
-
-    with patch(
-        "aquarco_supervisor.pipeline.executor.execute_claude",
-        new_callable=AsyncMock,
-        side_effect=call_sequence,
-    ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
-        "aquarco_supervisor.pipeline.executor.load_overlay",
-        return_value=None,
-    ), patch(
-        "aquarco_supervisor.pipeline.executor._run_git",
-        new_callable=AsyncMock,
-        return_value="0",
-    ), patch(
-        "aquarco_supervisor.pipeline.executor._git_checkout",
-        new_callable=AsyncMock,
-    ), patch(
-        "aquarco_supervisor.pipeline.executor._auto_commit",
-        new_callable=AsyncMock,
-    ), patch(
-        "aquarco_supervisor.pipeline.executor._get_ahead_count",
-        new_callable=AsyncMock,
-        return_value=0,
-    ):
-        await executor.execute_pipeline("feature-pipeline", "task-1", {})
-
-    # Verify each agent's validation call received ONLY that agent's output
-    per_agent_calls = {sk: out for sk, out in captured_calls}
-
-    # Agent-A's call must contain only item 1
-    sk_a = [sk for sk in per_agent_calls if "agent-a" in sk]
-    assert sk_a, "Expected a validation call keyed to agent-a"
-    assert per_agent_calls[sk_a[0]].get("validation_items_resolved") == [1], (
-        "agent-a should receive only its own output (item 1), not the merged output"
-    )
-
-    # Agent-B's call must contain only item 2
-    sk_b = [sk for sk in per_agent_calls if "agent-b" in sk]
-    assert sk_b, "Expected a validation call keyed to agent-b"
-    assert per_agent_calls[sk_b[0]].get("validation_items_resolved") == [2], (
-        "agent-b should receive only its own output (item 2), not the merged output"
-    )
 
 
 # ---------------------------------------------------------------------------

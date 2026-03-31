@@ -329,36 +329,24 @@ def test_compare_string_ge_le() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tests: evaluate_ai_condition — extra_env branch
+# Tests: evaluate_ai_condition — delegates to execute_claude
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_evaluate_ai_condition_with_extra_env() -> None:
+async def test_evaluate_ai_condition_passes_extra_env() -> None:
+    from aquarco_supervisor.cli.claude import ClaudeOutput
     from aquarco_supervisor.pipeline.conditions import evaluate_ai_condition
 
-    result_event = {
-        "type": "result",
-        "subtype": "success",
-        "structured_output": {"answer": True, "message": "env was set"},
-    }
+    mock_output = ClaudeOutput(
+        structured={"answer": True, "message": "env was set", "_cost_usd": 0.02},
+        raw="",
+    )
 
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.wait = AsyncMock(return_value=None)
-    mock_proc.stdout = _AsyncLineReader([(json.dumps(result_event) + "\n").encode()])
-    mock_proc.stderr = AsyncMock()
-    mock_proc.stderr.read = AsyncMock(return_value=b"")
-
-    captured_kwargs: dict[str, Any] = {}
-
-    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
-        captured_kwargs.update(kwargs)
-        return mock_proc
-
-    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
-         patch("os.fdopen", mock_open()), \
-         patch("os.unlink"):
+    with patch(
+        "aquarco_supervisor.pipeline.conditions.execute_claude",
+        AsyncMock(return_value=mock_output),
+    ) as mock_exec:
         result = await evaluate_ai_condition(
             "Is extra env set?",
             {"context": "data"},
@@ -367,155 +355,124 @@ async def test_evaluate_ai_condition_with_extra_env() -> None:
             extra_env={"MY_VAR": "my_value"},
         )
 
-    assert result[0] is True
-    assert captured_kwargs.get("env") is not None
-    assert captured_kwargs["env"].get("MY_VAR") == "my_value"
-
-
-# ---------------------------------------------------------------------------
-# Tests: evaluate_ai_condition — stderr not done path
-# ---------------------------------------------------------------------------
+    assert result["answer"] is True
+    assert result["_cost_usd"] == 0.02
+    call_kwargs = mock_exec.call_args[1]
+    assert call_kwargs["extra_env"] == {"MY_VAR": "my_value"}
 
 
 @pytest.mark.asyncio
-async def test_evaluate_ai_condition_stderr_not_done_is_cancelled() -> None:
+async def test_evaluate_ai_condition_passes_max_turns_and_timeout() -> None:
+    from aquarco_supervisor.cli.claude import ClaudeOutput
     from aquarco_supervisor.pipeline.conditions import evaluate_ai_condition
 
-    result_event = {
-        "type": "result",
-        "subtype": "success",
-        "structured_output": {"answer": False, "message": "stderr slow"},
-    }
+    mock_output = ClaudeOutput(
+        structured={"answer": False, "message": "nope"},
+        raw="",
+    )
 
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.wait = AsyncMock(return_value=None)
-    mock_proc.stdout = _AsyncLineReader([(json.dumps(result_event) + "\n").encode()])
-
-    async def hanging_read() -> bytes:
-        await asyncio.sleep(3600)
-        return b""
-
-    mock_proc.stderr = AsyncMock()
-    mock_proc.stderr.read = hanging_read
-
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
-         patch("os.fdopen", mock_open()), \
-         patch("os.unlink"):
-        result = await evaluate_ai_condition(
-            "Is the condition met?",
-            {},
-            task_id="t1",
-            stage_num=0,
-        )
-
-    assert result[0] is False
-
-
-@pytest.mark.asyncio
-async def test_evaluate_ai_condition_stdout_task_empty_returns_false() -> None:
-    from aquarco_supervisor.pipeline.conditions import evaluate_ai_condition
-
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.wait = AsyncMock(return_value=None)
-    mock_proc.stdout = _AsyncLineReader([])
-    mock_proc.stderr = AsyncMock()
-    mock_proc.stderr.read = AsyncMock(return_value=b"")
-
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
-         patch("os.fdopen", mock_open()), \
-         patch("os.unlink"):
+    with patch(
+        "aquarco_supervisor.pipeline.conditions.execute_claude",
+        AsyncMock(return_value=mock_output),
+    ) as mock_exec:
         result = await evaluate_ai_condition(
             "test condition",
             {},
             task_id="t1",
             stage_num=0,
+            max_turns=3,
+            timeout_seconds=300,
         )
 
-    assert result[0] is False
+    assert result["answer"] is False
+    call_kwargs = mock_exec.call_args[1]
+    assert call_kwargs["max_turns"] == 3
+    assert call_kwargs["timeout_seconds"] == 300
 
 
 @pytest.mark.asyncio
-async def test_evaluate_ai_condition_stderr_task_result_raises_exception() -> None:
+async def test_evaluate_ai_condition_uses_prompt_file() -> None:
+    """When prompt_file is given and exists, it is passed to execute_claude."""
+    import tempfile
+    from aquarco_supervisor.cli.claude import ClaudeOutput
     from aquarco_supervisor.pipeline.conditions import evaluate_ai_condition
 
-    result_event = {
-        "type": "result",
-        "subtype": "success",
-        "structured_output": {"answer": True},
-    }
+    mock_output = ClaudeOutput(
+        structured={"answer": True, "message": "ok"},
+        raw="",
+    )
 
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.wait = AsyncMock(return_value=None)
-    mock_proc.stdout = _AsyncLineReader([(json.dumps(result_event) + "\n").encode()])
+    with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
+        f.write("Custom prompt")
+        prompt_path = Path(f.name)
 
-    original_create_task = asyncio.create_task
-    task_count = 0
+    try:
+        with patch(
+            "aquarco_supervisor.pipeline.conditions.execute_claude",
+            AsyncMock(return_value=mock_output),
+        ) as mock_exec:
+            result = await evaluate_ai_condition(
+                "test",
+                {},
+                task_id="t1",
+                stage_num=0,
+                prompt_file=prompt_path,
+            )
 
-    def patched_create_task(coro: Any, **kwargs: Any) -> Any:
-        nonlocal task_count
-        task_count += 1
-        if task_count == 2:
-            async def raising() -> bytes:
-                raise RuntimeError("stderr task failed")
-            return original_create_task(raising())
-        return original_create_task(coro, **kwargs)
+        assert result["answer"] is True
+        call_kwargs = mock_exec.call_args[1]
+        assert call_kwargs["prompt_file"] == prompt_path
+    finally:
+        prompt_path.unlink(missing_ok=True)
 
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
-         patch("os.fdopen", mock_open()), \
-         patch("os.unlink"), \
-         patch("asyncio.create_task", side_effect=patched_create_task):
-        result = await evaluate_ai_condition(
-            "test stderr exception",
+
+@pytest.mark.asyncio
+async def test_evaluate_ai_condition_fallback_prompt_cleaned_up() -> None:
+    """When no prompt_file, a temp file is created and cleaned up."""
+    from aquarco_supervisor.cli.claude import ClaudeOutput
+    from aquarco_supervisor.pipeline.conditions import evaluate_ai_condition
+
+    captured_prompt_file: list[Path] = []
+    mock_output = ClaudeOutput(
+        structured={"answer": True, "message": "ok"},
+        raw="",
+    )
+
+    async def capturing_execute(*args: Any, **kwargs: Any) -> ClaudeOutput:
+        captured_prompt_file.append(kwargs["prompt_file"])
+        return mock_output
+
+    with patch(
+        "aquarco_supervisor.pipeline.conditions.execute_claude",
+        side_effect=capturing_execute,
+    ):
+        await evaluate_ai_condition(
+            "test",
             {},
             task_id="t1",
             stage_num=0,
         )
 
-    assert result[0] is True
+    # Temp file should have been cleaned up
+    assert len(captured_prompt_file) == 1
+    assert not captured_prompt_file[0].exists()
 
 
 @pytest.mark.asyncio
-async def test_evaluate_ai_condition_cleans_temp_files_via_evaluate_conditions() -> None:
+async def test_evaluate_ai_condition_includes_raw_output() -> None:
+    from aquarco_supervisor.cli.claude import ClaudeOutput
     from aquarco_supervisor.pipeline.conditions import evaluate_ai_condition
 
-    unlinked: list[str] = []
-    original_os_unlink = __import__("os").unlink
+    raw = '{"type":"result","structured_output":{"answer":true}}'
+    mock_output = ClaudeOutput(
+        structured={"answer": True, "message": ""},
+        raw=raw,
+    )
 
-    def tracking_unlink(path: str) -> None:
-        unlinked.append(path)
-        try:
-            original_os_unlink(path)
-        except OSError:
-            pass
-
-    original_mkstemp = __import__("tempfile").mkstemp
-    created_paths: list[str] = []
-
-    def tracking_mkstemp(*args: Any, **kwargs: Any) -> Any:
-        fd, path = original_mkstemp(*args, **kwargs)
-        created_paths.append(path)
-        return fd, path
-
-    result_event = {
-        "type": "result",
-        "subtype": "success",
-        "structured_output": {"answer": True},
-    }
-
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.wait = AsyncMock(return_value=None)
-    mock_proc.stdout = _AsyncLineReader([(json.dumps(result_event) + "\n").encode()])
-    mock_proc.stderr = AsyncMock()
-    mock_proc.stderr.read = AsyncMock(return_value=b"")
-
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
-         patch("os.fdopen", mock_open()), \
-         patch("tempfile.mkstemp", side_effect=tracking_mkstemp), \
-         patch("os.unlink", side_effect=tracking_unlink):
+    with patch(
+        "aquarco_supervisor.pipeline.conditions.execute_claude",
+        AsyncMock(return_value=mock_output),
+    ):
         result = await evaluate_ai_condition(
             "test",
             {},
@@ -523,39 +480,4 @@ async def test_evaluate_ai_condition_cleans_temp_files_via_evaluate_conditions()
             stage_num=0,
         )
 
-    assert result[0] is True
-    assert len(created_paths) == 2
-    assert len(unlinked) == 2
-
-
-@pytest.mark.asyncio
-async def test_evaluate_ai_condition_unlink_oserror_is_suppressed() -> None:
-    from aquarco_supervisor.pipeline.conditions import evaluate_ai_condition
-
-    result_event = {
-        "type": "result",
-        "subtype": "success",
-        "structured_output": {"answer": True},
-    }
-
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.wait = AsyncMock(return_value=None)
-    mock_proc.stdout = _AsyncLineReader([(json.dumps(result_event) + "\n").encode()])
-    mock_proc.stderr = AsyncMock()
-    mock_proc.stderr.read = AsyncMock(return_value=b"")
-
-    def raising_unlink(path: str) -> None:
-        raise OSError(f"Permission denied: {path}")
-
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
-         patch("os.fdopen", mock_open()), \
-         patch("os.unlink", side_effect=raising_unlink):
-        result = await evaluate_ai_condition(
-            "test unlink error suppression",
-            {},
-            task_id="t1",
-            stage_num=0,
-        )
-
-    assert result[0] is True
+    assert result["_raw_output"] == raw

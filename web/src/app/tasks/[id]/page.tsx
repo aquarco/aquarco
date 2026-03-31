@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation } from '@apollo/client'
 import { useParams } from 'next/navigation'
 import Box from '@mui/material/Box'
@@ -29,7 +29,7 @@ import { GET_TASK, GET_PIPELINE_DEFINITIONS, RETRY_TASK, RERUN_TASK, CLOSE_TASK,
 import { StatusChip } from '@/components/ui/StatusChip'
 import { monoStyle } from '@/lib/theme'
 import { formatDate } from '@/lib/format'
-import { parseLiveSpending, formatCost, formatTokens } from '@/lib/spending'
+import { formatCost, formatTokens } from '@/lib/spending'
 
 interface Stage {
   id: string
@@ -100,6 +100,43 @@ function resolveContextValue(entry: ContextEntry): { display: string; isJson: bo
     return { display: entry.valueFileRef, isJson: false }
   }
   return { display: '—', isJson: false }
+}
+
+function formatDurationSeconds(totalSeconds: number): string {
+  if (totalSeconds < 60) return `${totalSeconds}s`
+  const minutes = Math.floor(totalSeconds / 60)
+  const secs = totalSeconds % 60
+  if (minutes < 60) return `${minutes}m ${secs}s`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ${minutes % 60}m`
+}
+
+function StageDuration({ startedAt, completedAt, isExecuting }: {
+  startedAt: string | null
+  completedAt: string | null
+  isExecuting: boolean
+}) {
+  const computeSeconds = useCallback(() => {
+    if (!startedAt) return 0
+    const end = completedAt ? new Date(completedAt).getTime() : Date.now()
+    return Math.max(0, Math.floor((end - new Date(startedAt).getTime()) / 1000))
+  }, [startedAt, completedAt])
+
+  const [seconds, setSeconds] = useState(computeSeconds)
+
+  useEffect(() => {
+    setSeconds(computeSeconds())
+    if (!isExecuting) return
+    const id = setInterval(() => setSeconds(computeSeconds()), 1000)
+    return () => clearInterval(id)
+  }, [isExecuting, computeSeconds])
+
+  if (!startedAt) return null
+  return (
+    <Typography variant="caption" color="text.secondary">
+      {formatDurationSeconds(seconds)}
+    </Typography>
+  )
 }
 
 // ── Pipeline Stages Flow Diagram ─────────────────────────────────────────────
@@ -540,29 +577,9 @@ export default function TaskDetailPage() {
               const totalOutput = stages.reduce((sum, s) => sum + (s.tokensOutput ?? 0), 0)
               const totalCacheRead = stages.reduce((sum, s) => sum + (s.cacheReadTokens ?? 0), 0)
               const totalCacheWrite = stages.reduce((sum, s) => sum + (s.cacheWriteTokens ?? 0), 0)
-
-              let liveCost = 0
-              let liveInput = 0
-              let liveOutput = 0
-              let liveCacheRead = 0
-              let liveCacheWrite = 0
-              for (const s of stages) {
-                if ((s.status === 'EXECUTING' || (s.status === 'PENDING' && effectiveExecutingStages.has(s.stageNumber))) && s.liveOutput) {
-                  const live = parseLiveSpending(s.liveOutput)
-                  liveCost += live.estimatedCostUsd
-                  liveInput += live.inputTokens
-                  liveOutput += live.outputTokens
-                  liveCacheRead += live.cacheReadTokens
-                  liveCacheWrite += live.cacheWriteTokens
-                }
-              }
-
-              const grandCost = totalCost + liveCost
-              const grandInput = totalInput + liveInput
-              const grandOutput = totalOutput + liveOutput
-              const grandCacheRead = totalCacheRead + liveCacheRead
-              const grandCacheWrite = totalCacheWrite + liveCacheWrite
-              const hasAny = grandCost > 0 || grandInput > 0 || grandOutput > 0
+              const hasExecuting = stages.some(s => s.status === 'EXECUTING' ||
+                (s.status === 'PENDING' && effectiveExecutingStages.has(s.stageNumber)))
+              const hasAny = totalCost > 0 || totalInput > 0 || totalOutput > 0
 
               if (!hasAny) return null
               return (
@@ -570,30 +587,30 @@ export default function TaskDetailPage() {
                   <Grid item xs={6} sm={4} md={2}>
                     <Typography variant="caption" color="text.secondary">Cost</Typography>
                     <Typography variant="h6" fontWeight={700} color="warning.main">
-                      {formatCost(grandCost)}{liveCost > 0 ? '*' : ''}
+                      {formatCost(totalCost)}{hasExecuting ? '*' : ''}
                     </Typography>
                   </Grid>
                   <Grid item xs={6} sm={4} md={2}>
                     <Typography variant="caption" color="text.secondary">Input Tokens</Typography>
-                    <Typography variant="body1" fontWeight={600}>{formatTokens(grandInput)}</Typography>
+                    <Typography variant="body1" fontWeight={600}>{formatTokens(totalInput)}</Typography>
                   </Grid>
                   <Grid item xs={6} sm={4} md={2}>
                     <Typography variant="caption" color="text.secondary">Output Tokens</Typography>
-                    <Typography variant="body1" fontWeight={600}>{formatTokens(grandOutput)}</Typography>
+                    <Typography variant="body1" fontWeight={600}>{formatTokens(totalOutput)}</Typography>
                   </Grid>
-                  {grandCacheRead > 0 && (
+                  {totalCacheRead > 0 && (
                     <Grid item xs={6} sm={4} md={2}>
                       <Typography variant="caption" color="text.secondary">Cache Read</Typography>
-                      <Typography variant="body1" fontWeight={600}>{formatTokens(grandCacheRead)}</Typography>
+                      <Typography variant="body1" fontWeight={600}>{formatTokens(totalCacheRead)}</Typography>
                     </Grid>
                   )}
-                  {grandCacheWrite > 0 && (
+                  {totalCacheWrite > 0 && (
                     <Grid item xs={6} sm={4} md={2}>
                       <Typography variant="caption" color="text.secondary">Cache Write</Typography>
-                      <Typography variant="body1" fontWeight={600}>{formatTokens(grandCacheWrite)}</Typography>
+                      <Typography variant="body1" fontWeight={600}>{formatTokens(totalCacheWrite)}</Typography>
                     </Grid>
                   )}
-                  {liveCost > 0 && (
+                  {hasExecuting && (
                     <Grid item xs={12}>
                       <Typography variant="caption" color="text.secondary">
                         * includes live estimate from executing stages
@@ -685,9 +702,8 @@ export default function TaskDetailPage() {
 
                   const effectiveStatus = stage.status === 'PENDING' && effectiveExecutingStages.has(stage.stageNumber)
                     ? 'EXECUTING' : stage.status
-                  const isLive = (effectiveStatus === 'EXECUTING') && !!stage.liveOutput
-                  const live = isLive ? parseLiveSpending(stage.liveOutput!) : null
-                  const stageCost = live?.estimatedCostUsd ?? stage.costUsd
+                  const isLive = effectiveStatus === 'EXECUTING'
+                  const stageCost = stage.costUsd
 
                   const output = stage.structuredOutput as Record<string, unknown> | null
                   const findings = output?.findings as Array<{
@@ -721,21 +737,21 @@ export default function TaskDetailPage() {
                                 {isLive ? '~' : ''}{formatCost(stageCost)}
                               </Typography>
                             )}
-                            {stage.startedAt && (
-                              <Typography variant="caption" color="text.secondary">
-                                {formatDate(stage.startedAt)}
-                              </Typography>
-                            )}
+                            <StageDuration
+                              startedAt={stage.startedAt}
+                              completedAt={stage.completedAt}
+                              isExecuting={isLive}
+                            />
                           </Stack>
                         </Stack>
                       </AccordionSummary>
                       <AccordionDetails sx={{ px: 2, pt: 0, pb: 2 }}>
                         {/* Token stats bar */}
                         {(() => {
-                          const inp = live?.inputTokens ?? stage.tokensInput
-                          const out = live?.outputTokens ?? stage.tokensOutput
-                          const cr = live?.cacheReadTokens ?? stage.cacheReadTokens
-                          const cw = live?.cacheWriteTokens ?? stage.cacheWriteTokens
+                          const inp = stage.tokensInput
+                          const out = stage.tokensOutput
+                          const cr = stage.cacheReadTokens
+                          const cw = stage.cacheWriteTokens
                           if (!inp && !out) return null
                           return (
                             <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap justifyContent="flex-end"

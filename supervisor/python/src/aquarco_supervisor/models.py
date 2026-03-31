@@ -46,11 +46,6 @@ class TaskPhase(str, enum.Enum):
     FAILED = "failed"
 
 
-class ValidationItemStatus(str, enum.Enum):
-    OPEN = "open"
-    RESOLVED = "resolved"
-    WONT_FIX = "wont_fix"
-
 
 class RepoAgentScanStatus(str, enum.Enum):
     PENDING = "pending"
@@ -132,8 +127,6 @@ class Stage(BaseModel):
     iteration: int = 1
     input: dict[str, Any] | None = None
     structured_output: dict[str, Any] | None = None
-    validation_items_in: list[dict[str, Any]] | None = None
-    validation_items_out: list[dict[str, Any]] | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error_message: str | None = None
@@ -191,21 +184,10 @@ class PollState(BaseModel):
 
 class PipelineCheckpoint(BaseModel):
     task_id: str
-    last_completed_stage: int
+    last_completed_stage: int  # FK to stages.id
     checkpoint_data: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
 
-
-class ValidationItem(BaseModel):
-    id: int | None = None
-    task_id: str
-    stage_key: str | None = None
-    category: str
-    description: str
-    status: ValidationItemStatus = ValidationItemStatus.OPEN
-    resolved_by: str | None = None
-    resolved_at: datetime | None = None
-    created_at: datetime | None = None
 
 
 class RepoAgentScan(BaseModel):

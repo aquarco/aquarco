@@ -60,6 +60,10 @@ class PipelineError(SupervisorError):
 class StageError(PipelineError):
     """A pipeline stage failed."""
 
+    def __init__(self, message: str, *, session_id: str | None = None) -> None:
+        super().__init__(message)
+        self.session_id = session_id
+
 
 class AgentExecutionError(PipelineError):
     """Claude CLI agent invocation failed."""
@@ -78,7 +82,14 @@ class RetryableError(AgentExecutionError):
 
     Subclasses indicate that the task should be postponed and retried after a
     cooldown period, rather than being permanently failed.
+
+    Carries an optional ``session_id`` so that the executor can resume the
+    Claude session instead of starting fresh on retry.
     """
+
+    def __init__(self, message: str, *, session_id: str | None = None) -> None:
+        super().__init__(message)
+        self.session_id = session_id
 
 
 class RateLimitError(RetryableError):

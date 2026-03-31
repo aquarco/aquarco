@@ -27,8 +27,6 @@ def _clean_stage(stage: dict[str, Any]) -> dict[str, Any]:
 def build_accumulated_context(
     task_context: dict[str, Any],
     current_stage: int,
-    *,
-    validation_items: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the accumulated context for a pipeline stage.
 
@@ -76,16 +74,5 @@ def build_accumulated_context(
         "stage_history": stage_history,
         "context_entries": task_context.get("context_entries", []),
     }
-
-    # Include validation items to address (for iteration re-runs)
-    if validation_items:
-        result["validation_items_to_address"] = validation_items
-
-    # Include all open validation items from task context
-    all_vi = task_context.get("validation_items", [])
-    if all_vi:
-        open_vi = [vi for vi in all_vi if vi.get("status") == "open"]
-        if open_vi:
-            result["open_validation_items"] = open_vi
 
     return result

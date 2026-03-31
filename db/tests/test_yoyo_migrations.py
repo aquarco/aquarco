@@ -54,6 +54,8 @@ EXPECTED_MIGRATIONS = [
     "030_add_agent_group",
     "031_add_postpone_cooldown",
     "032_add_stage_spending",
+    "033_add_stage_session_id",
+    "034_checkpoint_stage_fk",
 ]
 
 # Build expected dependency map: migration_name -> depends_on_name
