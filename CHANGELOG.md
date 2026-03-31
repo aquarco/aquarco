@@ -1,5 +1,30 @@
 # Changelog
 
+## [2026-03-31] — Unified reverse proxy routing via Caddy (#2)
+
+### Added
+- **Caddy reverse proxy** (`docker/caddy/Caddyfile`) — single-port entry point on `:8080` with path-based routing to all services
+- **Caddy Docker service** in `docker/compose.yml` — `caddy:2-alpine` container with Caddyfile mount, admin API on `127.0.0.1:2019`, and named volumes (`caddy_data`, `caddy_config`)
+- **Monitoring network bridge** — `docker/compose.monitoring.yml` now joins the `aquarco` network so Caddy can reach Grafana and Prometheus
+
+### Changed
+- **`docker/compose.yml`** — `web` service no longer exposes external ports (Caddy handles routing); `api` restricted to `127.0.0.1:4000` for debug access only; added `NEXT_PUBLIC_API_URL: /api/graphql` to `web` environment
+- **`docker/compose.dev.yml`** — Adminer no longer exposes a direct port; accessed via `/adminer/*` through Caddy
+- **`docker/compose.monitoring.yml`** — Grafana and Prometheus direct ports removed; Grafana configured with `GF_SERVER_SERVE_FROM_SUB_PATH` at `/grafana/`; Prometheus configured with `--web.external-url` and `--web.route-prefix` at `/prometheus`
+- **`web/src/lib/apollo.tsx`** — browser-side API URL changed from absolute to relative (`/api/graphql`); SSR continues to use `http://api:4000/graphql`
+- **`vagrant/Vagrantfile`** — reduced to two system port forwards: `8080` (Caddy proxy) and `15432` (PostgreSQL); removed individual forwards for API, Grafana, Prometheus, and Adminer
+
+### Routing Map
+```
+:8080 (single port)
+  /              → web:3000        (Next.js)
+  /api/*         → api:4000        (GraphQL, path stripped)
+  /adminer/*     → adminer:8080    (path stripped)
+  /grafana/*     → grafana:3000    (subpath-aware)
+  /prometheus/*  → prometheus:9090 (subpath-aware)
+  /repo/*        → 503 placeholder (Phase 2)
+```
+
 ## [2026-03-30] — Expand retryable error handling to cover HTTP 500 and 529 (#41)
 
 ### Added

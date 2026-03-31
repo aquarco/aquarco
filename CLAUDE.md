@@ -35,6 +35,7 @@ Always check `prd.json` for current requirements, architecture decisions, and st
 - **Backend API**: GraphQL (Node.js / .NET)
 - **Frontend**: Next.js, React, MUI
 - **Database**: PostgreSQL
+- **Reverse Proxy**: Caddy (single-port entry on `:8080`, path-based routing to all services)
 - **Dev Infra**: Docker Compose with source code mounts (no docker build, hot reload)
 - **Runtime**: Docker Compose only (no Kubernetes/k3s)
 - **CI/CD**: Scripts managed by scripting agent
@@ -56,6 +57,7 @@ changes.
 
 | Component | Container/Service | Hot Reload | Mechanism | Polling Env Var |
 |-----------|-------------------|------------|-----------|-----------------|
+| **Caddy (Proxy)** | `caddy` (Docker) | ✅ Auto | Caddyfile mounted read-only; use `caddy reload` or Admin API (`:2019`) to apply changes | — |
 | **Web (Next.js)** | `web` (Docker) | ✅ Works | `next dev` + watchpack | `WATCHPACK_POLLING=true` |
 | **API (GraphQL)** | `api` (Docker) | ✅ Works | `tsx watch` + chokidar | `CHOKIDAR_USEPOLLING=true` |
 | **PostgreSQL** | `postgres` (Docker) | N/A | yoyo-migrations applied on each `docker compose up` | — |
