@@ -316,6 +316,49 @@ def test_scoped_view_accessors_defaults(tmp_path: Path) -> None:
     view.cleanup()
 
 
+def test_scoped_view_get_agent_model(tmp_path: Path) -> None:
+    """get_agent_model returns model from resolved config or None."""
+    resolved = ResolvedConfig(
+        agents={
+            "agent-with-model": {"name": "agent-with-model", "model": "claude-sonnet-4-6"},
+            "agent-nested": {"name": "agent-nested", "spec": {"model": "claude-haiku-4-5"}},
+            "agent-no-model": {"name": "agent-no-model"},
+        },
+        pipelines=[],
+        prompt_dirs=[tmp_path],
+    )
+    view = ScopedAgentView(resolved)
+    assert view.get_agent_model("agent-with-model") == "claude-sonnet-4-6"
+    assert view.get_agent_model("agent-nested") == "claude-haiku-4-5"
+    assert view.get_agent_model("agent-no-model") is None
+    assert view.get_agent_model("unknown") is None
+    view.cleanup()
+
+
+def test_scoped_view_model_overlay_resolution(tmp_path: Path) -> None:
+    """Repo overlay model overrides default model via resolve_config."""
+    from aquarco_supervisor.models import ConfigOverlay, MergeConfig
+
+    default_agents = {
+        "my-agent": {"name": "my-agent", "model": "claude-sonnet-4-6"},
+    }
+    repo_base = tmp_path / "repo"
+    repo_base.mkdir()
+    repo_overlay = ConfigOverlay(
+        agents=[{"name": "my-agent", "model": "claude-opus-4"}],
+        merge=MergeConfig(agents=MergeStrategy.EXTEND, pipelines=MergeStrategy.EXTEND),
+    )
+
+    resolved = resolve_config(
+        default_agents, [], tmp_path / "prompts",
+        repo_overlay=repo_overlay,
+        repo_overlay_base=repo_base,
+    )
+    view = ScopedAgentView(resolved)
+    assert view.get_agent_model("my-agent") == "claude-opus-4"
+    view.cleanup()
+
+
 def test_scoped_view_path_traversal(tmp_path: Path) -> None:
     """Path traversal in promptFile is rejected."""
     from aquarco_supervisor.exceptions import AgentRegistryError

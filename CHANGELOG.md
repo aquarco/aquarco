@@ -1,5 +1,22 @@
 # Changelog
 
+## [2026-03-31] — Per-agent model selection (#60)
+
+### Added
+- **`model` field** in agent definition schemas (`system-agent-v1.json`, `pipeline-agent-v1.json`) — optional string specifying which Claude model the agent should use (e.g., `claude-sonnet-4-6`, `claude-haiku-4-5`). When omitted, the CLI uses its default model.
+- **`get_agent_model()`** on `AgentRegistry` — retrieves the configured model for a given agent name, returning `None` when not set
+- **`get_agent_model()`** on `ScopedAgentView` (`config_overlay.py`) — resolves model through the multi-layer config overlay (default → global → repo → autoloaded), enabling per-repo model overrides
+- **`--model` flag** passed to Claude CLI (`cli/claude.py`) — `execute_claude()` accepts an optional `model` parameter and appends `--model <value>` to the CLI args when set
+- **Model resolution in executor** (`pipeline/executor.py`) — both `_execute_agent()` and condition-evaluator invocations now resolve and pass the agent's model to the CLI
+- 39 new tests in `supervisor/python/tests/test_model_per_agent.py`
+
+### Changed
+- **All agent definitions** updated with explicit `model` values:
+  - Pipeline agents (`analyze`, `design`, `implementation`, `review`, `test`, `docs`): `claude-sonnet-4-6`
+  - System agents (`planner`): `claude-sonnet-4-6`
+  - System agents (`condition-evaluator`, `repo-descriptor`): `claude-haiku-4-5`
+- **Legacy flat-directory agent definitions** (`config/agents/definitions/*.yaml`) also updated with `model` field for backward compatibility
+
 ## [2026-03-31] — Aquarco CLI (#5)
 
 ### Added

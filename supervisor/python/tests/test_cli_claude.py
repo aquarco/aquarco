@@ -896,3 +896,81 @@ def test_parse_output_list_no_assistant_messages() -> None:
     messages = [{"type": "system", "subtype": "init"}]
     result = _parse_output(json.dumps(messages), "task-001", 0)
     assert result["_no_structured_output"] is True
+
+
+# --- model parameter ---
+
+
+@pytest.mark.asyncio
+async def test_execute_claude_passes_model_flag(tmp_path: Any) -> None:
+    """When model is provided, --model <value> is included in CLI args."""
+    prompt_file = tmp_path / "system.md"
+    prompt_file.write_text("You are a test agent.")
+
+    mock_proc = _make_proc_mock(returncode=0)
+    captured_args: list = []
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        captured_args.extend(args)
+        return mock_proc
+
+    async def fake_tail(path, proc, **kwargs):
+        return [], False
+
+    with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
+         patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
+         patch("tempfile.mkstemp") as mock_mkstemp, \
+         patch("pathlib.Path.mkdir"):
+        ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
+        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+
+        await execute_claude(
+            prompt_file=prompt_file,
+            context={},
+            work_dir=str(tmp_path),
+            task_id="t1",
+            stage_num=0,
+            model="claude-sonnet-4-6",
+        )
+
+    args_str = " ".join(str(a) for a in captured_args)
+    assert "--model" in args_str
+    assert "claude-sonnet-4-6" in args_str
+
+
+@pytest.mark.asyncio
+async def test_execute_claude_no_model_flag_when_none(tmp_path: Any) -> None:
+    """When model is None, --model is NOT included in CLI args."""
+    prompt_file = tmp_path / "system.md"
+    prompt_file.write_text("You are a test agent.")
+
+    mock_proc = _make_proc_mock(returncode=0)
+    captured_args: list = []
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        captured_args.extend(args)
+        return mock_proc
+
+    async def fake_tail(path, proc, **kwargs):
+        return [], False
+
+    with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
+         patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
+         patch("tempfile.mkstemp") as mock_mkstemp, \
+         patch("pathlib.Path.mkdir"):
+        ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
+        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+
+        await execute_claude(
+            prompt_file=prompt_file,
+            context={},
+            work_dir=str(tmp_path),
+            task_id="t1",
+            stage_num=0,
+            model=None,
+        )
+
+    args_str = " ".join(str(a) for a in captured_args)
+    assert "--model" not in args_str

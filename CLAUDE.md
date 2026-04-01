@@ -96,9 +96,11 @@ Agents are split into two subdirectories by role:
 - **`system/`** — Orchestration agents invoked directly by the executor. Use `spec.role` (e.g., `planner`, `condition-evaluator`, `repo-descriptor`) instead of `spec.categories`. Never selected for category-based stage dispatch. Validated against `config/schemas/system-agent-v1.json`.
 - **`pipeline/`** — Stage execution agents selected by category. Use `spec.categories` and `spec.priority`. Validated against `config/schemas/pipeline-agent-v1.json`.
 
-Each agent is defined as a Kubernetes-style resource with `spec.tools.allowed`/`spec.tools.denied`
-and `spec.environment` (env vars passed to Claude CLI). Output schemas are now defined at
-the pipeline category level (see Pipelines below), not in agent definitions.
+Each agent is defined as a Kubernetes-style resource with `spec.model` (Claude model override),
+`spec.tools.allowed`/`spec.tools.denied`, and `spec.environment` (env vars passed to Claude CLI).
+The `model` field is optional; when omitted the CLI uses its default. The config overlay system
+supports per-repo model overrides. Output schemas are now defined at the pipeline category level
+(see Pipelines below), not in agent definitions.
 
 ### Pipelines (`config/pipelines.yaml`)
 Pipeline definitions are loaded from this standalone file (path configured via `pipelinesFile`
