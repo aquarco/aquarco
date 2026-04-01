@@ -18,7 +18,8 @@ STEPS = [
     ("Pull latest Docker images", "cd /home/agent/aquarco/docker && sudo docker compose pull"),
     ("Run database migrations", "cd /home/agent/aquarco/docker && sudo docker compose run --rm migrations"),
     ("Restart Docker services", "cd /home/agent/aquarco/docker && sudo docker compose up -d --build"),
-    ("Upgrade supervisor package", "cd /home/agent/aquarco/supervisor/python && sudo pip install -e '.[dev]'"),
+    ("Fix venv permissions", "sudo chown -R agent:agent /home/agent/.venv && sudo chmod -R u+w /home/agent/.venv"),
+    ("Upgrade supervisor package", "sudo -u agent /home/agent/.venv/bin/pip install -e /home/agent/aquarco/supervisor/python/"),
     ("Restart supervisor service", "sudo systemctl restart aquarco-supervisor-python"),
 ]
 
