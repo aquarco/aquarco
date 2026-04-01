@@ -126,3 +126,116 @@ class TestUpdateCommand:
         assert result.exit_code == 0
         assert "provision" in result.output.lower()
         assert "health" in result.output.lower()
+
+
+class TestStepsDefinition:
+    """Tests for the STEPS list structure and ordering."""
+
+    def test_lock_venv_step_exists(self):
+        """The 'Lock venv' step must be present in STEPS."""
+        from aquarco_cli.commands.update import STEPS
+
+        step_names = [name for name, _ in STEPS]
+        assert "Lock venv" in step_names
+
+    def test_lock_venv_uses_chmod_remove_write(self):
+        """Lock venv step must remove write permissions on .venv/lib/."""
+        from aquarco_cli.commands.update import STEPS
+
+        lock_steps = [(n, c) for n, c in STEPS if n == "Lock venv"]
+        assert len(lock_steps) == 1
+        cmd = lock_steps[0][1]
+        assert "chmod" in cmd
+        assert "a-w" in cmd
+        assert ".venv/lib/" in cmd
+
+    def test_lock_venv_after_upgrade(self):
+        """Lock venv must come immediately after 'Upgrade supervisor package'."""
+        from aquarco_cli.commands.update import STEPS
+
+        step_names = [name for name, _ in STEPS]
+        upgrade_idx = step_names.index("Upgrade supervisor package")
+        lock_idx = step_names.index("Lock venv")
+        assert lock_idx == upgrade_idx + 1, (
+            f"Lock venv (idx={lock_idx}) should be right after "
+            f"Upgrade supervisor package (idx={upgrade_idx})"
+        )
+
+    def test_lock_venv_before_restart(self):
+        """Lock venv must come before 'Restart supervisor service'."""
+        from aquarco_cli.commands.update import STEPS
+
+        step_names = [name for name, _ in STEPS]
+        lock_idx = step_names.index("Lock venv")
+        restart_idx = step_names.index("Restart supervisor service")
+        assert lock_idx < restart_idx
+
+    def test_unlock_lock_sequence(self):
+        """Steps must follow unlock → install → lock → restart sequence."""
+        from aquarco_cli.commands.update import STEPS
+
+        step_names = [name for name, _ in STEPS]
+        fix_idx = step_names.index("Fix venv permissions")
+        upgrade_idx = step_names.index("Upgrade supervisor package")
+        lock_idx = step_names.index("Lock venv")
+        restart_idx = step_names.index("Restart supervisor service")
+        assert fix_idx < upgrade_idx < lock_idx < restart_idx
+
+
+class TestLockVenvExecution:
+    """Tests that the lock venv step is actually executed via SSH."""
+
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.subprocess.run")
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_lock_venv_ssh_called(self, mock_cls, mock_subprocess, mock_health):
+        """The lock venv chmod command must be sent via SSH."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_subprocess.return_value.returncode = 0
+
+        runner.invoke(app, ["update"])
+
+        ssh_cmds = [
+            call[0][0] if call[0] else call[1].get("command", "")
+            for call in mock_vagrant.ssh.call_args_list
+        ]
+        lock_cmds = [c for c in ssh_cmds if "a-w" in c and ".venv/lib/" in c]
+        assert len(lock_cmds) == 1, f"Expected one lock-venv SSH call, got: {ssh_cmds}"
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_dry_run_shows_lock_venv_step(self, mock_cls):
+        """Dry run output must list the lock venv step."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        result = runner.invoke(app, ["update", "--dry-run"])
+        assert result.exit_code == 0
+        assert "lock venv" in result.output.lower()
+
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.subprocess.run")
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_lock_venv_runs_even_if_upgrade_fails(self, mock_cls, mock_subprocess, mock_health):
+        """If pip install fails, lock venv should still execute (fail-safe)."""
+        from aquarco_cli.vagrant import VagrantError
+
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_subprocess.return_value.returncode = 0
+
+        # Make only the pip install step fail
+        def ssh_side_effect(cmd, **kwargs):
+            if "pip install" in cmd:
+                raise VagrantError("pip install failed")
+
+        mock_vagrant.ssh.side_effect = ssh_side_effect
+
+        result = runner.invoke(app, ["update"])
+        assert result.exit_code == 0
+
+        ssh_cmds = [
+            call[0][0] if call[0] else call[1].get("command", "")
+            for call in mock_vagrant.ssh.call_args_list
+        ]
+        lock_cmds = [c for c in ssh_cmds if "a-w" in c and ".venv/lib/" in c]
+        assert len(lock_cmds) == 1, "Lock venv must still be called after pip install failure"
