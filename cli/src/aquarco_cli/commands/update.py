@@ -20,6 +20,7 @@ STEPS = [
     ("Restart Docker services", "cd /home/agent/aquarco/docker && sudo docker compose up -d --build"),
     ("Fix venv permissions", "sudo chown -R agent:agent /home/agent/.venv && sudo chmod -R u+w /home/agent/.venv"),
     ("Upgrade supervisor package", "sudo -u agent /home/agent/.venv/bin/pip install -e /home/agent/aquarco/supervisor/python/"),
+    ("Lock venv", "sudo chmod -R a-w /home/agent/.venv/lib/"),
     ("Restart supervisor service", "sudo systemctl restart aquarco-supervisor-python"),
 ]
 
