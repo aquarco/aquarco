@@ -25,8 +25,7 @@ categories:
           enum:
             - feature-pipeline
             - bugfix-pipeline
-            - docs-pipeline
-            - hotfix-pipeline
+            - pr-review-pipeline
           description: "Which pipeline should handle this work"
         estimated_complexity:
           type: string
@@ -89,7 +88,7 @@ categories:
           items:
             type: string
           description: "Migration files that will be required"
-  - name: docs
+  - name: document
     outputSchema:
       type: object
       required:
@@ -104,7 +103,7 @@ categories:
         summary:
           type: string
           description: "Narrative description of what documentation was changed and why"
-  - name: implementation
+  - name: implement
     outputSchema:
       type: object
       required:
@@ -218,7 +217,7 @@ pipelines:
         required: true
 
       - name: implementation
-        category: implementation
+        category: implement
         required: false
         conditions: 
           - ai: All design.acceptance_criteria fulfilled?
@@ -237,7 +236,7 @@ pipelines:
             maxRepeats: 5
 
       - name: fix-review-findings
-        category: implementation
+        category: implement
         required: false
         conditions:
           - simple: "true"
@@ -252,8 +251,8 @@ pipelines:
             "no": test
             maxRepeats: 5
 
-      - name: docs
-        category: docs
+      - name: documentation
+        category: document
         required: false
 
   - name: bugfix-pipeline
@@ -266,7 +265,7 @@ pipelines:
         required: true
 
       - name: implementation
-        category: implementation
+        category: implement
         required: true
 
       - name: review
@@ -278,7 +277,7 @@ pipelines:
             maxRepeats: 3
 
       - name: fix-review-findings
-        category: implementation
+        category: implement
         required: false
         conditions:
           - simple: "true"
@@ -307,7 +306,7 @@ pipelines:
             maxRepeats: 3
 
       - name: fix-review-findings
-        category: implementation
+        category: implement
         required: false
         conditions:
           - simple: "true"

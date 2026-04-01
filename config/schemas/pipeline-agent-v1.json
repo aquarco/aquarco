@@ -53,7 +53,8 @@
       "properties": {
         "model": {
           "type": "string",
-          "description": "Claude model to use for this agent (e.g. claude-sonnet-4-6). When omitted, the CLI uses its default model."
+          "enum": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5", "opus", "sonnet", "haiku"],
+          "description": "Claude model to use for this agent (e.g. sonnet). When omitted, the CLI uses its default model."
         },
         "categories": {
           "type": "array",
@@ -61,7 +62,7 @@
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "enum": ["review", "implementation", "test", "design", "docs", "analyze"]
+            "enum": ["review", "implement", "test", "design", "docs", "analyze"]
           },
           "description": "Task categories this agent handles"
         },

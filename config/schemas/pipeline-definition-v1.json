@@ -41,7 +41,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Category name (e.g., analyze, design, implementation)"
+          "description": "Category name (e.g., analyze, design, implement, test, review, document)"
         },
         "outputSchema": {
           "type": "object",

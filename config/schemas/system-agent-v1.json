@@ -53,7 +53,7 @@
       "properties": {
         "model": {
           "type": "string",
-          "description": "Claude model to use for this agent (e.g. claude-sonnet-4-6). When omitted, the CLI uses its default model."
+          "description": "Claude model to use for this agent (e.g. ). When omitted, the CLI uses its default model."
         },
         "role": {
           "type": "string",
