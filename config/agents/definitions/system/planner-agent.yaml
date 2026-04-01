@@ -9,11 +9,11 @@ metadata:
     domain: planning
 
 spec:
-  model: claude-sonnet-4-6
+  model: sonnet
 
   role: planner
 
-  promptFile: planner-agent.md
+  promptFile:  ../../prompts/planner-agent.md
 
   tools:
     allowed:
@@ -30,7 +30,7 @@ spec:
     timeoutMinutes: 20
     maxConcurrent: 2
     maxTurns: 20
-    maxCost: 1.0
+    maxCost: 2.0
 
   environment:
     AGENT_MODE: "planning"

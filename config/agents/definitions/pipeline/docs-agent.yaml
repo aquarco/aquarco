@@ -9,14 +9,14 @@ metadata:
     domain: documentation
 
 spec:
-  model: claude-sonnet-4-6
+  model: haiku
 
   categories:
     - docs
 
   priority: 20
 
-  promptFile: docs-agent.md
+  promptFile:  ../../prompts/docs-agent.md
 
   tools:
     allowed:

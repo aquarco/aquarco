@@ -9,14 +9,14 @@ metadata:
     domain: implementation
 
 spec:
-  model: claude-sonnet-4-6
+  model: opus
 
   categories:
-    - implementation
+    - implement
 
   priority: 10
 
-  promptFile: implementation-agent.md
+  promptFile:  ../../prompts/implementation-agent.md
 
   tools:
     allowed:

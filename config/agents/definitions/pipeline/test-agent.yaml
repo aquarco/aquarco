@@ -9,14 +9,14 @@ metadata:
     domain: testing
 
 spec:
-  model: claude-sonnet-4-6
+  model: opus
 
   categories:
     - test
 
   priority: 10
 
-  promptFile: test-agent.md
+  promptFile:  ../../prompts/test-agent.md
 
   tools:
     allowed:

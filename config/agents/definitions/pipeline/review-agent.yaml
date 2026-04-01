@@ -9,14 +9,14 @@ metadata:
     domain: review
 
 spec:
-  model: claude-sonnet-4-6
+  model: opus
 
   categories:
     - review
 
   priority: 10
 
-  promptFile: review-agent.md
+  promptFile:  ../../prompts/review-agent.md
 
   tools:
     allowed:

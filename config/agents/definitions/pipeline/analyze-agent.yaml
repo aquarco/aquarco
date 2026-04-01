@@ -9,7 +9,7 @@ metadata:
     domain: analysis
 
 spec:
-  model: claude-sonnet-4-6
+  model: sonnet
 
   categories:
     - analyze
@@ -17,7 +17,7 @@ spec:
   # Priority 1 — highest priority, runs first in all pipelines
   priority: 1
 
-  promptFile: analyze-agent.md
+  promptFile: ../../prompts/analyze-agent.md
 
   tools:
     allowed:

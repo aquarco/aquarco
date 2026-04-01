@@ -9,11 +9,11 @@ metadata:
     domain: orchestration
 
 spec:
-  model: claude-haiku-4-5
+  model: haiku
 
   role: repo-descriptor
 
-  promptFile: repo-descriptor-agent.md
+  promptFile:  ../../prompts/repo-descriptor-agent.md
 
   tools:
     allowed:
@@ -28,8 +28,8 @@ spec:
     maxTokens: 50000
     timeoutMinutes: 10
     maxConcurrent: 2
-    maxTurns: 5
-    maxCost: 0.5
+    maxTurns: 10
+    maxCost: 1.0
 
   environment:
     AGENT_MODE: "repo-description"

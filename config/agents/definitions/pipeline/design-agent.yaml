@@ -9,14 +9,14 @@ metadata:
     domain: design
 
 spec:
-  model: claude-sonnet-4-6
+  model: sonnet
 
   categories:
     - design
 
   priority: 10
 
-  promptFile: design-agent.md
+  promptFile:  ../../prompts/design-agent.md
 
   tools:
     allowed:

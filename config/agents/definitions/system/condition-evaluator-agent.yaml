@@ -9,11 +9,11 @@ metadata:
     domain: orchestration
 
 spec:
-  model: claude-haiku-4-5
+  model: haiku
 
   role: condition-evaluator
 
-  promptFile: condition-evaluator-agent.md
+  promptFile:  ../../prompts/condition-evaluator-agent.md
 
   # tools.allowed: [] means "no tools whitelisted" — the CLI wrapper MUST
   # omit --allowedTools when the list is empty (treating it as "unset / all
@@ -28,8 +28,8 @@ spec:
     maxTokens: 10000
     timeoutMinutes: 2
     maxConcurrent: 5
-    maxTurns: 1
-    maxCost: 0.05
+    maxTurns: 10
+    maxCost: 1.0
 
   environment:
     AGENT_MODE: "condition-evaluation"
