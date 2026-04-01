@@ -30,7 +30,7 @@ app = typer.Typer(help="Agent discovery and validation commands.")
 # ---------------------------------------------------------------------------
 REQUIRED_API_VERSION = "aquarco.agents/v1"
 REQUIRED_KIND = "AgentDefinition"
-VALID_CATEGORIES = {"review", "implementation", "test", "design", "docs", "analyze"}
+VALID_CATEGORIES = {"review", "implement", "test", "design", "document", "analyze"}
 VALID_OUTPUT_FORMATS = {"task-file", "github-pr-comment", "commit", "issue", "none"}
 KEBAB_CASE_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)")

@@ -122,10 +122,10 @@ def _infer_category(name: str, content: str) -> str:
     category_hints = {
         "analyze": ["analyz", "triage", "assess", "audit"],
         "design": ["design", "architect", "plan"],
-        "implementation": ["implement", "develop", "code", "build", "write code"],
+        "implement": ["implement", "develop", "code", "build", "write code"],
         "test": ["test", "spec", "coverage", "e2e", "playwright"],
         "review": ["review", "quality", "qa", "lint", "security", "auth", "owasp", "vulnerabilit"],
-        "docs": ["document", "readme", "changelog", "docs"],
+        "document": ["document", "readme", "changelog", "docs"],
     }
 
     for category, hints in category_hints.items():
@@ -133,7 +133,7 @@ def _infer_category(name: str, content: str) -> str:
             if hint in name_lower or hint in content_lower:
                 return category
 
-    return "implementation"  # Default category
+    return "implement"  # Default category
 
 
 def _infer_tools(content: str) -> list[str]:

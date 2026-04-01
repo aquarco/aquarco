@@ -62,7 +62,7 @@
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "enum": ["review", "implement", "test", "design", "docs", "analyze"]
+            "enum": ["review", "implement", "test", "design", "document", "analyze"]
           },
           "description": "Task categories this agent handles"
         },
