@@ -1196,9 +1196,13 @@ async def test_sync_agent_instances_inserts_new_agents_with_zero_counts(
         sql = call[0][0]
         # The INSERT VALUES should include 0 for both active_count and total_executions
         assert "VALUES" in sql
-        assert "0, 0" in sql.replace(" ", "").replace("\n", "") or (
-            "0" in sql
-        ), "INSERT should set active_count=0 and total_executions=0 for new agents"
+        # Normalize whitespace and check the VALUES clause contains 0, 0
+        values_section = sql.split("VALUES")[1].split("ON CONFLICT")[0]
+        normalized = " ".join(values_section.split())
+        assert "0, 0)" in normalized, (
+            f"INSERT VALUES should end with 0, 0 for active_count and total_executions, "
+            f"got: {normalized}"
+        )
 
 
 @pytest.mark.asyncio
@@ -1223,3 +1227,84 @@ async def test_sync_does_not_use_do_nothing(
         assert "DO NOTHING" not in sql, (
             "Must NOT use DO NOTHING — stale active_count must be reset to 0"
         )
+
+
+@pytest.mark.asyncio
+async def test_sync_agent_instances_sql_uses_named_parameter(
+    mock_db: AsyncMock, registry_file: Path, tmp_path: Path
+) -> None:
+    """The INSERT should use %(name)s parameter, not string interpolation.
+
+    This guards against SQL injection and ensures parameterized queries.
+    """
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    await reg.load(str(registry_file))
+
+    sync_calls = [
+        call for call in mock_db.execute.call_args_list
+        if "agent_instances" in str(call) and "INSERT" in str(call)
+    ]
+
+    for call in sync_calls:
+        sql = call[0][0]
+        params = call[0][1]
+        # Must use parameterized query, not string formatting
+        assert "%(name)s" in sql, "SQL must use %(name)s parameter binding"
+        assert "name" in params, "Params dict must contain 'name' key"
+        # Agent name must not appear literally in the SQL
+        agent_name = params["name"]
+        assert agent_name not in sql, (
+            f"Agent name '{agent_name}' should not be interpolated into SQL"
+        )
+
+
+@pytest.mark.asyncio
+async def test_sync_agent_instances_uses_on_conflict_agent_name(
+    mock_db: AsyncMock, registry_file: Path, tmp_path: Path
+) -> None:
+    """ON CONFLICT must target (agent_name) as the unique constraint."""
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    await reg.load(str(registry_file))
+
+    sync_calls = [
+        call for call in mock_db.execute.call_args_list
+        if "agent_instances" in str(call) and "ON CONFLICT" in str(call)
+    ]
+    assert len(sync_calls) >= 1
+
+    for call in sync_calls:
+        sql = call[0][0]
+        assert "(agent_name)" in sql.replace(" ", ""), (
+            "ON CONFLICT must target (agent_name) column"
+        )
+
+
+@pytest.mark.asyncio
+async def test_sync_agent_instances_only_sets_active_count_in_update(
+    mock_db: AsyncMock, registry_file: Path, tmp_path: Path
+) -> None:
+    """The DO UPDATE clause should ONLY set active_count, nothing else.
+
+    This is a stricter version of the preservation test — it verifies that
+    exactly one column is modified in the update clause.
+    """
+    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    await reg.load(str(registry_file))
+
+    sync_calls = [
+        call for call in mock_db.execute.call_args_list
+        if "agent_instances" in str(call) and "DO UPDATE" in str(call)
+    ]
+
+    for call in sync_calls:
+        sql = call[0][0]
+        update_clause = sql.split("DO UPDATE")[1].strip()
+        # Should only contain SET active_count = 0, no other SET assignments
+        set_assignments = [
+            s.strip() for s in update_clause.split("SET")[1].split(",")
+        ]
+        assert len(set_assignments) == 1, (
+            f"Expected exactly 1 SET assignment in ON CONFLICT UPDATE, "
+            f"got {len(set_assignments)}: {set_assignments}"
+        )
+        assert "active_count" in set_assignments[0]
