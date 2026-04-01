@@ -1299,8 +1299,9 @@ async def test_sync_agent_instances_only_sets_active_count_in_update(
 
     for call in sync_calls:
         sql = call[0][0]
-        # Use regex to extract column names from SET clause
-        set_columns = re.findall(r"SET\s+(\w+)\s*=", sql.split("DO UPDATE")[1])
+        # Extract the SET clause and find all "column =" pairs within it
+        after_set = re.split(r"\bSET\b", sql.split("DO UPDATE")[1], maxsplit=1)[1]
+        set_columns = re.findall(r"(\w+)\s*=", after_set)
         assert set_columns == ["active_count"], (
             f"Expected exactly ['active_count'] in ON CONFLICT UPDATE SET, "
             f"got {set_columns}"
