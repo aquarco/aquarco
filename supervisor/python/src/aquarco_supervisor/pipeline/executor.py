@@ -67,7 +67,6 @@ class PipelineExecutor:
             {"name": p.name, "version": p.version, "trigger": p.trigger.model_dump(), "stages": [s.model_dump() for s in p.stages], "categories": p.categories}
             for p in self._pipelines
         ]
-        default_prompts_dir = self._registry.get_default_prompts_dir()
 
         # Layer 2: global config repo (is_config_repo=true, clone_status='ready')
         global_overlay = None
@@ -104,7 +103,7 @@ class PipelineExecutor:
             return None
 
         resolved = resolve_config(
-            default_agents, default_pipelines, default_prompts_dir,
+            default_agents, default_pipelines,
             global_overlay, global_overlay_base,
             repo_overlay, repo_overlay_base,
         )

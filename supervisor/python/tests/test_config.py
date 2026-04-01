@@ -48,7 +48,6 @@ def test_load_empty_database_url(tmp_path: Path) -> None:
         "spec": {
             "workdir": "/tmp",
             "agentsDir": "/tmp",
-            "promptsDir": "/tmp",
             "database": {"url": ""},
         },
     }
@@ -242,7 +241,6 @@ def test_load_minimal_config(tmp_path: Path) -> None:
         "spec": {
             "workdir": "/tmp",
             "agentsDir": "/tmp",
-            "promptsDir": "/tmp",
             "database": {
                 "url": "postgresql://test:test@localhost/test",
                 "maxConnections": 1,

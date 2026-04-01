@@ -8,7 +8,6 @@ metadata:
 spec:
   workdir: /home/agent/aquarco
   agentsDir: /home/agent/aquarco/config/agents/definitions
-  promptsDir: /home/agent/aquarco/config/agents/prompts
   pipelinesFile: /home/agent/aquarco/config/pipelines.yaml
 
   database:

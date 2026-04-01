@@ -18,10 +18,9 @@ log = get_logger("agent-registry")
 class AgentRegistry:
     """Manages agent definitions, capacity, and instance tracking."""
 
-    def __init__(self, db: Database, agents_dir: str, prompts_dir: str) -> None:
+    def __init__(self, db: Database, agents_dir: str) -> None:
         self._db = db
         self._agents_dir = Path(agents_dir)
-        self._prompts_dir = Path(prompts_dir)
         self._agents: dict[str, dict[str, Any]] = {}
 
     async def load(self, registry_file: str | None = None) -> None:
@@ -86,6 +85,7 @@ class AgentRegistry:
                     spec["name"] = name
                     group = "system" if name in _SYSTEM_AGENT_NAMES else "pipeline"
                     spec["_group"] = group
+                    spec["_definition_file"] = str(yaml_file)
                     self._agents[name] = spec
                 except yaml.YAMLError:
                     log.warning("agent_yaml_parse_error", file=str(yaml_file))
@@ -101,6 +101,7 @@ class AgentRegistry:
                 spec = dict(raw.get("spec", raw))  # shallow copy to avoid mutating parsed YAML
                 spec["name"] = name
                 spec["_group"] = group
+                spec["_definition_file"] = str(yaml_file)
                 self._agents[name] = spec
             except yaml.YAMLError:
                 log.warning("agent_yaml_parse_error", file=str(yaml_file))
@@ -234,15 +235,26 @@ class AgentRegistry:
     def get_agent_prompt_file(self, agent_name: str) -> Path:
         """Get the prompt file path for an agent.
 
-        Validates the resolved path stays within prompts_dir to prevent
-        path traversal via malicious promptFile values.
+        Resolves ``promptFile`` relative to the definition file's parent
+        directory.  Validates the resolved path stays within the agents
+        config tree (``agents_dir.parent``) to prevent path traversal.
         """
         spec = self._agents.get(agent_name, {})
         prompt_file: str = spec.get("promptFile", f"{agent_name}.md")
-        resolved = (self._prompts_dir / prompt_file).resolve()
-        if not resolved.is_relative_to(self._prompts_dir.resolve()):
+
+        # Determine the base directory for resolution
+        definition_file = spec.get("_definition_file")
+        if definition_file:
+            base_dir = Path(definition_file).parent
+        else:
+            # Fallback for agents without a definition file (e.g. from DB)
+            base_dir = self._agents_dir
+
+        resolved = (base_dir / prompt_file).resolve()
+        config_root = self._agents_dir.parent.resolve()
+        if not resolved.is_relative_to(config_root):
             raise AgentRegistryError(
-                f"Prompt file path escapes prompts directory: {prompt_file}"
+                f"Prompt file path escapes config directory: {prompt_file}"
             )
         return resolved
 
@@ -373,10 +385,6 @@ class AgentRegistry:
     def get_default_agents(self) -> dict[str, dict[str, Any]]:
         """Return a copy of all loaded agent definitions."""
         return dict(self._agents)
-
-    def get_default_prompts_dir(self) -> Path:
-        """Return the default prompts directory path."""
-        return self._prompts_dir
 
     def should_skip_planning(self, categories: list[str]) -> bool:
         """Return True if every category has exactly one registered agent.

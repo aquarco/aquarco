@@ -513,7 +513,6 @@ async def test_start_initializes_components(sample_config: Any, tmp_path: Any) -
         "spec": {
             "workdir": str(tmp_path),
             "agentsDir": str(tmp_path / "agents"),
-            "promptsDir": str(tmp_path / "prompts"),
             "database": {"url": "postgresql://x:x@localhost/x", "maxConnections": 1},
             "logging": {"level": "debug", "format": "json"},
             "globalLimits": {

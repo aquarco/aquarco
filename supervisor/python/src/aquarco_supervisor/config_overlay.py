@@ -35,18 +35,32 @@ def merge_agents(
     base: dict[str, dict[str, Any]],
     overlay_agents: list[dict[str, Any]],
     strategy: MergeStrategy,
+    config_base: Path | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Merge overlay agents into base agents dict."""
+    """Merge overlay agents into base agents dict.
+
+    When *config_base* is provided, each overlay agent is tagged with
+    ``_config_base`` so that ``promptFile`` can be resolved relative to it.
+    """
     if strategy == MergeStrategy.REPLACE:
-        return {a["name"]: a for a in overlay_agents}
-    # EXTEND: add/override by name
-    result = dict(base)
-    for agent in overlay_agents:
-        name = agent.get("name")
-        if not name:
-            continue
-        result[name] = agent
-    return result
+        merged = {a["name"]: a for a in overlay_agents}
+    else:
+        # EXTEND: add/override by name
+        merged = dict(base)
+        for agent in overlay_agents:
+            name = agent.get("name")
+            if not name:
+                continue
+            merged[name] = agent
+
+    if config_base is not None:
+        base_str = str(config_base)
+        for agent in overlay_agents:
+            name = agent.get("name")
+            if name and name in merged:
+                merged[name]["_config_base"] = base_str
+
+    return merged
 
 
 def merge_pipelines(
@@ -68,23 +82,20 @@ def merge_pipelines(
 
 
 class ResolvedConfig:
-    """Holds merged agents, pipelines, and ordered prompt directories."""
+    """Holds merged agents and pipelines."""
 
     def __init__(
         self,
         agents: dict[str, dict[str, Any]],
         pipelines: list[dict[str, Any]],
-        prompt_dirs: list[Path],
     ) -> None:
         self.agents = agents
         self.pipelines = pipelines
-        self.prompt_dirs = prompt_dirs
 
 
 def resolve_config(
     default_agents: dict[str, dict[str, Any]],
     default_pipelines: list[dict[str, Any]],
-    default_prompts_dir: Path,
     global_overlay: ConfigOverlay | None = None,
     global_overlay_base: Path | None = None,
     repo_overlay: ConfigOverlay | None = None,
@@ -95,32 +106,36 @@ def resolve_config(
 
     The optional *autoloaded_agents* list is merged as a 4th layer after
     repo_overlay using EXTEND strategy (add/override by name).
+
+    Overlay agents are tagged with ``_config_base`` so that ``promptFile``
+    can be resolved relative to their source directory.
     """
     agents = dict(default_agents)
     pipelines = list(default_pipelines)
-    prompt_dirs = [default_prompts_dir]
 
     if global_overlay and global_overlay_base:
-        agents = merge_agents(agents, global_overlay.agents, global_overlay.merge.agents)
+        agents = merge_agents(
+            agents, global_overlay.agents, global_overlay.merge.agents,
+            config_base=global_overlay_base,
+        )
         pipelines = merge_pipelines(
             pipelines, global_overlay.pipelines, global_overlay.merge.pipelines,
         )
-        overlay_prompts = (global_overlay_base / global_overlay.prompts_dir).resolve()
-        prompt_dirs.append(overlay_prompts)
 
     if repo_overlay and repo_overlay_base:
-        agents = merge_agents(agents, repo_overlay.agents, repo_overlay.merge.agents)
+        agents = merge_agents(
+            agents, repo_overlay.agents, repo_overlay.merge.agents,
+            config_base=repo_overlay_base,
+        )
         pipelines = merge_pipelines(
             pipelines, repo_overlay.pipelines, repo_overlay.merge.pipelines,
         )
-        overlay_prompts = (repo_overlay_base / repo_overlay.prompts_dir).resolve()
-        prompt_dirs.append(overlay_prompts)
 
     # Layer 4: autoloaded agents (always EXTEND strategy)
     if autoloaded_agents:
         agents = merge_agents(agents, autoloaded_agents, MergeStrategy.EXTEND)
 
-    return ResolvedConfig(agents, pipelines, prompt_dirs)
+    return ResolvedConfig(agents, pipelines)
 
 
 class ScopedAgentView:
@@ -135,7 +150,13 @@ class ScopedAgentView:
         self._temp_files: list[Path] = []
 
     def get_agent_prompt_file(self, agent_name: str) -> Path:
-        """Get the prompt file path, searching prompt_dirs in reverse order.
+        """Get the prompt file path for an agent.
+
+        Resolution order:
+        1. ``promptInline`` → written to a tempfile.
+        2. ``promptFile`` resolved relative to the agent's ``_definition_file``
+           parent directory (for YAML-discovered agents) or ``_config_base``
+           (for overlay agents).
 
         If the agent spec has promptInline, writes it to a tempfile.
         """
@@ -154,24 +175,27 @@ class ScopedAgentView:
             self._temp_files.append(path)
             return path
 
-        # File-based prompt: search prompt_dirs in reverse (later layers override)
+        # File-based prompt: resolve relative to definition file or config base
         prompt_file_name = (
             spec.get("promptFile")
             or spec.get("spec", {}).get("promptFile")
             or f"{agent_name}.md"
         )
 
-        for prompt_dir in reversed(self._resolved.prompt_dirs):
-            resolved = (prompt_dir / prompt_file_name).resolve()
-            if not resolved.is_relative_to(prompt_dir.resolve()):
-                raise AgentRegistryError(
-                    f"Prompt file path escapes prompts directory: {prompt_file_name}"
-                )
-            if resolved.exists():
-                return resolved
+        # Determine base directory for resolution
+        definition_file = spec.get("_definition_file")
+        config_base = spec.get("_config_base")
+        if definition_file:
+            base_dir = Path(definition_file).parent
+        elif config_base:
+            base_dir = Path(config_base)
+        else:
+            raise AgentRegistryError(
+                f"Cannot resolve prompt file for '{agent_name}': "
+                f"no _definition_file or _config_base"
+            )
 
-        # Fall back to first (default) prompts dir even if file doesn't exist
-        return (self._resolved.prompt_dirs[0] / prompt_file_name).resolve()
+        return (base_dir / prompt_file_name).resolve()
 
     def get_agent_model(self, agent_name: str) -> str | None:
         """Get the model for an agent from resolved config, or None if not set."""

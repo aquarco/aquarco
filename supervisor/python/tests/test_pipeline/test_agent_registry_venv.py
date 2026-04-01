@@ -60,7 +60,7 @@ async def test_get_agent_environment_returns_defaults_for_unknown_agent(
     mock_db: AsyncMock, tmp_path: Path
 ) -> None:
     """Unknown agent gets the default venv environment."""
-    registry = AgentRegistry(mock_db, str(tmp_path / "agents"), str(tmp_path / "prompts"))
+    registry = AgentRegistry(mock_db, str(tmp_path / "agents"))
 
     env = registry.get_agent_environment("nonexistent-agent")
     assert env["VIRTUAL_ENV"] == "/home/agent/.agent-venv"
@@ -72,7 +72,7 @@ async def test_get_agent_environment_merges_per_agent_env(
     mock_db: AsyncMock, tmp_path: Path
 ) -> None:
     """Per-agent environment is merged on top of defaults."""
-    registry = AgentRegistry(mock_db, str(tmp_path / "agents"), str(tmp_path / "prompts"))
+    registry = AgentRegistry(mock_db, str(tmp_path / "agents"))
     registry._agents = {
         "test-agent": {
             "name": "test-agent",
@@ -94,7 +94,7 @@ async def test_get_agent_environment_per_agent_overrides_default(
 ) -> None:
     """Per-agent env can override default values like PATH."""
     custom_path = "/custom/bin:/usr/bin"
-    registry = AgentRegistry(mock_db, str(tmp_path / "agents"), str(tmp_path / "prompts"))
+    registry = AgentRegistry(mock_db, str(tmp_path / "agents"))
     registry._agents = {
         "custom-agent": {
             "name": "custom-agent",
@@ -113,7 +113,7 @@ async def test_get_agent_environment_empty_agent_env(
     mock_db: AsyncMock, tmp_path: Path
 ) -> None:
     """Agent with empty environment dict gets just defaults."""
-    registry = AgentRegistry(mock_db, str(tmp_path / "agents"), str(tmp_path / "prompts"))
+    registry = AgentRegistry(mock_db, str(tmp_path / "agents"))
     registry._agents = {
         "bare-agent": {
             "name": "bare-agent",
@@ -130,7 +130,7 @@ async def test_get_agent_environment_no_environment_key(
     mock_db: AsyncMock, tmp_path: Path
 ) -> None:
     """Agent without environment key in spec gets just defaults."""
-    registry = AgentRegistry(mock_db, str(tmp_path / "agents"), str(tmp_path / "prompts"))
+    registry = AgentRegistry(mock_db, str(tmp_path / "agents"))
     registry._agents = {
         "minimal-agent": {
             "name": "minimal-agent",

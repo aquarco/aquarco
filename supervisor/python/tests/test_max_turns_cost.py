@@ -36,7 +36,7 @@ class TestScopedAgentViewMaxTurnsCost:
     """Test new ScopedAgentView accessors for maxTurns and maxCost."""
 
     def _make_view(self, agents: dict[str, dict[str, Any]], tmp_path: Path) -> ScopedAgentView:
-        resolved = ResolvedConfig(agents=agents, pipelines=[], prompt_dirs=[tmp_path])
+        resolved = ResolvedConfig(agents=agents, pipelines=[])
         return ScopedAgentView(resolved)
 
     def test_get_agent_max_turns_explicit(self, tmp_path: Path) -> None:
@@ -462,11 +462,9 @@ class TestAgentRegistryMaxTurnsCost:
 
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
-        prompts_dir = tmp_path / "prompts"
-        prompts_dir.mkdir()
 
         db = AsyncMock(spec=Database)
-        reg = AgentRegistry(db, str(agents_dir), str(prompts_dir))
+        reg = AgentRegistry(db, str(agents_dir))
 
         # Directly set internal _agents dict to avoid needing file loading
         reg._agents = {

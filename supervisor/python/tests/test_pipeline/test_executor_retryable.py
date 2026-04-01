@@ -100,7 +100,6 @@ def _make_executor(
     mock_registry.get_denied_tools = MagicMock(return_value=[])
     mock_registry.get_agent_environment = MagicMock(return_value={})
     mock_registry.get_agent_output_schema = MagicMock(return_value=None)
-    mock_registry.get_default_prompts_dir = MagicMock(return_value="/prompts")
 
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 

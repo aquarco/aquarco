@@ -113,7 +113,6 @@ class Supervisor:
         self._registry = AgentRegistry(
             self._db,
             agents_dir=self._config.spec.agents_dir,
-            prompts_dir=self._config.spec.prompts_dir,
         )
         await self._registry.load()
 

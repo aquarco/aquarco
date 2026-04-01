@@ -41,7 +41,6 @@ _REPO_ROOT   = _PACKAGE_DIR.parents[3]                        # project root (4 
 # <repo>/supervisor/python/src/aquarco_supervisor  → parents[0]=src, [1]=python, [2]=supervisor, [3]=repo-root
 
 _DEFAULT_DEFINITIONS_DIR = _REPO_ROOT / "agents" / "definitions"
-_DEFAULT_PROMPTS_DIR     = _REPO_ROOT / "agents" / "prompts"
 _DEFAULT_REGISTRY_OUTPUT = Path("/var/lib/aquarco/agent-registry.json")
 
 
@@ -73,9 +72,11 @@ def _get_field(doc: dict[str, Any], dotted_path: str) -> Any:
 
 def validate_definition(
     file: Path,
-    prompts_dir: Path,
 ) -> tuple[list[ValidationError], dict[str, Any] | None]:
     """Validate a single agent definition YAML file.
+
+    ``promptFile`` is resolved relative to the definition file's parent
+    directory.
 
     Returns (errors, record) where record is the normalised dict to include
     in the registry, or None when validation fails.
@@ -152,22 +153,13 @@ def validate_definition(
                     f"invalid value '{cat}' (allowed: {', '.join(sorted(VALID_CATEGORIES))})",
                 ))
 
-    # 7. spec.promptFile + existence check
+    # 7. spec.promptFile + existence check (resolved relative to definition file)
     prompt_file: str = spec.get("promptFile") or ""
     if not prompt_file:
         errors.append(ValidationError("spec.promptFile", "is required"))
     else:
-        # Resolve and verify the path stays within prompts_dir (prevent path traversal)
-        prompt_path = (prompts_dir / prompt_file).resolve()
-        try:
-            prompt_path.relative_to(prompts_dir.resolve())
-        except ValueError:
-            errors.append(ValidationError(
-                "spec.promptFile",
-                f"'{prompt_file}' escapes the prompts directory (path traversal rejected)",
-            ))
-            prompt_path = None  # type: ignore[assignment]
-        if prompt_path is not None and not prompt_path.exists():
+        prompt_path = (file.parent / prompt_file).resolve()
+        if not prompt_path.exists():
             errors.append(ValidationError(
                 "spec.promptFile",
                 f"'{prompt_file}' not found at {prompt_path}",
@@ -223,12 +215,6 @@ def discover(
         help="Directory containing agent definition YAML files.",
         show_default=True,
     ),
-    prompts_dir: Path = typer.Option(
-        _DEFAULT_PROMPTS_DIR,
-        "--prompts-dir", "-p",
-        help="Directory containing agent prompt files.",
-        show_default=True,
-    ),
     output: Path = typer.Option(
         _DEFAULT_REGISTRY_OUTPUT,
         "--output", "-o",
@@ -246,17 +232,14 @@ def discover(
     if not as_json:
         typer.echo("[INFO]  Aquarco agent discovery starting")
         typer.echo(f"[INFO]  Definitions directory : {definitions_dir}")
-        typer.echo(f"[INFO]  Prompts directory     : {prompts_dir}")
         typer.echo(f"[INFO]  Output path           : {output}")
         typer.echo("")
 
-    log.info("agent_discovery_start", definitions_dir=str(definitions_dir), prompts_dir=str(prompts_dir))
+    log.info("agent_discovery_start", definitions_dir=str(definitions_dir))
 
     # Directory checks
     if not definitions_dir.is_dir():
         _fatal(f"Definitions directory not found: {definitions_dir}", as_json)
-    if not prompts_dir.is_dir():
-        _fatal(f"Prompts directory not found: {prompts_dir}", as_json)
 
     # Collect definition files
     def_files = sorted(definitions_dir.glob("*.yaml"))
@@ -271,7 +254,7 @@ def discover(
     records: list[dict[str, Any]] = []
 
     for def_file in def_files:
-        errors, record = validate_definition(def_file, prompts_dir)
+        errors, record = validate_definition(def_file)
         if errors:
             total_errors += len(errors)
             if not as_json:
@@ -339,12 +322,6 @@ def validate(
         ...,
         help="Path to the agent definition YAML file to validate.",
     ),
-    prompts_dir: Path = typer.Option(
-        _DEFAULT_PROMPTS_DIR,
-        "--prompts-dir", "-p",
-        help="Directory containing agent prompt files.",
-        show_default=True,
-    ),
     as_json: bool = typer.Option(False, "--json", help="Print machine-readable JSON to stdout."),
 ) -> None:
     """Validate a single agent definition YAML file.
@@ -367,7 +344,7 @@ def validate(
         typer.echo(f"Validating: {definition_file}")
         typer.echo("---")
 
-    errors, record = validate_definition(definition_file, prompts_dir)
+    errors, record = validate_definition(definition_file)
 
     if as_json:
         if errors:
@@ -385,7 +362,7 @@ def validate(
 
     # Human-readable output — mirror the shell script's OK / FAIL lines
     # Re-run field checks individually so we can print per-field pass/fail.
-    _print_verbose_validation(definition_file, prompts_dir, basename)
+    _print_verbose_validation(definition_file, basename)
 
     typer.echo("---")
     if errors:
@@ -395,7 +372,7 @@ def validate(
     typer.echo(f"VALID  {basename}: all checks passed")
 
 
-def _print_verbose_validation(file: Path, prompts_dir: Path, basename: str) -> None:
+def _print_verbose_validation(file: Path, basename: str) -> None:
     """Print per-field OK / FAIL lines matching validate-agent.sh output format."""
     try:
         raw: Any = yaml.safe_load(file.read_text())
@@ -470,22 +447,16 @@ def _print_verbose_validation(file: Path, prompts_dir: Path, basename: str) -> N
                 fail(f"  spec.categories[{i}] = '{cat}' "
                      f"(allowed: {', '.join(sorted(VALID_CATEGORIES))})")
 
-    # 7. spec.promptFile
+    # 7. spec.promptFile (resolved relative to definition file)
     prompt_file: str = spec.get("promptFile") or ""
     if not prompt_file:
         fail("spec.promptFile is required")
     else:
-        prompt_path = (prompts_dir / prompt_file).resolve()
-        try:
-            prompt_path.relative_to(prompts_dir.resolve())
-        except ValueError:
-            fail(f"spec.promptFile '{prompt_file}' escapes the prompts directory (path traversal rejected)")
-            prompt_path = None  # type: ignore[assignment]
-        if prompt_path is not None:
-            if prompt_path.exists():
-                ok(f"spec.promptFile = {prompt_file} (file exists at {prompt_path})")
-            else:
-                fail(f"spec.promptFile '{prompt_file}' not found at {prompt_path}")
+        prompt_path = (file.parent / prompt_file).resolve()
+        if prompt_path.exists():
+            ok(f"spec.promptFile = {prompt_file} (file exists at {prompt_path})")
+        else:
+            fail(f"spec.promptFile '{prompt_file}' not found at {prompt_path}")
 
     # 8. spec.output.format (optional — no longer required)
     output_section: dict[str, Any] = spec.get("output") or {}

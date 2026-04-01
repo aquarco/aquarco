@@ -22,7 +22,6 @@ def sample_config_path(tmp_path: Path) -> Path:
         "spec": {
             "workdir": "/tmp/test",
             "agentsDir": "/tmp/test/agents/definitions",
-            "promptsDir": "/tmp/test/agents/prompts",
             "pipelinesFile": str(tmp_path / "pipelines.yaml"),
             "database": {
                 "url": "postgresql://test:test@localhost:5432/test",

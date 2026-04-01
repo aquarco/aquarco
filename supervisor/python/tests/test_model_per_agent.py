@@ -114,21 +114,21 @@ def test_yaml_definition_has_model(yaml_path: Path) -> None:
 
 def test_registry_get_agent_model_set(tmp_path: Path) -> None:
     db = AsyncMock(spec=Database)
-    reg = AgentRegistry(db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(db, str(tmp_path))
     reg._agents = {"a": {"model": "claude-opus-4"}}
     assert reg.get_agent_model("a") == "claude-opus-4"
 
 
 def test_registry_get_agent_model_missing(tmp_path: Path) -> None:
     db = AsyncMock(spec=Database)
-    reg = AgentRegistry(db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(db, str(tmp_path))
     reg._agents = {"a": {"resources": {}}}
     assert reg.get_agent_model("a") is None
 
 
 def test_registry_get_agent_model_unknown_agent(tmp_path: Path) -> None:
     db = AsyncMock(spec=Database)
-    reg = AgentRegistry(db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(db, str(tmp_path))
     reg._agents = {}
     assert reg.get_agent_model("nonexistent") is None
 
@@ -136,7 +136,7 @@ def test_registry_get_agent_model_unknown_agent(tmp_path: Path) -> None:
 def test_registry_get_agent_model_empty_string_returns_none(tmp_path: Path) -> None:
     """Empty string model should be treated as None (backward compat)."""
     db = AsyncMock(spec=Database)
-    reg = AgentRegistry(db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(db, str(tmp_path))
     reg._agents = {"a": {"model": ""}}
     assert reg.get_agent_model("a") is None
 
@@ -179,7 +179,7 @@ async def test_discover_agents_loads_model_from_yaml(tmp_path: Path) -> None:
 
     db = AsyncMock(spec=Database)
     db.fetch_all = AsyncMock(return_value=[])
-    reg = AgentRegistry(db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(db, str(agents_dir))
     await reg.load(str(tmp_path / "nonexistent-registry.json"))
 
     assert reg.get_agent_model("impl-agent") == "claude-opus-4"
@@ -195,7 +195,6 @@ def test_scoped_view_model_empty_string_returns_none(tmp_path: Path) -> None:
     resolved = ResolvedConfig(
         agents={"a": {"name": "a", "model": ""}},
         pipelines=[],
-        prompt_dirs=[tmp_path],
     )
     view = ScopedAgentView(resolved)
     assert view.get_agent_model("a") is None
@@ -206,7 +205,6 @@ def test_scoped_view_model_nested_empty_string(tmp_path: Path) -> None:
     resolved = ResolvedConfig(
         agents={"a": {"name": "a", "spec": {"model": ""}}},
         pipelines=[],
-        prompt_dirs=[tmp_path],
     )
     view = ScopedAgentView(resolved)
     assert view.get_agent_model("a") is None
@@ -218,7 +216,6 @@ def test_scoped_view_model_flat_takes_precedence_over_nested(tmp_path: Path) -> 
     resolved = ResolvedConfig(
         agents={"a": {"name": "a", "model": "claude-opus-4", "spec": {"model": "claude-haiku-4-5"}}},
         pipelines=[],
-        prompt_dirs=[tmp_path],
     )
     view = ScopedAgentView(resolved)
     # The nested spec takes precedence because spec.get("spec", spec) returns the inner dict
@@ -238,7 +235,7 @@ def test_scoped_view_model_overlay_overrides_default(tmp_path: Path) -> None:
         merge=MergeConfig(agents=MergeStrategy.EXTEND, pipelines=MergeStrategy.EXTEND),
     )
     resolved = resolve_config(
-        default_agents, [], tmp_path / "prompts",
+        default_agents, [],
         repo_overlay=repo_overlay,
         repo_overlay_base=repo_base,
     )
@@ -265,7 +262,7 @@ def test_scoped_view_model_global_overlay_then_repo_overlay(tmp_path: Path) -> N
         merge=MergeConfig(agents=MergeStrategy.EXTEND, pipelines=MergeStrategy.EXTEND),
     )
     resolved = resolve_config(
-        default_agents, [], tmp_path / "prompts",
+        default_agents, [],
         global_overlay=global_overlay,
         global_overlay_base=global_base,
         repo_overlay=repo_overlay,

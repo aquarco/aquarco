@@ -34,13 +34,12 @@ def test_resolve_config_autoloaded_agents_added(tmp_path: Path) -> None:
         "default-agent": {"name": "default-agent", "categories": ["test"]},
     }
     pipelines: list[dict[str, Any]] = []
-    prompts_dir = tmp_path / "prompts"
 
     autoloaded = [
         {"name": "repo-custom", "categories": ["review"], "spec": {"tools": {"allowed": ["Read"]}}},
     ]
 
-    resolved = resolve_config(agents, pipelines, prompts_dir, autoloaded_agents=autoloaded)
+    resolved = resolve_config(agents, pipelines, autoloaded_agents=autoloaded)
 
     assert "default-agent" in resolved.agents
     assert "repo-custom" in resolved.agents
@@ -56,7 +55,7 @@ def test_resolve_config_autoloaded_extends_not_replaces(tmp_path: Path) -> None:
 
     autoloaded = [{"name": "c"}]
 
-    resolved = resolve_config(agents, [], tmp_path, autoloaded_agents=autoloaded)
+    resolved = resolve_config(agents, [], autoloaded_agents=autoloaded)
 
     assert "a" in resolved.agents
     assert "b" in resolved.agents
@@ -71,7 +70,7 @@ def test_resolve_config_autoloaded_overrides_by_name(tmp_path: Path) -> None:
 
     autoloaded = [{"name": "shared", "categories": ["autoloaded"]}]
 
-    resolved = resolve_config(agents, [], tmp_path, autoloaded_agents=autoloaded)
+    resolved = resolve_config(agents, [], autoloaded_agents=autoloaded)
 
     assert resolved.agents["shared"]["categories"] == ["autoloaded"]
 
@@ -92,7 +91,7 @@ def test_resolve_config_autoloaded_after_repo_overlay(tmp_path: Path) -> None:
     autoloaded = [{"name": "autoloaded-agent", "priority": 3}]
 
     resolved = resolve_config(
-        agents, [], tmp_path,
+        agents, [],
         repo_overlay=repo_overlay,
         repo_overlay_base=repo_base,
         autoloaded_agents=autoloaded,
@@ -107,7 +106,7 @@ def test_resolve_config_autoloaded_none_is_noop(tmp_path: Path) -> None:
     """When autoloaded_agents is None, no extra merging occurs."""
     agents: dict[str, dict[str, Any]] = {"a": {"name": "a"}}
 
-    resolved = resolve_config(agents, [], tmp_path, autoloaded_agents=None)
+    resolved = resolve_config(agents, [], autoloaded_agents=None)
 
     assert resolved.agents == agents
 
@@ -116,7 +115,7 @@ def test_resolve_config_autoloaded_empty_list_is_noop(tmp_path: Path) -> None:
     """When autoloaded_agents is empty list, no extra merging occurs."""
     agents: dict[str, dict[str, Any]] = {"a": {"name": "a"}}
 
-    resolved = resolve_config(agents, [], tmp_path, autoloaded_agents=[])
+    resolved = resolve_config(agents, [], autoloaded_agents=[])
 
     assert resolved.agents == agents
 
@@ -126,7 +125,7 @@ def test_resolve_config_autoloaded_does_not_affect_pipelines(tmp_path: Path) -> 
     pipelines = [{"name": "p1", "stages": [{"category": "test"}]}]
     autoloaded = [{"name": "agent"}]
 
-    resolved = resolve_config({}, pipelines, tmp_path, autoloaded_agents=autoloaded)
+    resolved = resolve_config({}, pipelines, autoloaded_agents=autoloaded)
 
     assert resolved.pipelines == pipelines
 
@@ -150,7 +149,6 @@ def test_scoped_view_autoloaded_inline_prompt(tmp_path: Path) -> None:
             }
         },
         pipelines=[],
-        prompt_dirs=[tmp_path],
     )
     view = ScopedAgentView(resolved)
 
@@ -177,7 +175,6 @@ def test_scoped_view_autoloaded_default_tools(tmp_path: Path) -> None:
             }
         },
         pipelines=[],
-        prompt_dirs=[tmp_path],
     )
     view = ScopedAgentView(resolved)
 
@@ -198,7 +195,7 @@ def test_scoped_view_autoloaded_participates_in_category_lookup(tmp_path: Path) 
         {"name": "repo-test", "categories": ["test"], "spec": {"priority": 50}},
     ]
 
-    resolved = resolve_config(agents, [], tmp_path, autoloaded_agents=autoloaded)
+    resolved = resolve_config(agents, [], autoloaded_agents=autoloaded)
 
     # Both agents with 'test' category are present
     test_agents = [

@@ -56,7 +56,7 @@ def registry_file(tmp_path: Path) -> Path:
 async def test_load_from_file(
     mock_db: AsyncMock, registry_file: Path, tmp_path: Path
 ) -> None:
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     agents = reg.get_agents_for_category("analyze")
@@ -68,7 +68,7 @@ async def test_load_from_file(
 async def test_agents_for_category_sorted(
     mock_db: AsyncMock, registry_file: Path, tmp_path: Path
 ) -> None:
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     agents = reg.get_agents_for_category("analyze")
@@ -79,7 +79,7 @@ async def test_agents_for_category_sorted(
 async def test_agents_for_unknown_category(
     mock_db: AsyncMock, registry_file: Path, tmp_path: Path
 ) -> None:
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     agents = reg.get_agents_for_category("nonexistent")
@@ -92,7 +92,7 @@ async def test_select_agent_available(
 ) -> None:
     mock_db.fetch_val.return_value = 0
 
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     agent = await reg.select_agent("analyze")
@@ -105,7 +105,7 @@ async def test_select_agent_none_available(
 ) -> None:
     mock_db.fetch_val.return_value = 100
 
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     with pytest.raises(NoAvailableAgentError):
@@ -116,7 +116,7 @@ async def test_select_agent_none_available(
 async def test_agent_is_available(
     mock_db: AsyncMock, registry_file: Path, tmp_path: Path
 ) -> None:
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     mock_db.fetch_val.return_value = 0
@@ -131,7 +131,7 @@ async def test_agent_is_available(
 
 def test_get_agent_model(tmp_path: Path) -> None:
     mock_db = AsyncMock(spec=Database)
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "with-model": {"model": "claude-sonnet-4-6"},
         "no-model": {"resources": {"timeoutMinutes": 10}},
@@ -143,7 +143,7 @@ def test_get_agent_model(tmp_path: Path) -> None:
 
 def test_get_agent_timeout(tmp_path: Path) -> None:
     mock_db = AsyncMock(spec=Database)
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "fast": {"resources": {"timeoutMinutes": 10}},
         "default": {},
@@ -155,19 +155,22 @@ def test_get_agent_timeout(tmp_path: Path) -> None:
 
 def test_get_agent_prompt_file(tmp_path: Path) -> None:
     mock_db = AsyncMock(spec=Database)
-    prompts_dir = tmp_path / "prompts"
-    reg = AgentRegistry(mock_db, str(tmp_path), str(prompts_dir))
+    defs_dir = tmp_path / "definitions" / "pipeline"
+    defs_dir.mkdir(parents=True)
+    def_file = str(defs_dir / "custom.yaml")
+    agents_dir = tmp_path / "definitions"
+    reg = AgentRegistry(mock_db, str(agents_dir))
     reg._agents = {
-        "custom": {"promptFile": "custom-prompt.md"},
-        "default": {},
+        "custom": {"promptFile": "../../prompts/custom-prompt.md", "_definition_file": def_file},
+        "default": {"_definition_file": def_file},
     }
-    assert reg.get_agent_prompt_file("custom") == prompts_dir / "custom-prompt.md"
-    assert reg.get_agent_prompt_file("default") == prompts_dir / "default.md"
+    assert reg.get_agent_prompt_file("custom") == (tmp_path / "prompts" / "custom-prompt.md").resolve()
+    assert reg.get_agent_prompt_file("default") == (defs_dir / "default.md").resolve()
 
 
 def test_get_allowed_denied_tools(tmp_path: Path) -> None:
     mock_db = AsyncMock(spec=Database)
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "agent1": {"tools": {"allowed": ["Read"], "denied": ["Bash"]}},
         "agent2": {},
@@ -182,7 +185,7 @@ def test_get_allowed_denied_tools(tmp_path: Path) -> None:
 async def test_increment_decrement(
     mock_db: AsyncMock, registry_file: Path, tmp_path: Path
 ) -> None:
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     await reg.increment_agent_instances("analyzer")
@@ -199,7 +202,7 @@ async def test_select_agent_empty_registry(
     mock_db: AsyncMock, tmp_path: Path
 ) -> None:
     """Empty registry gives a clear error message."""
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     # Don't load any agents
     with pytest.raises(NoAvailableAgentError, match="registry is empty"):
         await reg.select_agent("analyze")
@@ -210,7 +213,7 @@ async def test_select_agent_no_category_match(
     mock_db: AsyncMock, registry_file: Path, tmp_path: Path
 ) -> None:
     """No agents for requested category gives a clear error."""
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
     with pytest.raises(NoAvailableAgentError, match="No agents registered"):
         await reg.select_agent("nonexistent-category")
@@ -222,7 +225,7 @@ async def test_select_agent_at_capacity(
 ) -> None:
     """All agents at capacity gives a clear error."""
     mock_db.fetch_val.return_value = 9999  # way over capacity
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
     with pytest.raises(NoAvailableAgentError, match="at capacity"):
         await reg.select_agent("analyze")
@@ -244,7 +247,7 @@ async def test_discover_agents_from_yaml(
     # Non-agent YAML should be skipped
     (agents_dir / "config.yaml").write_text(yaml.dump({"kind": "Other"}))
 
-    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(agents_dir))
     # No registry file → triggers discovery
     await reg.load(str(tmp_path / "nonexistent.json"))
 
@@ -258,7 +261,7 @@ async def test_discover_agents_missing_dir(
 ) -> None:
     """Discovery with missing agents dir logs warning and loads empty."""
     reg = AgentRegistry(
-        mock_db, str(tmp_path / "no-such-dir"), str(tmp_path / "prompts")
+        mock_db, str(tmp_path / "no-such-dir")
     )
     await reg.load(str(tmp_path / "nonexistent.json"))
     assert reg._agents == {}
@@ -273,7 +276,7 @@ async def test_discover_agents_bad_yaml(
     agents_dir.mkdir()
     (agents_dir / "bad.yaml").write_text("{{invalid yaml::")
 
-    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(agents_dir))
     await reg.load(str(tmp_path / "nonexistent.json"))
     assert reg._agents == {}
 
@@ -289,7 +292,7 @@ async def test_load_dict_format_registry(
     path = tmp_path / "registry.json"
     path.write_text(json.dumps(data))
 
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(path))
     assert "agent-a" in reg._agents
 
@@ -302,7 +305,7 @@ async def test_load_invalid_json_raises(
     path = tmp_path / "bad.json"
     path.write_text("{bad json")
 
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     with pytest.raises(AgentRegistryError, match="Failed to parse"):
         await reg.load(str(path))
 
@@ -315,7 +318,7 @@ async def test_load_default_path_no_file(
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
     # No schemas/agent-registry.json exists, no YAML files either
-    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(agents_dir))
     await reg.load()  # No argument — uses default path
     assert reg._agents == {}
 
@@ -323,7 +326,7 @@ async def test_load_default_path_no_file(
 def test_get_agent_output_schema_returns_schema(tmp_path: Path) -> None:
     """Returns the outputSchema dict when present."""
     mock_db = AsyncMock(spec=Database)
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
     reg._agents = {"agent1": {"outputSchema": schema}}
     assert reg.get_agent_output_schema("agent1") == schema
@@ -332,7 +335,7 @@ def test_get_agent_output_schema_returns_schema(tmp_path: Path) -> None:
 def test_get_agent_output_schema_returns_none_when_missing(tmp_path: Path) -> None:
     """Returns None when no outputSchema is defined."""
     mock_db = AsyncMock(spec=Database)
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {"agent1": {}}
     assert reg.get_agent_output_schema("agent1") is None
 
@@ -340,7 +343,7 @@ def test_get_agent_output_schema_returns_none_when_missing(tmp_path: Path) -> No
 def test_get_agent_output_schema_returns_none_for_unknown(tmp_path: Path) -> None:
     """Returns None for an agent not in the registry."""
     mock_db = AsyncMock(spec=Database)
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {}
     assert reg.get_agent_output_schema("nonexistent") is None
 
@@ -348,7 +351,7 @@ def test_get_agent_output_schema_returns_none_for_unknown(tmp_path: Path) -> Non
 def test_get_agent_output_schema_returns_none_for_empty_schema(tmp_path: Path) -> None:
     """Returns None when outputSchema is an empty dict."""
     mock_db = AsyncMock(spec=Database)
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {"agent1": {"outputSchema": {}}}
     assert reg.get_agent_output_schema("agent1") is None
 
@@ -361,7 +364,7 @@ def test_get_agent_output_schema_returns_none_for_empty_schema(tmp_path: Path) -
 def test_get_agents_for_category_excludes_system_agents(tmp_path: Path) -> None:
     """System agents must never appear in get_agents_for_category results."""
     mock_db = AsyncMock(spec=Database)
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "planner-agent": {"_group": "system", "categories": [], "priority": 1},
         "condition-evaluator-agent": {"_group": "system", "categories": [], "priority": 1},
@@ -376,7 +379,7 @@ def test_get_agents_for_category_excludes_system_agents(tmp_path: Path) -> None:
 def test_get_agent_group_returns_system(tmp_path: Path) -> None:
     """get_agent_group returns 'system' for system agents."""
     mock_db = AsyncMock(spec=Database)
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "planner-agent": {"_group": "system"},
         "analyze-agent": {"_group": "pipeline"},
@@ -388,7 +391,7 @@ def test_get_agent_group_returns_system(tmp_path: Path) -> None:
 def test_get_agent_group_returns_pipeline_for_unknown(tmp_path: Path) -> None:
     """get_agent_group defaults to 'pipeline' for unknown agents."""
     mock_db = AsyncMock(spec=Database)
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {}
     assert reg.get_agent_group("nonexistent") == "pipeline"
 
@@ -396,7 +399,7 @@ def test_get_agent_group_returns_pipeline_for_unknown(tmp_path: Path) -> None:
 def test_get_system_agent_by_role_returns_name(tmp_path: Path) -> None:
     """get_system_agent_by_role returns the agent name with the matching role."""
     mock_db = AsyncMock(spec=Database)
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "planner-agent": {"_group": "system", "role": "planner"},
         "condition-evaluator-agent": {"_group": "system", "role": "condition-evaluator"},
@@ -409,7 +412,7 @@ def test_get_system_agent_by_role_returns_name(tmp_path: Path) -> None:
 def test_get_system_agent_by_role_returns_none_for_unknown(tmp_path: Path) -> None:
     """get_system_agent_by_role returns None when no match."""
     mock_db = AsyncMock(spec=Database)
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "planner-agent": {"_group": "system", "role": "planner"},
     }
@@ -440,7 +443,7 @@ async def test_discover_agents_from_system_and_pipeline_subdirs(
     (system_dir / "planner-agent.yaml").write_text(yaml.dump(system_defn))
     (pipeline_dir / "analyze-agent.yaml").write_text(yaml.dump(pipeline_defn))
 
-    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(agents_dir))
     await reg.load(str(tmp_path / "nonexistent.json"))
 
     assert reg.get_agent_group("planner-agent") == "system"
@@ -466,7 +469,7 @@ async def test_autoloaded_agents_tagged_as_pipeline(
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
 
-    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(agents_dir))
     await reg.load(str(tmp_path / "nonexistent.json"))
 
     assert reg.get_agent_group("repo-custom-agent") == "pipeline"
@@ -499,7 +502,7 @@ async def test_get_all_agent_definitions_json_db_path_includes_group(
             "agent_group": "pipeline",
         },
     ]
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
 
     result = await reg.get_all_agent_definitions_json()
 
@@ -528,7 +531,7 @@ async def test_get_all_agent_definitions_json_db_path_returns_all_fields(
             "agent_group": "pipeline",
         },
     ]
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
 
     result = await reg.get_all_agent_definitions_json()
 
@@ -550,7 +553,7 @@ async def test_get_all_agent_definitions_json_fallback_to_memory_when_db_empty(
 ) -> None:
     """Falls back to in-memory registry when DB returns empty rows."""
     mock_db.fetch_all.return_value = []  # DB returns nothing
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "analyze-agent": {
             "_group": "pipeline",
@@ -574,7 +577,7 @@ async def test_get_all_agent_definitions_json_fallback_to_memory_when_db_fails(
 ) -> None:
     """Falls back to in-memory registry when DB query raises an exception."""
     mock_db.fetch_all.side_effect = Exception("DB connection error")
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "planner-agent": {
             "_group": "system",
@@ -598,7 +601,7 @@ async def test_get_all_agent_definitions_json_memory_fallback_system_group(
 ) -> None:
     """In-memory fallback correctly uppercase system group from _group field."""
     mock_db.fetch_all.return_value = []
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "condition-evaluator-agent": {
             "_group": "system",
@@ -634,7 +637,7 @@ async def test_get_all_agent_definitions_json_db_path_handles_missing_agent_grou
     # The key must truly be absent (not None) for the .get() default to apply
     assert "agent_group" not in row
     mock_db.fetch_all.return_value = [row]
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
 
     result = await reg.get_all_agent_definitions_json()
 
@@ -674,7 +677,7 @@ def test_discover_agents_from_dir_skips_non_agent_kind(
     (pipeline_dir / "not-an-agent.yaml").write_text(yaml.dump(wrong_kind_doc))
 
     # Act
-    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(agents_dir))
     reg._discover_agents_from_dir(pipeline_dir, group="pipeline")
 
     # Assert — only the valid AgentDefinition is loaded
@@ -697,7 +700,7 @@ def test_discover_agents_from_dir_handles_yaml_parse_error(
     (system_dir / "bad-agent.yaml").write_text(bad_yaml)
 
     # Act — must not raise
-    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(agents_dir))
     with caplog.at_level(logging.WARNING):
         reg._discover_agents_from_dir(system_dir, group="system")
 
@@ -730,7 +733,7 @@ def test_discover_agents_from_dir_tags_correct_group(
     (pipeline_dir / "test-agent.yaml").write_text(yaml.dump(pipe_doc))
 
     # Act
-    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(agents_dir))
     reg._discover_agents_from_dir(system_dir, group="system")
     reg._discover_agents_from_dir(pipeline_dir, group="pipeline")
 
@@ -751,7 +754,7 @@ def test_discover_agents_from_dir_non_dict_yaml_skipped(
     (pipeline_dir / "list-file.yaml").write_text("- item1\n- item2\n")
 
     # Act
-    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(agents_dir))
     reg._discover_agents_from_dir(pipeline_dir, group="pipeline")
 
     # Assert — registry is empty, no exception raised
@@ -774,7 +777,7 @@ def test_should_skip_planning_excludes_system_agents(
     # Arrange — one pipeline agent for 'analyze', plus a system agent also tagged
     # with an internal spec that would match 'analyze' if categories were checked.
     # System agent must NOT be counted.
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "analyze-agent": {
             "_group": "pipeline",
@@ -801,7 +804,7 @@ def test_should_skip_planning_returns_false_when_multiple_pipeline_agents(
 ) -> None:
     """should_skip_planning returns False when a category has multiple pipeline agents."""
     # Arrange
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "analyze-agent-a": {"_group": "pipeline", "categories": ["analyze"], "priority": 10},
         "analyze-agent-b": {"_group": "pipeline", "categories": ["analyze"], "priority": 20},
@@ -819,7 +822,7 @@ def test_should_skip_planning_returns_false_when_no_agent_for_category(
 ) -> None:
     """should_skip_planning returns False when no pipeline agent handles a category."""
     # Arrange
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "analyze-agent": {"_group": "pipeline", "categories": ["analyze"], "priority": 10},
     }
@@ -836,7 +839,7 @@ def test_should_skip_planning_returns_true_for_empty_categories(
 ) -> None:
     """should_skip_planning returns True for an empty categories list (vacuous truth)."""
     # Arrange
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {}
 
     # Act
@@ -856,7 +859,7 @@ def test_get_agent_environment_returns_defined_env(
 ) -> None:
     """get_agent_environment returns the environment dict from agent spec."""
     # Arrange
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "condition-evaluator-agent": {
             "_group": "system",
@@ -880,7 +883,7 @@ def test_get_agent_environment_returns_defaults_when_no_env(
 ) -> None:
     """get_agent_environment returns the default agent venv env when agent has no environment block."""
     # Arrange
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "analyze-agent": {
             "_group": "pipeline",
@@ -901,7 +904,7 @@ def test_get_agent_environment_returns_defaults_for_unknown_agent(
 ) -> None:
     """get_agent_environment returns default agent venv env for an agent not in the registry."""
     # Arrange
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {}
 
     # Act
@@ -912,7 +915,7 @@ def test_get_agent_environment_returns_defaults_for_unknown_agent(
 
 
 # ---------------------------------------------------------------------------
-# get_default_agents / get_default_prompts_dir
+# get_default_agents
 # ---------------------------------------------------------------------------
 
 
@@ -921,7 +924,7 @@ def test_get_default_agents_returns_copy(
 ) -> None:
     """get_default_agents returns a copy of the in-memory agent registry."""
     # Arrange
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     reg._agents = {
         "planner-agent": {"_group": "system", "role": "planner"},
         "analyze-agent": {"_group": "pipeline", "categories": ["analyze"]},
@@ -935,21 +938,6 @@ def test_get_default_agents_returns_copy(
     # Modifying the copy should not affect the registry
     result["new-agent"] = {}
     assert "new-agent" not in reg._agents
-
-
-def test_get_default_prompts_dir_returns_path(
-    mock_db: AsyncMock, tmp_path: Path
-) -> None:
-    """get_default_prompts_dir returns the Path set during construction."""
-    # Arrange
-    prompts_dir = tmp_path / "prompts"
-    reg = AgentRegistry(mock_db, str(tmp_path), str(prompts_dir))
-
-    # Act
-    result = reg.get_default_prompts_dir()
-
-    # Assert
-    assert result == prompts_dir
 
 
 # ---------------------------------------------------------------------------
@@ -994,7 +982,7 @@ async def test_system_agents_never_compete_for_pipeline_slots_in_structured_scan
     (pipeline_dir / "review-agent-alt.yaml").write_text(yaml.dump(pipeline_defn_b))
 
     # Act
-    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(agents_dir))
     await reg.load(str(tmp_path / "nonexistent.json"))
 
     candidates = reg.get_agents_for_category("review")
@@ -1038,7 +1026,7 @@ async def test_discover_agents_from_dir_spec_is_shallow_copy(
     yaml_file = agents_dir / "canary-agent.yaml"
     yaml_file.write_text(yaml.dump(agent_defn))
 
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
 
     # Act: load via _discover_agents_from_dir
     reg._discover_agents_from_dir(agents_dir, group="pipeline")
@@ -1082,7 +1070,7 @@ async def test_discover_agents_flat_scan_spec_is_shallow_copy(
     mock_db.fetch_all.return_value = []
     mock_db.execute.return_value = None
 
-    reg = AgentRegistry(mock_db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(agents_dir))
 
     # Use a non-existent registry file so load() falls through to _discover_agents
     non_existent = str(tmp_path / "no-registry.json")
@@ -1115,7 +1103,7 @@ async def test_sync_agent_instances_resets_active_count_on_startup(
     This ensures stale active_count values from a previous supervisor run
     (where agents may have been killed mid-execution) are reset to 0.
     """
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     # _sync_agent_instances is called during load; check the SQL used
@@ -1138,7 +1126,7 @@ async def test_sync_agent_instances_called_for_each_agent(
     mock_db: AsyncMock, registry_file: Path, tmp_path: Path
 ) -> None:
     """_sync_agent_instances must issue one INSERT per registered agent."""
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     # Registry file has 3 agents: analyzer, implementer, reviewer
@@ -1160,7 +1148,7 @@ async def test_sync_agent_instances_preserves_total_executions(
 
     Only active_count should be set to 0; the other columns should be preserved.
     """
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     sync_calls = [
@@ -1185,7 +1173,7 @@ async def test_sync_agent_instances_inserts_new_agents_with_zero_counts(
     mock_db: AsyncMock, registry_file: Path, tmp_path: Path
 ) -> None:
     """New agents (no conflict) get active_count=0 and total_executions=0."""
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     sync_calls = [
@@ -1215,7 +1203,7 @@ async def test_sync_does_not_use_do_nothing(
     The old code used DO NOTHING which left stale active_count values from
     previous runs, causing agents to appear at capacity and blocking dispatch.
     """
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     sync_calls = [
@@ -1238,7 +1226,7 @@ async def test_sync_agent_instances_sql_uses_named_parameter(
 
     This guards against SQL injection and ensures parameterized queries.
     """
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     sync_calls = [
@@ -1264,7 +1252,7 @@ async def test_sync_agent_instances_uses_on_conflict_agent_name(
     mock_db: AsyncMock, registry_file: Path, tmp_path: Path
 ) -> None:
     """ON CONFLICT must target (agent_name) as the unique constraint."""
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     sync_calls = [
@@ -1289,7 +1277,7 @@ async def test_sync_agent_instances_only_sets_active_count_in_update(
     This is a stricter version of the preservation test — it verifies that
     exactly one column is modified in the update clause.
     """
-    reg = AgentRegistry(mock_db, str(tmp_path), str(tmp_path / "prompts"))
+    reg = AgentRegistry(mock_db, str(tmp_path))
     await reg.load(str(registry_file))
 
     sync_calls = [

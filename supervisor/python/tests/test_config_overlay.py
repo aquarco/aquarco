@@ -34,7 +34,6 @@ def test_load_overlay_valid(tmp_path: Path) -> None:
         "pipelines": [
             {"name": "custom-pipeline", "trigger": {"labels": ["custom"]}, "stages": []},
         ],
-        "promptsDir": "./my-prompts",
     }
     (tmp_path / ".aquarco.yaml").write_text(yaml.dump(overlay))
 
@@ -46,7 +45,6 @@ def test_load_overlay_valid(tmp_path: Path) -> None:
     assert len(result.agents) == 1
     assert result.agents[0]["name"] == "custom-agent"
     assert len(result.pipelines) == 1
-    assert result.prompts_dir == "./my-prompts"
 
 
 def test_load_overlay_missing_file(tmp_path: Path) -> None:
@@ -78,7 +76,6 @@ def test_load_overlay_defaults(tmp_path: Path) -> None:
     assert result.merge.pipelines == MergeStrategy.EXTEND
     assert result.agents == []
     assert result.pipelines == []
-    assert result.prompts_dir == "./prompts"
 
 
 # --- merge_agents ---
@@ -159,12 +156,10 @@ def test_resolve_config_no_overlays(tmp_path: Path) -> None:
     """Defaults only, no overlays."""
     agents = {"a": {"name": "a", "categories": ["cat1"]}}
     pipelines = [{"name": "p1", "stages": []}]
-    prompts_dir = tmp_path / "prompts"
 
-    resolved = resolve_config(agents, pipelines, prompts_dir)
+    resolved = resolve_config(agents, pipelines)
     assert resolved.agents == agents
     assert resolved.pipelines == pipelines
-    assert resolved.prompt_dirs == [prompts_dir]
 
 
 def test_resolve_config_all_layers(tmp_path: Path) -> None:
@@ -173,7 +168,6 @@ def test_resolve_config_all_layers(tmp_path: Path) -> None:
 
     agents = {"a": {"name": "a", "categories": ["cat1"]}}
     pipelines = [{"name": "p1", "stages": []}]
-    prompts_dir = tmp_path / "default-prompts"
 
     global_base = tmp_path / "global"
     global_base.mkdir()
@@ -192,14 +186,16 @@ def test_resolve_config_all_layers(tmp_path: Path) -> None:
     )
 
     resolved = resolve_config(
-        agents, pipelines, prompts_dir,
+        agents, pipelines,
         global_overlay, global_base,
         repo_overlay, repo_base,
     )
     assert "a" in resolved.agents
     assert "b" in resolved.agents
     assert "c" in resolved.agents
-    assert len(resolved.prompt_dirs) == 3
+    # Overlay agents should be tagged with _config_base
+    assert resolved.agents["b"]["_config_base"] == str(global_base)
+    assert resolved.agents["c"]["_config_base"] == str(repo_base)
     # p1 should be overridden by repo overlay
     p1 = next(p for p in resolved.pipelines if p["name"] == "p1")
     assert p1["stages"] == [{"category": "overridden"}]
@@ -208,45 +204,45 @@ def test_resolve_config_all_layers(tmp_path: Path) -> None:
 # --- ScopedAgentView ---
 
 
-def test_scoped_view_prompt_file_resolution(tmp_path: Path) -> None:
-    """Searches prompt_dirs in reverse order (later overrides earlier)."""
-    default_dir = tmp_path / "default"
-    default_dir.mkdir()
-    (default_dir / "agent.md").write_text("default prompt")
-
-    overlay_dir = tmp_path / "overlay"
-    overlay_dir.mkdir()
-    (overlay_dir / "agent.md").write_text("overlay prompt")
+def test_scoped_view_prompt_file_from_definition(tmp_path: Path) -> None:
+    """promptFile resolved relative to _definition_file parent."""
+    defs_dir = tmp_path / "defs" / "pipeline"
+    defs_dir.mkdir(parents=True)
+    prompts_dir = tmp_path / "defs" / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "agent.md").write_text("prompt content")
 
     resolved = ResolvedConfig(
-        agents={"agent": {"name": "agent"}},
+        agents={"agent": {
+            "name": "agent",
+            "promptFile": "../prompts/agent.md",
+            "_definition_file": str(defs_dir / "agent.yaml"),
+        }},
         pipelines=[],
-        prompt_dirs=[default_dir, overlay_dir],
     )
     view = ScopedAgentView(resolved)
     prompt = view.get_agent_prompt_file("agent")
-    assert prompt == overlay_dir / "agent.md"
+    assert prompt == (prompts_dir / "agent.md").resolve()
     view.cleanup()
 
 
-def test_scoped_view_prompt_falls_back_to_default(tmp_path: Path) -> None:
-    """Falls back to default dir when overlay doesn't have the file."""
-    default_dir = tmp_path / "default"
-    default_dir.mkdir()
-    (default_dir / "agent.md").write_text("default prompt")
-
+def test_scoped_view_prompt_file_from_config_base(tmp_path: Path) -> None:
+    """promptFile resolved relative to _config_base for overlay agents."""
     overlay_dir = tmp_path / "overlay"
     overlay_dir.mkdir()
-    # No agent.md in overlay
+    (overlay_dir / "custom-prompt.md").write_text("overlay prompt")
 
     resolved = ResolvedConfig(
-        agents={"agent": {"name": "agent"}},
+        agents={"agent": {
+            "name": "agent",
+            "promptFile": "custom-prompt.md",
+            "_config_base": str(overlay_dir),
+        }},
         pipelines=[],
-        prompt_dirs=[default_dir, overlay_dir],
     )
     view = ScopedAgentView(resolved)
     prompt = view.get_agent_prompt_file("agent")
-    assert prompt == default_dir / "agent.md"
+    assert prompt == (overlay_dir / "custom-prompt.md").resolve()
     view.cleanup()
 
 
@@ -255,7 +251,6 @@ def test_scoped_view_inline_prompt(tmp_path: Path) -> None:
     resolved = ResolvedConfig(
         agents={"agent": {"name": "agent", "promptInline": "You are a test agent."}},
         pipelines=[],
-        prompt_dirs=[tmp_path],
     )
     view = ScopedAgentView(resolved)
     prompt = view.get_agent_prompt_file("agent")
@@ -270,7 +265,6 @@ def test_scoped_view_inline_prompt_nested_spec(tmp_path: Path) -> None:
     resolved = ResolvedConfig(
         agents={"agent": {"name": "agent", "spec": {"promptInline": "Nested inline."}}},
         pipelines=[],
-        prompt_dirs=[tmp_path],
     )
     view = ScopedAgentView(resolved)
     prompt = view.get_agent_prompt_file("agent")
@@ -293,7 +287,6 @@ def test_scoped_view_accessors(tmp_path: Path) -> None:
             }
         },
         pipelines=[],
-        prompt_dirs=[tmp_path],
     )
     view = ScopedAgentView(resolved)
     assert view.get_agent_timeout("agent") == 60
@@ -306,7 +299,7 @@ def test_scoped_view_accessors(tmp_path: Path) -> None:
 
 def test_scoped_view_accessors_defaults(tmp_path: Path) -> None:
     """Unknown agents get defaults."""
-    resolved = ResolvedConfig(agents={}, pipelines=[], prompt_dirs=[tmp_path])
+    resolved = ResolvedConfig(agents={}, pipelines=[])
     view = ScopedAgentView(resolved)
     assert view.get_agent_timeout("unknown") == 30
     assert view.get_allowed_tools("unknown") == []
@@ -325,7 +318,6 @@ def test_scoped_view_get_agent_model(tmp_path: Path) -> None:
             "agent-no-model": {"name": "agent-no-model"},
         },
         pipelines=[],
-        prompt_dirs=[tmp_path],
     )
     view = ScopedAgentView(resolved)
     assert view.get_agent_model("agent-with-model") == "claude-sonnet-4-6"
@@ -350,7 +342,7 @@ def test_scoped_view_model_overlay_resolution(tmp_path: Path) -> None:
     )
 
     resolved = resolve_config(
-        default_agents, [], tmp_path / "prompts",
+        default_agents, [],
         repo_overlay=repo_overlay,
         repo_overlay_base=repo_base,
     )
@@ -359,16 +351,15 @@ def test_scoped_view_model_overlay_resolution(tmp_path: Path) -> None:
     view.cleanup()
 
 
-def test_scoped_view_path_traversal(tmp_path: Path) -> None:
-    """Path traversal in promptFile is rejected."""
+def test_scoped_view_no_base_raises(tmp_path: Path) -> None:
+    """Agent without _definition_file or _config_base raises."""
     from aquarco_supervisor.exceptions import AgentRegistryError
 
     resolved = ResolvedConfig(
-        agents={"agent": {"name": "agent", "promptFile": "../../etc/passwd"}},
+        agents={"agent": {"name": "agent", "promptFile": "agent.md"}},
         pipelines=[],
-        prompt_dirs=[tmp_path],
     )
     view = ScopedAgentView(resolved)
-    with pytest.raises(AgentRegistryError, match="escapes"):
+    with pytest.raises(AgentRegistryError, match="Cannot resolve prompt file"):
         view.get_agent_prompt_file("agent")
     view.cleanup()

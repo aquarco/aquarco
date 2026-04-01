@@ -156,7 +156,6 @@ class ConfigOverlay(BaseModel):
     merge: MergeConfig = Field(default_factory=MergeConfig)
     agents: list[dict[str, Any]] = Field(default_factory=list)
     pipelines: list[dict[str, Any]] = Field(default_factory=list)
-    prompts_dir: str = Field(default="./prompts", alias="promptsDir")
 
     model_config = {"populate_by_name": True}
 
@@ -321,7 +320,6 @@ class RepositoryConfig(BaseModel):
 class SupervisorSpec(BaseModel):
     workdir: str
     agents_dir: str = Field(alias="agentsDir")
-    prompts_dir: str = Field(alias="promptsDir")
     database: DatabaseConfig
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     global_limits: GlobalLimits = Field(default_factory=GlobalLimits, alias="globalLimits")
