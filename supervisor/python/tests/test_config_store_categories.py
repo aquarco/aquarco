@@ -58,7 +58,7 @@ async def test_store_pipeline_without_categories(mock_db: AsyncMock) -> None:
             "name": "simple-pipeline",
             "version": "1.0.0",
             "trigger": {"labels": ["bug"]},
-            "stages": [{"name": "fix", "category": "implementation"}],
+            "stages": [{"name": "fix", "category": "implement"}],
         }
     ]
 

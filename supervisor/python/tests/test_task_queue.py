@@ -473,7 +473,7 @@ async def test_create_pending_stages(
 ) -> None:
     stages = [
         {"category": "analyze"},
-        {"category": "implementation"},
+        {"category": "implement"},
         {"category": "test"},
     ]
     await task_queue.create_pending_stages("task-1", stages)

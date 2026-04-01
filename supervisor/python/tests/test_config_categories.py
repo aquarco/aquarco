@@ -235,7 +235,7 @@ class TestLoadPipelinesWithConditions:
                         {"name": "design", "category": "design", "required": True},
                         {
                             "name": "implementation",
-                            "category": "implementation",
+                            "category": "implement",
                             "required": False,
                             "conditions": [
                                 {"ai": "All design.acceptance_criteria fulfilled?", "no": "implementation", "maxRepeats": 5},
@@ -252,7 +252,7 @@ class TestLoadPipelinesWithConditions:
                         },
                         {
                             "name": "fix-review-findings",
-                            "category": "implementation",
+                            "category": "implement",
                             "required": False,
                             "conditions": [
                                 {"simple": True, "yes": "review", "maxRepeats": 5},
@@ -266,7 +266,7 @@ class TestLoadPipelinesWithConditions:
                                 {"simple": "tests_added == 0 || (coverage_percent >= 80 && tests_failed == 0)", "no": "test", "maxRepeats": 5},
                             ],
                         },
-                        {"name": "docs", "category": "docs", "required": True},
+                        {"name": "docs", "category": "document", "required": True},
                     ],
                 }
             ],

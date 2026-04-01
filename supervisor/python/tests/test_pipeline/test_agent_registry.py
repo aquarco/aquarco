@@ -36,7 +36,7 @@ def registry_file(tmp_path: Path) -> Path:
             },
             {
                 "name": "implementer",
-                "categories": ["implementation"],
+                "categories": ["implement"],
                 "priority": 20,
                 "resources": {"maxConcurrent": 1},
             },

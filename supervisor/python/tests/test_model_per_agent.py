@@ -160,7 +160,7 @@ async def test_discover_agents_loads_model_from_yaml(tmp_path: Path) -> None:
         "metadata": {"name": "impl-agent"},
         "spec": {
             "model": "claude-opus-4",
-            "categories": ["implementation"],
+            "categories": ["implement"],
             "promptFile": "impl.md",
         },
     }

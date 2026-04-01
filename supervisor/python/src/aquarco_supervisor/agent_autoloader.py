@@ -180,7 +180,7 @@ def generate_agent_definition(
             },
         },
         "spec": {
-            "categories": [analysis.get("category", "implementation")],
+            "categories": [analysis.get("category", "implement")],
             "priority": 50,
             "promptInline": prompt_content,
             "tools": {

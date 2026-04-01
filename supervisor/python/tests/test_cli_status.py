@@ -150,14 +150,14 @@ class TestGetRegistrySummary:
         registry = {
             "agents": [
                 {"spec": {"categories": ["review", "test"]}},
-                {"spec": {"categories": ["test", "docs"]}},
+                {"spec": {"categories": ["test", "document"]}},
             ]
         }
         (schemas_dir / "agent-registry.json").write_text(json.dumps(registry))
 
         result = _get_registry_summary(str(agents_dir))
 
-        assert result["categories"] == sorted(["docs", "review", "test"])
+        assert result["categories"] == sorted(["document", "review", "test"])
 
     def test_malformed_registry_json_returns_zeros(self, tmp_path: Path) -> None:
         agents_dir = tmp_path / "agents" / "definitions"
@@ -283,7 +283,7 @@ class TestRenderHuman:
             {
                 "id": "abc-123",
                 "title": "Fix bug",
-                "category": "implementation",
+                "category": "implement",
                 "status": "pending",
                 "pipeline": "bugfix-pipeline",
                 "repository": "my-repo",
