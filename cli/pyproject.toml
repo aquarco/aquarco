@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aquarco-cli"
+version = "0.1.0"
+description = "Aquarco CLI — manage your Aquarco VM from the host"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.9.0,<1.0",
+    "httpx>=0.25.0,<1.0",
+    "rich>=13.0.0,<14.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.0",
+    "respx>=0.21.0",
+]
+
+[project.scripts]
+aquarco = "aquarco_cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
