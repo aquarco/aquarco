@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -1262,8 +1263,8 @@ async def test_sync_agent_instances_uses_on_conflict_agent_name(
 
     for call in sync_calls:
         sql = call[0][0]
-        assert "(agent_name)" in sql.replace(" ", ""), (
-            "ON CONFLICT must target (agent_name) column"
+        assert re.search(r"ON\s+CONFLICT\s*\(\s*agent_name\s*\)", sql), (
+            "ON CONFLICT must target exactly (agent_name) column"
         )
 
 
@@ -1286,13 +1287,9 @@ async def test_sync_agent_instances_only_sets_active_count_in_update(
 
     for call in sync_calls:
         sql = call[0][0]
-        update_clause = sql.split("DO UPDATE")[1].strip()
-        # Should only contain SET active_count = 0, no other SET assignments
-        set_assignments = [
-            s.strip() for s in update_clause.split("SET")[1].split(",")
-        ]
-        assert len(set_assignments) == 1, (
-            f"Expected exactly 1 SET assignment in ON CONFLICT UPDATE, "
-            f"got {len(set_assignments)}: {set_assignments}"
+        # Use regex to extract column names from SET clause
+        set_columns = re.findall(r"SET\s+(\w+)\s*=", sql.split("DO UPDATE")[1])
+        assert set_columns == ["active_count"], (
+            f"Expected exactly ['active_count'] in ON CONFLICT UPDATE SET, "
+            f"got {set_columns}"
         )
-        assert "active_count" in set_assignments[0]
