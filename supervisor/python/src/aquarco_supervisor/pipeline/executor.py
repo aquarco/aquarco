@@ -1318,12 +1318,11 @@ class PipelineExecutor:
                 log.info("no_commits_to_push", task_id=task_id)
                 return
 
-            await _run_git(
-                clone_dir, "fetch", "origin",
-                f"+refs/heads/{branch_name}:refs/remotes/origin/{branch_name}",
-                check=False,
-            )
-            await _run_git(clone_dir, "push", "origin", branch_name, "--force-with-lease")
+            # --force is safe: these branches are exclusively owned by the
+            # pipeline, so there is no risk of overwriting human work.
+            # (--force-with-lease fails with "stale info" in worktrees
+            # because the remote-tracking ref lives in the parent repo.)
+            await _run_git(clone_dir, "push", "origin", branch_name, "--force")
             repo_slug = await self._get_repo_slug(task_id)
             if repo_slug:
                 # Check if a PR already exists for this branch
