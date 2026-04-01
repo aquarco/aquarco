@@ -49,7 +49,7 @@ def sample_config_path(tmp_path: Path) -> Path:
                         "categorization": {
                             "defaultCategory": "analyze",
                             "labelMapping": {
-                                "bug": "implementation",
+                                "bug": "implement",
                                 "feature": "analyze",
                             },
                         },
@@ -101,7 +101,7 @@ def sample_config_path(tmp_path: Path) -> Path:
                         "category": "design",
                         "required": True,
                     },
-                    {"name": "implementation", "category": "implementation", "required": True},
+                    {"name": "implementation", "category": "implement", "required": True},
                     {"name": "test", "category": "test", "required": True},
                     {"name": "review", "category": "review", "required": True},
                 ],
@@ -112,7 +112,7 @@ def sample_config_path(tmp_path: Path) -> Path:
                 "trigger": {"labels": ["bug"]},
                 "stages": [
                     {"name": "analysis", "category": "analyze", "required": True},
-                    {"name": "implementation", "category": "implementation", "required": True},
+                    {"name": "implementation", "category": "implement", "required": True},
                     {"name": "test", "category": "test", "required": True},
                     {"name": "review", "category": "review", "required": True},
                 ],

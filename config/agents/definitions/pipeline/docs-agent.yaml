@@ -12,7 +12,7 @@ spec:
   model: haiku
 
   categories:
-    - docs
+    - document
 
   priority: 20
 

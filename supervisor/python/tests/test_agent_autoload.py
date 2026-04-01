@@ -190,10 +190,10 @@ def test_analyze_agent_prompt_basic():
 
 
 def test_analyze_agent_prompt_implementation():
-    """Agent with implementation-related content gets implementation category."""
+    """Agent with implementation-related content gets implement category."""
     content = "This agent writes code and implements features."
     result = analyze_agent_prompt(content, "coder.md")
-    assert result["category"] == "implementation"
+    assert result["category"] == "implement"
 
 
 def test_analyze_agent_prompt_security():
@@ -219,10 +219,10 @@ def test_analyze_agent_prompt_review_category():
 
 
 def test_analyze_agent_prompt_docs_category():
-    """Agent with docs content gets docs category."""
+    """Agent with docs content gets document category."""
     content = "This agent maintains documentation and README files."
     result = analyze_agent_prompt(content, "documenter.md")
-    assert result["category"] == "docs"
+    assert result["category"] == "document"
 
 
 def test_analyze_agent_prompt_analyze_category():
@@ -233,10 +233,10 @@ def test_analyze_agent_prompt_analyze_category():
 
 
 def test_analyze_agent_prompt_default_category():
-    """Agent with no specific hints defaults to implementation."""
+    """Agent with no specific hints defaults to implement."""
     content = "A helper for everyday tasks."
     result = analyze_agent_prompt(content, "helper.md")
-    assert result["category"] == "implementation"
+    assert result["category"] == "implement"
 
 
 def test_analyze_agent_prompt_default_tools():
@@ -290,7 +290,7 @@ def test_analyze_agent_prompt_empty_content():
     result = analyze_agent_prompt("", "empty.md")
     assert result["name"] == "empty"
     assert result["description"] == ""
-    assert result["category"] == "implementation"
+    assert result["category"] == "implement"
     assert set(result["tools"]) == set(DEFAULT_TOOLS)
 
 
@@ -1041,4 +1041,4 @@ async def test_full_pipeline_categories_inferred(tmp_path: Path):
 
     # 'security' is not a valid pipeline category — maps to 'review'
     assert analyses["sec-checker"]["category"] == "review"
-    assert analyses["docs-gen"]["category"] == "docs"
+    assert analyses["docs-gen"]["category"] == "document"

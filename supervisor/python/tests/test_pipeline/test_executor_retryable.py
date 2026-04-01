@@ -106,12 +106,12 @@ def _make_executor(
     return executor, mock_tq, mock_db
 
 
-def _minimal_planned_stages(category: str = "implementation") -> list[dict[str, Any]]:
+def _minimal_planned_stages(category: str = "implement") -> list[dict[str, Any]]:
     """Single-stage planned stages list."""
     return [{"category": category, "agents": ["impl-agent"], "parallel": False}]
 
 
-def _minimal_stage_defs(category: str = "implementation") -> list[dict[str, Any]]:
+def _minimal_stage_defs(category: str = "implement") -> list[dict[str, Any]]:
     """Single-stage definitions with no exit conditions."""
     return [{"name": "impl", "category": category, "required": True, "conditions": []}]
 
@@ -273,11 +273,11 @@ async def test_running_phase_retryable_checkpoints_before_postpone(
     # Two stages: first succeeds, second hits retryable error
     planned = [
         {"category": "analyze", "agents": ["agent"], "parallel": False, "validation": []},
-        {"category": "implementation", "agents": ["agent"], "parallel": False, "validation": []},
+        {"category": "implement", "agents": ["agent"], "parallel": False, "validation": []},
     ]
     stage_defs = [
         {"name": "analyze", "category": "analyze", "required": True, "conditions": []},
-        {"name": "implement", "category": "implementation", "required": True, "conditions": []},
+        {"name": "implement", "category": "implement", "required": True, "conditions": []},
     ]
 
     call_count = 0

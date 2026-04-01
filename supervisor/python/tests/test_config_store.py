@@ -945,7 +945,7 @@ class TestRoundTrip:
                 "trigger": {"labels": ["feature"], "events": ["pr_opened"]},
                 "stages": [
                     {"category": "analyze", "required": True},
-                    {"category": "implementation", "required": True},
+                    {"category": "implement", "required": True},
                 ],
             },
         ]

@@ -427,7 +427,7 @@ async def test_auto_commit_commits_when_dirty() -> None:
         "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
     ) as mock_git:
         mock_git.side_effect = call_results
-        await _auto_commit("/repo", "task-001", 2, "implementation")
+        await _auto_commit("/repo", "task-001", 2, "implement")
 
     assert mock_git.await_count == 3
     commit_call = mock_git.await_args_list[2]
@@ -527,7 +527,7 @@ async def test_execute_stage_success(sample_pipelines: Any) -> None:
     ), patch(
         "aquarco_supervisor.pipeline.executor.Path",
     ):
-        output = await executor._execute_stage("implementation", "task-1", {}, 0)
+        output = await executor._execute_stage("implement", "task-1", {}, 0)
 
     assert output["_agent_name"] == "impl-agent"
     assert output["result"] == "done"
@@ -555,7 +555,7 @@ async def test_execute_stage_failure_records_and_raises(sample_pipelines: Any) -
         new_callable=AsyncMock,
         side_effect=RuntimeError("agent crashed"),
     ), pytest.raises(StageError, match="Stage 0.*failed"):
-        await executor._execute_stage("implementation", "task-1", {}, 0)
+        await executor._execute_stage("implement", "task-1", {}, 0)
 
     mock_tq.record_stage_failed.assert_awaited_once()
     mock_registry.decrement_agent_instances.assert_awaited_once()
@@ -638,7 +638,7 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
     # Resuming requires planned_stages on the task
     task.planned_stages = [
         {"category": "analyze", "agents": ["agent"], "parallel": False, "validation": []},
-        {"category": "implementation", "agents": ["agent"], "parallel": False, "validation": []},
+        {"category": "implement", "agents": ["agent"], "parallel": False, "validation": []},
     ]
     mock_tq.get_task = AsyncMock(return_value=task)
 
@@ -767,7 +767,7 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
     # Patch pipeline config to have an optional first stage
     optional_stages = [
         {"category": "analyze", "required": False},
-        {"category": "implementation", "required": True},
+        {"category": "implement", "required": True},
     ]
 
     with patch(
@@ -860,7 +860,7 @@ async def test_execute_planned_stage_fresh_run(sample_pipelines: Any) -> None:
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
         result, stage_id = await executor._execute_planned_stage(
-            "task-1", 0, "implementation", "impl-agent", {}, iteration=1,
+            "task-1", 0, "implement", "impl-agent", {}, iteration=1,
         )
 
     # No retry row should be created
@@ -891,7 +891,7 @@ async def test_execute_planned_stage_retry_after_failure(sample_pipelines: Any) 
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
         result, stage_id = await executor._execute_planned_stage(
-            "task-1", 0, "implementation", "impl-agent", {}, iteration=1,
+            "task-1", 0, "implement", "impl-agent", {}, iteration=1,
         )
 
     # Must create a retry row with run=2
@@ -926,7 +926,7 @@ async def test_execute_planned_stage_retry_after_rate_limited(sample_pipelines: 
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
         result, stage_id = await executor._execute_planned_stage(
-            "task-1", 0, "implementation", "impl-agent", {}, iteration=1,
+            "task-1", 0, "implement", "impl-agent", {}, iteration=1,
         )
 
     # Must create a retry row with run=3
@@ -957,7 +957,7 @@ async def test_execute_planned_stage_reuse_pending_run(sample_pipelines: Any) ->
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
         result, stage_id = await executor._execute_planned_stage(
-            "task-1", 0, "implementation", "impl-agent", {}, iteration=1,
+            "task-1", 0, "implement", "impl-agent", {}, iteration=1,
         )
 
     # No new retry row should be created
