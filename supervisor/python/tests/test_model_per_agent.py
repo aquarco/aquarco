@@ -74,9 +74,9 @@ def test_schema_has_model_field(schema_file: str) -> None:
     if not path.exists():
         pytest.skip(f"Schema file not found at {path}")
     schema = json.loads(path.read_text())
-    spec_props = schema["properties"]["spec"]["properties"]
-    assert "model" in spec_props, f"model field missing from {schema_file}"
-    assert spec_props["model"]["type"] == "string"
+    props = schema["properties"]
+    assert "model" in props, f"model field missing from {schema_file}"
+    assert props["model"]["type"] == "string"
 
 
 # ===========================================================================

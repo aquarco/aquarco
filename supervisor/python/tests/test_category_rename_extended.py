@@ -76,8 +76,9 @@ class TestPipelineStageCategories:
 
     def test_all_stage_categories_are_canonical(self, pipelines_doc: dict) -> None:
         """Every stage.category in pipelines.yaml must be a canonical name."""
-        pipelines = pipelines_doc.get("pipelines", {})
-        for pipeline_name, pipeline_def in pipelines.items():
+        pipelines = pipelines_doc.get("pipelines", [])
+        for pipeline_def in pipelines:
+            pipeline_name = pipeline_def.get("name", "<unnamed>")
             stages = pipeline_def.get("stages", [])
             for idx, stage in enumerate(stages):
                 cat = stage.get("category")
@@ -88,8 +89,9 @@ class TestPipelineStageCategories:
 
     def test_no_stage_uses_old_names(self, pipelines_doc: dict) -> None:
         """No pipeline stage references deprecated category names."""
-        pipelines = pipelines_doc.get("pipelines", {})
-        for pipeline_name, pipeline_def in pipelines.items():
+        pipelines = pipelines_doc.get("pipelines", [])
+        for pipeline_def in pipelines:
+            pipeline_name = pipeline_def.get("name", "<unnamed>")
             stages = pipeline_def.get("stages", [])
             for idx, stage in enumerate(stages):
                 cat = stage.get("category")
@@ -102,7 +104,7 @@ class TestPipelineStageCategories:
         """Every category referenced in stages has a top-level definition."""
         defined = {c["name"] for c in pipelines_doc.get("categories", [])}
         used: set[str] = set()
-        for pipeline_def in pipelines_doc.get("pipelines", {}).values():
+        for pipeline_def in pipelines_doc.get("pipelines", []):
             for stage in pipeline_def.get("stages", []):
                 used.add(stage["category"])
         assert used <= defined, f"Undefined categories used in stages: {used - defined}"
@@ -179,7 +181,7 @@ class TestInferCategoryEdgeCases:
     def test_security_content_maps_to_review(self) -> None:
         """Security-focused content should map to 'review', not a separate category."""
         result = analyze_agent_prompt(
-            "Performs OWASP vulnerability scanning and security audits.",
+            "Performs OWASP vulnerability scanning and security checks.",
             "security-scanner.md",
         )
         assert result["category"] == "review"

@@ -62,42 +62,75 @@ def validate_pipeline_definition(doc: dict[str, Any], schema: dict[str, Any]) ->
 # Config → DB  (deserialize YAML files and store in database)
 # ---------------------------------------------------------------------------
 
+def _parse_md_frontmatter(path: Path) -> dict[str, Any]:
+    """Parse YAML frontmatter from a hybrid .md agent file.
+
+    The file format is::
+
+        ---
+        <YAML frontmatter>
+        ---
+        <Markdown prompt body>
+
+    Returns the frontmatter as a dict.
+    Raises :class:`ValueError` on missing delimiters or non-dict YAML.
+    """
+    content = path.read_text()
+
+    if not content.startswith("---"):
+        raise ValueError(f"Missing opening '---' delimiter in {path}")
+
+    after_open = content[3:]
+    if after_open.startswith("\n"):
+        after_open = after_open[1:]
+
+    close_idx = after_open.find("\n---")
+    if close_idx == -1:
+        raise ValueError(f"Missing closing '---' delimiter in {path}")
+
+    frontmatter_text = after_open[:close_idx]
+    parsed = yaml.safe_load(frontmatter_text)
+    if not isinstance(parsed, dict):
+        raise ValueError(f"Frontmatter is not a YAML mapping in {path}")
+
+    return parsed
+
+
 def load_agent_definitions_from_files(
     agents_dir: Path,
     schema: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Read all agent YAML files from *agents_dir*, optionally validate, return
-    a list of parsed documents (each is a full YAML dict with apiVersion/kind/
-    metadata/spec).
+    """Read all agent ``.md`` files from *agents_dir*, parse YAML frontmatter,
+    optionally validate, and return a list of flat frontmatter dicts.
     """
     definitions: list[dict[str, Any]] = []
     if not agents_dir.is_dir():
         log.warning("agents_dir_not_found", path=str(agents_dir))
         return definitions
 
-    for yaml_file in sorted(agents_dir.glob("*.yaml")):
+    for md_file in sorted(agents_dir.glob("*.md")):
         try:
-            raw = yaml.safe_load(yaml_file.read_text())
-        except yaml.YAMLError:
-            log.warning("agent_yaml_parse_error", file=str(yaml_file))
+            frontmatter = _parse_md_frontmatter(md_file)
+        except (ValueError, yaml.YAMLError) as exc:
+            log.warning("agent_md_parse_error", file=str(md_file), error=str(exc))
             continue
 
-        if not isinstance(raw, dict) or raw.get("kind") != AGENT_KIND:
-            log.warning("agent_yaml_not_agent_definition", file=str(yaml_file))
+        if not frontmatter.get("name"):
+            log.warning("agent_md_missing_name", file=str(md_file))
             continue
 
         if schema is not None:
             try:
-                validate_agent_definition(raw, schema)
+                validate_agent_definition(frontmatter, schema)
             except jsonschema.ValidationError as exc:
                 log.warning(
-                    "agent_yaml_schema_invalid",
-                    file=str(yaml_file),
+                    "agent_md_schema_invalid",
+                    file=str(md_file),
                     error=exc.message,
                 )
                 continue
 
-        definitions.append(raw)
+        definitions.append(frontmatter)
 
     return definitions
 
@@ -128,11 +161,30 @@ async def store_agent_definitions(
         raise ValueError(
             f"Invalid agent_group {agent_group!r}. Must be 'system' or 'pipeline'."
         )
+    # Keys that live outside spec in the flat frontmatter format
+    _FLAT_META_KEYS = {"name", "version", "description", "labels"}
+
     count = 0
     for doc in definitions:
-        meta = doc.get("metadata", {})
-        name = meta.get("name", "")
-        version = meta.get("version", "0.0.0")
+        # Detect flat (frontmatter) vs k8s (metadata/spec) format
+        if "metadata" in doc:
+            # Legacy k8s-style document
+            meta = doc["metadata"]
+            name = meta.get("name", "")
+            version = meta.get("version", "0.0.0")
+            description = meta.get("description", "")
+            labels = meta.get("labels", {})
+            spec = doc.get("spec", {})
+        else:
+            # Flat frontmatter format
+            name = doc.get("name", "")
+            version = doc.get("version", "0.0.0")
+            description = doc.get("description", "")
+            labels = doc.get("labels", {})
+            spec = {
+                k: v for k, v in doc.items() if k not in _FLAT_META_KEYS
+            }
+
         if not name:
             continue
 
@@ -160,9 +212,9 @@ async def store_agent_definitions(
             {
                 "name": name,
                 "version": version,
-                "description": meta.get("description", ""),
-                "labels": json.dumps(meta.get("labels", {})),
-                "spec": json.dumps(doc.get("spec", {})),
+                "description": description,
+                "labels": json.dumps(labels),
+                "spec": json.dumps(spec),
                 "source": source,
                 "agent_group": agent_group,
             },
@@ -240,14 +292,14 @@ async def sync_all_agent_definitions_to_db(
     # validation and be silently excluded.
     all_defs = load_agent_definitions_from_files(agents_dir, schema=None)
 
-    sys_defs = [
-        d for d in all_defs
-        if d.get("metadata", {}).get("name", "") in _SYSTEM_AGENT_NAMES
-    ]
-    pipe_defs = [
-        d for d in all_defs
-        if d.get("metadata", {}).get("name", "") not in _SYSTEM_AGENT_NAMES
-    ]
+    def _agent_name(d: dict[str, Any]) -> str:
+        """Extract agent name from either flat or k8s format."""
+        if "metadata" in d:
+            return d["metadata"].get("name", "")
+        return d.get("name", "")
+
+    sys_defs = [d for d in all_defs if _agent_name(d) in _SYSTEM_AGENT_NAMES]
+    pipe_defs = [d for d in all_defs if _agent_name(d) not in _SYSTEM_AGENT_NAMES]
 
     count = await store_agent_definitions(db, sys_defs, agent_group="system")
     count += await store_agent_definitions(db, pipe_defs, agent_group="pipeline")

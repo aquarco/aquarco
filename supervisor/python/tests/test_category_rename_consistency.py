@@ -79,7 +79,15 @@ class TestSchemaEnums:
     ])
     def schema_categories_enum(self, request: pytest.FixtureRequest) -> list[str]:
         doc = _load_json(request.param)
-        items = doc["properties"]["spec"]["properties"]["categories"]["items"]
+        # Flat frontmatter schema — categories is a top-level property
+        if "categories" in doc.get("properties", {}):
+            items = doc["properties"]["categories"]["items"]
+        elif "oneOf" in doc:
+            # agent-definition-v1.json uses oneOf; extract from the categories branch
+            cats_branch = [b for b in doc["oneOf"] if "categories" in b.get("required", [])][0]
+            items = cats_branch["properties"]["categories"]["items"]
+        else:
+            raise KeyError("Cannot find categories enum in schema")
         return items["enum"]
 
     def test_schema_enum_matches_canonical(self, schema_categories_enum: list[str]) -> None:
