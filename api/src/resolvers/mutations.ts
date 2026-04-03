@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { Context } from '../context.js'
+import { Context, requireInternalAuth } from '../context.js'
 import { mapRepository, mapStage, mapAgentDefinition, mapRepoAgentScan, fetchAgentWithOverrides, getDrainStatus } from './queries.js'
 import { mapTask } from './mappers.js'
 
@@ -714,6 +714,7 @@ export const Mutation = {
     args: { enabled: boolean },
     ctx: Context
   ) {
+    requireInternalAuth(ctx)
     const value = args.enabled ? 'true' : 'false'
     await ctx.pool.query(
       `INSERT INTO supervisor_state (key, value, updated_at)

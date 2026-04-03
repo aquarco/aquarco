@@ -57,15 +57,15 @@ def auth_callback(ctx: typer.Context) -> None:
         print_info("Claude is not authenticated. Starting login flow...")
         try:
             ctx.invoke(claude)
-        except SystemExit:
-            print_error("Claude login flow failed. Continuing to check GitHub...")
+        except (SystemExit, Exception) as exc:
+            print_error(f"Claude login flow failed: {type(exc).__name__}. Continuing to check GitHub...")
 
     if not gs["authenticated"]:
         print_info("GitHub is not authenticated. Starting login flow...")
         try:
             ctx.invoke(github)
-        except SystemExit:
-            print_error("GitHub login flow failed.")
+        except (SystemExit, Exception) as exc:
+            print_error(f"GitHub login flow failed: {type(exc).__name__}.")
 
     # Show final status
     print_info("Checking final auth status...")

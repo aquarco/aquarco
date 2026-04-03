@@ -68,8 +68,11 @@ def _query_drain_status(client: GraphQLClient) -> dict | None:
         return data["drainStatus"]
     except (httpx.ConnectError, httpx.TimeoutException, OSError):
         return None
-    except Exception:
-        print_warning("Failed to query drain status from API. Proceeding without drain check.")
+    except (KeyError, TypeError) as exc:
+        print_warning(f"Unexpected drain status response: {exc}. Proceeding without drain check.")
+        return None
+    except Exception as exc:
+        print_warning(f"Failed to query drain status: {type(exc).__name__}: {exc}. Proceeding without drain check.")
         return None
 
 
@@ -113,8 +116,8 @@ def update(
                 print_info("Drain mode was pending and all work is idle. Proceeding with update...")
                 try:
                     client.execute(MUTATION_SET_DRAIN_MODE, {"enabled": False})
-                except Exception:
-                    pass  # best-effort clear
+                except Exception as exc:
+                    print_warning(f"Could not clear drain flag: {type(exc).__name__}: {exc}. Proceeding with update.")
                 _run_update_steps(vagrant, steps, skip_provision)
                 return
 
@@ -135,8 +138,8 @@ def update(
                 print_warning("Forcing immediate restart...")
                 try:
                     client.execute(MUTATION_SET_DRAIN_MODE, {"enabled": False})
-                except Exception:
-                    print_warning("Could not clear drain flag — proceeding with restart anyway.")
+                except Exception as exc:
+                    print_warning(f"Could not clear drain flag ({type(exc).__name__}: {exc}) — proceeding with restart anyway.")
                 _run_update_steps(vagrant, steps, skip_provision)
                 return
             else:  # cancel

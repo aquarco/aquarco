@@ -439,22 +439,19 @@ export function mapStage(row: Record<string, unknown>) {
 // ── Drain status helper ──────────────────────────────────────────────────────
 
 async function getDrainStatus(pool: Pool) {
-  const drainRow = await pool.query(
-    `SELECT value FROM supervisor_state WHERE key = 'drain_mode'`
-  )
-  const enabled = drainRow.rows.length > 0 && drainRow.rows[0].value === 'true'
-
-  const activeRes = await pool.query(
-    `SELECT COALESCE(SUM(active_count), 0)::int AS cnt FROM agent_instances`
-  )
-  const activeAgents = activeRes.rows[0]?.cnt ?? 0
-
-  const taskRes = await pool.query(
-    `SELECT COUNT(*)::int AS cnt FROM tasks WHERE status IN ('executing', 'queued', 'planning')`
-  )
-  const activeTasks = taskRes.rows[0]?.cnt ?? 0
-
-  return { enabled, activeAgents, activeTasks }
+  // Single atomic query for consistent point-in-time reads
+  const { rows } = await pool.query(`
+    SELECT
+      (SELECT value FROM supervisor_state WHERE key = 'drain_mode') AS drain_val,
+      (SELECT COALESCE(SUM(active_count), 0)::int FROM agent_instances) AS active_agents,
+      (SELECT COUNT(*)::int FROM tasks WHERE status IN ('executing', 'queued', 'planning')) AS active_tasks
+  `)
+  const row = rows[0]
+  return {
+    enabled: row?.drain_val === 'true',
+    activeAgents: row?.active_agents ?? 0,
+    activeTasks: row?.active_tasks ?? 0,
+  }
 }
 
 export { getDrainStatus }

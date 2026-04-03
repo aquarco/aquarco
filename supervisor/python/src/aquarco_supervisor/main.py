@@ -241,7 +241,8 @@ class Supervisor:
                     (SELECT COUNT(*) FROM tasks WHERE status IN ('executing', 'queued', 'planning')) AS executing_count
                 """
             )
-        except Exception:
+        except Exception as exc:
+            log.warning("drain_check_failed", msg=f"Could not query drain status: {exc}")
             drain_row = None  # table may not exist yet (pre-migration)
 
         if drain_row and drain_row["drain_val"] == "true":

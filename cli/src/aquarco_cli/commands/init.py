@@ -27,6 +27,7 @@ def _check_prerequisite(binary: str, display_name: str, install_url: str) -> boo
 
 @app.callback(invoke_without_command=True)
 def init(
+    ctx: typer.Context,
     port: int = typer.Option(
         8080, "--port",
         help="Host port for the Caddy reverse proxy (default: 8080). "
@@ -34,9 +35,13 @@ def init(
     ),
 ) -> None:
     """One-command bootstrap of a working Aquarco environment."""
-    # Save port configuration
+    # Save port configuration when --port is explicitly provided or config already exists
     config_file = Path.home() / ".aquarco.json"
-    if port != 8080 or config_file.exists():
+    # Click's get_parameter_source returns ParameterSource.COMMANDLINE when user passed --port
+    import click
+    port_source = ctx.get_parameter_source("port")
+    port_explicitly_set = port_source is not None and port_source == click.core.ParameterSource.COMMANDLINE
+    if port_explicitly_set or config_file.exists():
         try:
             existing = {}
             if config_file.exists():
