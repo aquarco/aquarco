@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
+import httpx
 import typer
 from rich.prompt import Prompt
 
@@ -65,7 +66,10 @@ def _query_drain_status(client: GraphQLClient) -> dict | None:
     try:
         data = client.execute(QUERY_DRAIN_STATUS)
         return data["drainStatus"]
+    except (httpx.ConnectError, httpx.TimeoutException, OSError):
+        return None
     except Exception:
+        print_warning("Failed to query drain status from API. Proceeding without drain check.")
         return None
 
 
@@ -132,15 +136,17 @@ def update(
                 try:
                     client.execute(MUTATION_SET_DRAIN_MODE, {"enabled": False})
                 except Exception:
-                    pass
+                    print_warning("Could not clear drain flag — proceeding with restart anyway.")
                 _run_update_steps(vagrant, steps, skip_provision)
                 return
             else:  # cancel
                 print_info("Cancelling planned update. Resuming normal operation.")
                 try:
                     client.execute(MUTATION_SET_DRAIN_MODE, {"enabled": False})
+                    print_success("Drain mode disabled. Normal operation resumed.")
                 except Exception as exc:
                     handle_api_error(exc)
+                    raise typer.Exit(code=1) from exc
                 return
 
         elif drain["activeTasks"] > 0 or drain["activeAgents"] > 0:

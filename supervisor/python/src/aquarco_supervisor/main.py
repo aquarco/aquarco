@@ -230,23 +230,24 @@ class Supervisor:
             return
 
         # Check drain mode — skip dispatch when draining
+        # Use a single query to atomically check drain flag + active counts
+        # to avoid TOCTOU race between drain check and idle check.
         try:
-            drain_val = await self._db.fetch_val(
-                "SELECT value FROM supervisor_state WHERE key = 'drain_mode'"
+            drain_row = await self._db.fetch_one(
+                """
+                SELECT
+                    (SELECT value FROM supervisor_state WHERE key = 'drain_mode') AS drain_val,
+                    (SELECT COALESCE(SUM(active_count), 0) FROM agent_instances) AS active_count,
+                    (SELECT COUNT(*) FROM tasks WHERE status IN ('executing', 'queued', 'planning')) AS executing_count
+                """
             )
         except Exception:
-            drain_val = None  # table may not exist yet (pre-migration)
+            drain_row = None  # table may not exist yet (pre-migration)
 
-        if drain_val == "true":
+        if drain_row and drain_row["drain_val"] == "true":
             log.info("drain_mode_active", msg="Skipping task dispatch — drain mode enabled")
             # Check if all work is idle → auto-restart
-            active_count = await self._db.fetch_val(
-                "SELECT COALESCE(SUM(active_count), 0) FROM agent_instances"
-            )
-            executing_count = await self._db.fetch_val(
-                "SELECT COUNT(*) FROM tasks WHERE status IN ('executing', 'queued', 'planning')"
-            )
-            if (active_count or 0) == 0 and (executing_count or 0) == 0:
+            if (drain_row["active_count"] or 0) == 0 and (drain_row["executing_count"] or 0) == 0:
                 log.info("drain_mode_idle", msg="All work idle — clearing drain flag and restarting")
                 # Clear drain flag before restart to prevent restart loop
                 await self._db.execute(
