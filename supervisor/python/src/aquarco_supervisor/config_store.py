@@ -60,7 +60,7 @@ def validate_pipeline_definition(doc: dict[str, Any], schema: dict[str, Any]) ->
 
 
 # ---------------------------------------------------------------------------
-# Config → DB  (deserialize YAML files and store in database)
+# Config → DB  (deserialize hybrid .md files and store in database)
 # ---------------------------------------------------------------------------
 
 def _parse_md_frontmatter(path: Path) -> dict[str, Any]:
@@ -216,7 +216,7 @@ async def sync_agent_definitions_to_db(
     agents_dir: Path,
     schema_path: Path | None = None,
 ) -> int:
-    """High-level: load agent YAML files, validate, store in DB.
+    """High-level: load hybrid .md agent files, validate, store in DB.
 
     Returns the number of definitions stored.
     """
@@ -452,14 +452,19 @@ async def read_autoloaded_agents_from_db(
 
 
 # ---------------------------------------------------------------------------
-# DB → Config  (read from database and serialize to YAML files)
+# DB → Config  (read from database and serialize to hybrid .md files)
 # ---------------------------------------------------------------------------
 
 async def read_agent_definitions_from_db(
     db: Database,
     active_only: bool = True,
 ) -> list[dict[str, Any]]:
-    """Read agent definitions from DB and return as full YAML-ready dicts.
+    """Read agent definitions from DB and return as k8s-style dicts.
+
+    .. note:: Returns the legacy apiVersion/kind/metadata/spec envelope format
+       used internally for DB storage.  Callers that need flat frontmatter dicts
+       (e.g. for schema validation or file export) must convert via
+       :func:`export_agent_definitions_to_files` which handles the mapping.
 
     Args:
         active_only: If True (default), return only the active version of each
@@ -526,17 +531,6 @@ async def export_agent_definitions_to_files(
     docs = await read_agent_definitions_from_db(db, active_only=True)
     count = 0
     for doc in docs:
-        if schema is not None:
-            try:
-                validate_agent_definition(doc, schema)
-            except jsonschema.ValidationError as exc:
-                log.warning(
-                    "agent_db_schema_invalid",
-                    agent=doc["metadata"]["name"],
-                    error=exc.message,
-                )
-                continue
-
         meta = doc.get("metadata", {})
         spec = doc.get("spec", {})
         name = meta.get("name", "")
@@ -556,6 +550,18 @@ async def export_agent_definitions_to_files(
 
         # Extract inline prompt if present, otherwise use a placeholder
         prompt_body = spec.get("promptInline", f"# {name}\n\nExported agent definition.\n")
+
+        # Validate the flat frontmatter dict (not the k8s envelope)
+        if schema is not None:
+            try:
+                validate_agent_definition(frontmatter, schema)
+            except jsonschema.ValidationError as exc:
+                log.warning(
+                    "agent_db_schema_invalid",
+                    agent=name,
+                    error=exc.message,
+                )
+                continue
 
         # Write hybrid .md file
         out_path = agents_dir / f"{name}.md"

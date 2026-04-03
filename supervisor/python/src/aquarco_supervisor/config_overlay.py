@@ -217,7 +217,7 @@ class ScopedAgentView:
 
             _frontmatter, prompt_body = _parse_md_agent_file(Path(definition_file))
             return prompt_body.strip() or None
-        except (ValueError, Exception):
+        except (ValueError, yaml.YAMLError, OSError):
             return None
 
     def get_agent_model(self, agent_name: str) -> str | None:
