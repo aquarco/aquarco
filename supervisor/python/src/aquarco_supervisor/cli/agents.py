@@ -186,7 +186,7 @@ def discover(
     definitions_dir: Path = typer.Option(
         _DEFAULT_DEFINITIONS_DIR,
         "--definitions-dir", "-d",
-        help="Directory containing agent definition YAML files.",
+        help="Directory containing hybrid .md agent definition files.",
         show_default=True,
     ),
     output: Path = typer.Option(

@@ -751,14 +751,16 @@ class TestExportAgentDefinitionsToFiles:
         count = await export_agent_definitions_to_files(mock_db, out_dir)
         assert count == 1
 
-        out_file = out_dir / "alpha-agent.yaml"
+        out_file = out_dir / "alpha-agent.md"
         assert out_file.exists()
 
-        loaded = yaml.safe_load(out_file.read_text())
-        assert loaded["apiVersion"] == "aquarco.agents/v1"
-        assert loaded["kind"] == "AgentDefinition"
-        assert loaded["metadata"]["name"] == "alpha-agent"
-        assert loaded["metadata"]["version"] == "1.0.0"
+        content = out_file.read_text()
+        assert content.startswith("---\n")
+        # Parse frontmatter from hybrid .md file
+        parts = content.split("---\n", 2)
+        loaded = yaml.safe_load(parts[1])
+        assert loaded["name"] == "alpha-agent"
+        assert loaded["version"] == "1.0.0"
 
     @pytest.mark.asyncio
     async def test_creates_output_dir(
@@ -951,11 +953,14 @@ class TestRoundTrip:
         count = await export_agent_definitions_to_files(mock_db, out_dir)
         assert count == 1
 
-        exported = yaml.safe_load((out_dir / "roundtrip-agent.yaml").read_text())
-        assert exported["metadata"]["name"] == original["name"]
-        assert exported["metadata"]["version"] == "2.1.0"
-        assert exported["spec"]["priority"] == 10
-        assert exported["spec"]["tools"] == {"allowed": ["Read", "Bash"]}
+        md_content = (out_dir / "roundtrip-agent.md").read_text()
+        assert md_content.startswith("---\n")
+        parts = md_content.split("---\n", 2)
+        exported = yaml.safe_load(parts[1])
+        assert exported["name"] == original["name"]
+        assert exported["version"] == "2.1.0"
+        assert exported["priority"] == 10
+        assert exported["tools"] == {"allowed": ["Read", "Bash"]}
 
     @pytest.mark.asyncio
     async def test_pipeline_roundtrip(

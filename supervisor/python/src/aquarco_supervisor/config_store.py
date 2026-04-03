@@ -1,8 +1,8 @@
 """Serialize agent/pipeline definitions to DB and deserialize back to config files.
 
 Two directions:
-  - config → DB:  load YAML files, validate against JSON schema, upsert into DB
-  - DB → config:  read from DB, validate against JSON schema, write YAML files
+  - config → DB:  load hybrid .md files, validate against JSON schema, upsert into DB
+  - DB → config:  read from DB, validate against JSON schema, write hybrid .md files
 
 Versioning:
   - Each definition is keyed by (name, version).
@@ -23,6 +23,7 @@ import yaml
 
 from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES as _SYSTEM_AGENT_NAMES
 from aquarco_supervisor.database import Database
+from aquarco_supervisor.pipeline.agent_registry import _parse_md_agent_file
 
 log = structlog.get_logger()
 
@@ -65,35 +66,13 @@ def validate_pipeline_definition(doc: dict[str, Any], schema: dict[str, Any]) ->
 def _parse_md_frontmatter(path: Path) -> dict[str, Any]:
     """Parse YAML frontmatter from a hybrid .md agent file.
 
-    The file format is::
-
-        ---
-        <YAML frontmatter>
-        ---
-        <Markdown prompt body>
+    Delegates to :func:`_parse_md_agent_file` and discards the prompt body.
 
     Returns the frontmatter as a dict.
     Raises :class:`ValueError` on missing delimiters or non-dict YAML.
     """
-    content = path.read_text()
-
-    if not content.startswith("---"):
-        raise ValueError(f"Missing opening '---' delimiter in {path}")
-
-    after_open = content[3:]
-    if after_open.startswith("\n"):
-        after_open = after_open[1:]
-
-    close_idx = after_open.find("\n---")
-    if close_idx == -1:
-        raise ValueError(f"Missing closing '---' delimiter in {path}")
-
-    frontmatter_text = after_open[:close_idx]
-    parsed = yaml.safe_load(frontmatter_text)
-    if not isinstance(parsed, dict):
-        raise ValueError(f"Frontmatter is not a YAML mapping in {path}")
-
-    return parsed
+    frontmatter, _prompt_body = _parse_md_agent_file(path)
+    return frontmatter
 
 
 def load_agent_definitions_from_files(
@@ -443,7 +422,10 @@ async def read_autoloaded_agents_from_db(
 ) -> list[dict[str, Any]]:
     """Fetch active autoloaded agents for a specific repository.
 
-    Returns full YAML-ready dicts for agents with source='autoload:<repo_name>'.
+    Returns flat frontmatter-style dicts for agents with
+    source='autoload:<repo_name>'.  The flat format matches what
+    ``_parse_md_frontmatter`` returns, so consumers don't need to handle
+    two different dict shapes.
     """
     rows = await db.fetch_all(
         """SELECT name, version, description, labels, spec, is_active
@@ -454,19 +436,17 @@ async def read_autoloaded_agents_from_db(
     )
     docs: list[dict[str, Any]] = []
     for row in rows:
+        spec = row["spec"] if isinstance(row["spec"], dict) else json.loads(row["spec"])
         doc: dict[str, Any] = {
-            "apiVersion": AGENT_API_VERSION,
-            "kind": AGENT_KIND,
-            "metadata": {
-                "name": row["name"],
-                "version": row["version"],
-                "description": row["description"],
-            },
-            "spec": row["spec"],
+            "name": row["name"],
+            "version": row["version"],
+            "description": row["description"],
         }
         labels = row.get("labels")
         if labels:
-            doc["metadata"]["labels"] = labels
+            doc["labels"] = labels
+        # Merge spec fields into flat dict
+        doc.update(spec)
         docs.append(doc)
     return docs
 
@@ -517,14 +497,16 @@ async def export_agent_definitions_to_files(
     agents_dir: Path,
     schema: dict[str, Any] | None = None,
 ) -> int:
-    """Read active agent definitions from DB, validate against schema, write
-    YAML files.
+    """Read active agent definitions from DB, validate, and write hybrid .md files.
+
+    Each exported file uses the hybrid format (YAML frontmatter + empty prompt
+    placeholder) so that ``_discover_agents_from_dir()`` can re-import them.
 
     Returns the number of files written.
 
     .. warning:: **Not group-preserving.**
         ``agent_group`` is stored only in the database and is intentionally
-        excluded from the exported YAML documents (to keep the schema clean).
+        excluded from the exported documents (to keep the schema clean).
         All files are written into ``agents_dir`` as a flat list — the
         ``system/`` vs ``pipeline/`` subdirectory split is lost.
 
@@ -536,7 +518,7 @@ async def export_agent_definitions_to_files(
 
         **Migration guide**: If you need a group-preserving backup/restore,
         query the DB directly including the ``agent_group`` column, or copy the
-        source YAML files from ``config/agents/definitions/system/`` and
+        source .md files from ``config/agents/definitions/system/`` and
         ``config/agents/definitions/pipeline/`` instead of using this function.
     """
     agents_dir.mkdir(parents=True, exist_ok=True)
@@ -555,11 +537,30 @@ async def export_agent_definitions_to_files(
                 )
                 continue
 
-        name = doc["metadata"]["name"]
-        out_path = agents_dir / f"{name}.yaml"
-        out_path.write_text(
-            yaml.dump(doc, default_flow_style=False, sort_keys=False)
-        )
+        meta = doc.get("metadata", {})
+        spec = doc.get("spec", {})
+        name = meta.get("name", "")
+
+        # Build flat frontmatter from k8s-style doc
+        frontmatter: dict[str, Any] = {
+            "name": name,
+            "version": meta.get("version", "0.0.0"),
+            "description": meta.get("description", ""),
+        }
+        if meta.get("labels"):
+            frontmatter["labels"] = meta["labels"]
+        # Copy spec fields into frontmatter (flat format)
+        for key, value in spec.items():
+            if key != "promptInline":
+                frontmatter[key] = value
+
+        # Extract inline prompt if present, otherwise use a placeholder
+        prompt_body = spec.get("promptInline", f"# {name}\n\nExported agent definition.\n")
+
+        # Write hybrid .md file
+        out_path = agents_dir / f"{name}.md"
+        frontmatter_yaml = yaml.dump(frontmatter, default_flow_style=False, sort_keys=False)
+        out_path.write_text(f"---\n{frontmatter_yaml}---\n{prompt_body}")
         count += 1
         log.debug("agent_definition_exported", agent=name, path=str(out_path))
 

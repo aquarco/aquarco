@@ -67,7 +67,7 @@ class AgentRegistry:
         self._agents: dict[str, dict[str, Any]] = {}
 
     async def load(self, registry_file: str | None = None) -> None:
-        """Load agent registry from JSON file or discover from YAML definitions.
+        """Load agent registry from JSON file or discover from hybrid .md definitions.
 
         Also loads autoloaded agents from the database for all registered
         repositories.
@@ -128,8 +128,8 @@ class AgentRegistry:
                     spec["_group"] = group
                     spec["_definition_file"] = str(md_file)
                     self._agents[name] = spec
-                except (ValueError, yaml.YAMLError):
-                    log.warning("agent_md_parse_error", file=str(md_file))
+                except (ValueError, yaml.YAMLError) as exc:
+                    log.warning("agent_md_parse_error", file=str(md_file), error=str(exc))
 
     def _discover_agents_from_dir(self, directory: Path, group: str) -> None:
         """Scan a single directory and add agents tagged with the given group."""
@@ -142,8 +142,8 @@ class AgentRegistry:
                 spec["_group"] = group
                 spec["_definition_file"] = str(md_file)
                 self._agents[name] = spec
-            except (ValueError, yaml.YAMLError):
-                log.warning("agent_md_parse_error", file=str(md_file))
+            except (ValueError, yaml.YAMLError) as exc:
+                log.warning("agent_md_parse_error", file=str(md_file), error=str(exc))
 
     async def _load_autoloaded_agents(self) -> None:
         """Load autoloaded agents from the database for all registered repositories."""
@@ -396,7 +396,7 @@ class AgentRegistry:
         """Return all active agent definitions as serializable dicts.
 
         Tries the database first (agent_definitions table), falls back to
-        in-memory registry loaded from YAML files.
+        in-memory registry loaded from hybrid .md definition files.
         """
         try:
             rows = await self._db.fetch_all(
