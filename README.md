@@ -41,7 +41,32 @@ Install: `pip install -e cli/` (requires Python 3.10+)
 | `aquarco ui api` | Open GraphQL playground |
 | `aquarco ui stop` | Stop all UI services (web, adminer) |
 
-Common flags: `--follow` / `-f` (stream task progress), `--json` (machine-readable output), `--dry-run` (preview update steps).
+### Common Flags
+
+| Flag | Commands | Description |
+|------|----------|-------------|
+| `-h`, `--help` | All | Show command help (short `-h` alias available on all commands) |
+| `--json` | `status`, `repos list`, `auth status` | Output machine-readable JSON instead of formatted tables |
+| `--follow`, `-f` | `status`, `run` | Stream progress until task/execution reaches terminal state |
+| `--no-open` | `aquarco ui` | Do not open browser after starting services (opens by default) |
+| `--port` | `aquarco init` | Custom port for Aquarco services (default: 8080) |
+| `--dry-run` | `aquarco update` | Preview update steps without applying changes |
+
+### Smart Features
+
+#### Smart Authentication (`aquarco auth`)
+Running `aquarco auth` without a subcommand now auto-detects which services are missing authentication:
+- If Claude is not authenticated, runs the Claude OAuth PKCE flow
+- If GitHub is not authenticated, runs the GitHub device flow
+- Shows final authentication status for both services
+
+#### Graceful Updates with Drain Mode (`aquarco update`)
+When running `aquarco update` while agents are actively working, you now have three options:
+1. **Yes** — Restart the supervisor immediately (may interrupt running work)
+2. **No** — Cancel the update
+3. **Plan update when idle** — Enable drain mode: the supervisor stops picking up new work and waits for all running stages to complete, then auto-restarts automatically
+
+If you run `aquarco update` while drain mode is enabled, you can choose to wait, restart immediately, or cancel the pending update.
 
 ## Architecture
 
