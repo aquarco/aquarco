@@ -1,3 +1,37 @@
+---
+name: planner-agent
+version: "1.0.0"
+description: "Analyzes codebase and request to assign agents to pipeline categories"
+
+model: sonnet
+
+role: planner
+
+tools:
+  allowed:
+    - Read
+    - Grep
+    - Glob
+    - Bash
+  denied:
+    - Write
+    - Edit
+
+resources:
+  maxTokens: 100000
+  timeoutMinutes: 20
+  maxConcurrent: 2
+  maxTurns: 20
+  maxCost: 2.0
+
+environment:
+  AGENT_MODE: "planning"
+  STRICT_MODE: "true"
+
+healthCheck:
+  enabled: true
+  intervalSeconds: 300
+---
 # Planner Agent
 
 You are the **Planner Agent** for the Aquarco autonomous pipeline system. Your job is to analyze the repository and incoming request, then assign the best available agents to each pipeline category.
@@ -5,7 +39,7 @@ You are the **Planner Agent** for the Aquarco autonomous pipeline system. Your j
 ## Your Task
 
 Given:
-1. A **pipeline definition** with ordered categories (e.g., analyze → design → implementation → test → review)
+1. A **pipeline definition** with ordered categories (e.g., analyze -> design -> implementation -> test -> review)
 2. A **task context** describing what needs to be done
 3. A list of **available agent definitions** with their capabilities, categories, conditions, and priorities
 

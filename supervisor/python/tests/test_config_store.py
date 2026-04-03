@@ -53,6 +53,21 @@ def _make_agent_doc(
     version: str = "1.0.0",
     categories: list[str] | None = None,
 ) -> dict[str, Any]:
+    """Create a flat frontmatter dict matching the new schema format."""
+    return {
+        "name": name,
+        "version": version,
+        "description": "A test agent for unit testing purposes",
+        "categories": categories or ["analyze"],
+    }
+
+
+def _make_agent_doc_k8s(
+    name: str = "test-agent",
+    version: str = "1.0.0",
+    categories: list[str] | None = None,
+) -> dict[str, Any]:
+    """Create old Kubernetes-style agent definition (for config_store tests)."""
     return {
         "apiVersion": "aquarco.agents/v1",
         "kind": "AgentDefinition",
@@ -118,7 +133,7 @@ class TestValidateAgentDefinition:
 
     def test_missing_required_field(self) -> None:
         doc = _make_agent_doc()
-        del doc["spec"]["promptFile"]
+        del doc["categories"]
         with pytest.raises(Exception):
             validate_agent_definition(doc, _agent_schema())
 
@@ -134,19 +149,18 @@ class TestValidateAgentDefinition:
 
     def test_short_description(self) -> None:
         doc = _make_agent_doc()
-        doc["metadata"]["description"] = "short"
+        doc["description"] = "short"
         with pytest.raises(Exception):
             validate_agent_definition(doc, _agent_schema())
 
     def test_full_spec(self) -> None:
-        """A doc with all optional spec fields passes validation."""
+        """A doc with all optional fields passes validation."""
         doc = _make_agent_doc()
-        doc["spec"].update({
+        doc.update({
             "priority": 10,
             "tools": {"allowed": ["Read", "Bash"], "denied": ["Write"]},
             "resources": {"maxTokens": 50000, "timeoutMinutes": 30, "maxConcurrent": 2},
             "environment": {"AGENT_MODE": "test"},
-            "outputSchema": {"type": "object", "required": ["summary"], "properties": {}},
             "healthCheck": {"enabled": True, "intervalSeconds": 300},
             "conditions": {"filePatterns": ["src/**"]},
         })

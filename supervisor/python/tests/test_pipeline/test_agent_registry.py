@@ -12,7 +12,7 @@ import yaml
 
 from aquarco_supervisor.database import Database
 from aquarco_supervisor.exceptions import AgentRegistryError, NoAvailableAgentError
-from aquarco_supervisor.pipeline.agent_registry import AgentRegistry
+from aquarco_supervisor.pipeline.agent_registry import AgentRegistry, _parse_md_agent_file
 
 
 @pytest.fixture
@@ -157,15 +157,19 @@ def test_get_agent_prompt_file(tmp_path: Path) -> None:
     mock_db = AsyncMock(spec=Database)
     defs_dir = tmp_path / "definitions" / "pipeline"
     defs_dir.mkdir(parents=True)
-    def_file = str(defs_dir / "custom.yaml")
+    def_file_yaml = str(defs_dir / "custom.yaml")
+    def_file_md = str(defs_dir / "hybrid.md")
     agents_dir = tmp_path / "definitions"
     reg = AgentRegistry(mock_db, str(agents_dir))
     reg._agents = {
-        "custom": {"promptFile": "../../prompts/custom-prompt.md", "_definition_file": def_file},
-        "default": {"_definition_file": def_file},
+        "custom": {"promptFile": "../../prompts/custom-prompt.md", "_definition_file": def_file_yaml},
+        "default": {"_definition_file": def_file_yaml},
+        "hybrid": {"_definition_file": def_file_md},  # no promptFile → hybrid .md agent
     }
     assert reg.get_agent_prompt_file("custom") == (tmp_path / "prompts" / "custom-prompt.md").resolve()
     assert reg.get_agent_prompt_file("default") == (defs_dir / "default.md").resolve()
+    # Hybrid .md agent without promptFile returns the definition file itself
+    assert reg.get_agent_prompt_file("hybrid") == Path(def_file_md).resolve()
 
 
 def test_get_allowed_denied_tools(tmp_path: Path) -> None:
@@ -232,27 +236,31 @@ async def test_select_agent_at_capacity(
 
 
 @pytest.mark.asyncio
-async def test_discover_agents_from_yaml(
+async def test_discover_agents_from_md(
     mock_db: AsyncMock, tmp_path: Path
 ) -> None:
-    """YAML agent discovery loads AgentDefinition files."""
+    """Hybrid .md agent discovery loads frontmatter-based files."""
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    defn = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "yaml-agent"},
-        "spec": {"categories": ["test"], "priority": 5},
-    }
-    (agents_dir / "yaml-agent.yaml").write_text(yaml.dump(defn))
-    # Non-agent YAML should be skipped
-    (agents_dir / "config.yaml").write_text(yaml.dump({"kind": "Other"}))
+    md_content = (
+        "---\n"
+        "name: md-agent\n"
+        "categories:\n"
+        "  - test\n"
+        "priority: 5\n"
+        "---\n"
+        "# Test prompt\n"
+    )
+    (agents_dir / "md-agent.md").write_text(md_content)
+    # Non-agent file should be skipped
+    (agents_dir / "config.txt").write_text("not an agent")
 
     reg = AgentRegistry(mock_db, str(agents_dir))
     # No registry file → triggers discovery
     await reg.load(str(tmp_path / "nonexistent.json"))
 
     agents = reg.get_agents_for_category("test")
-    assert "yaml-agent" in agents
+    assert "md-agent" in agents
 
 
 @pytest.mark.asyncio
@@ -268,13 +276,13 @@ async def test_discover_agents_missing_dir(
 
 
 @pytest.mark.asyncio
-async def test_discover_agents_bad_yaml(
+async def test_discover_agents_bad_md(
     mock_db: AsyncMock, tmp_path: Path
 ) -> None:
-    """Invalid YAML files are skipped without crashing."""
+    """Invalid .md files are skipped without crashing."""
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    (agents_dir / "bad.yaml").write_text("{{invalid yaml::")
+    (agents_dir / "bad.md").write_text("no frontmatter at all")
 
     reg = AgentRegistry(mock_db, str(agents_dir))
     await reg.load(str(tmp_path / "nonexistent.json"))
@@ -430,18 +438,24 @@ async def test_discover_agents_from_system_and_pipeline_subdirs(
     system_dir.mkdir(parents=True)
     pipeline_dir.mkdir(parents=True)
 
-    system_defn = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "planner-agent"},
-        "spec": {"role": "planner", "promptFile": "planner-agent.md"},
-    }
-    pipeline_defn = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "analyze-agent"},
-        "spec": {"categories": ["analyze"], "priority": 10, "promptFile": "analyze-agent.md"},
-    }
-    (system_dir / "planner-agent.yaml").write_text(yaml.dump(system_defn))
-    (pipeline_dir / "analyze-agent.yaml").write_text(yaml.dump(pipeline_defn))
+    system_md = (
+        "---\n"
+        "name: planner-agent\n"
+        "role: planner\n"
+        "---\n"
+        "# Planner prompt\n"
+    )
+    pipeline_md = (
+        "---\n"
+        "name: analyze-agent\n"
+        "categories:\n"
+        "  - analyze\n"
+        "priority: 10\n"
+        "---\n"
+        "# Analyze prompt\n"
+    )
+    (system_dir / "planner-agent.md").write_text(system_md)
+    (pipeline_dir / "analyze-agent.md").write_text(pipeline_md)
 
     reg = AgentRegistry(mock_db, str(agents_dir))
     await reg.load(str(tmp_path / "nonexistent.json"))
@@ -650,10 +664,10 @@ async def test_get_all_agent_definitions_json_db_path_handles_missing_agent_grou
 # ---------------------------------------------------------------------------
 
 
-def test_discover_agents_from_dir_skips_non_agent_kind(
+def test_discover_agents_from_dir_skips_invalid_md(
     mock_db: AsyncMock, tmp_path: Path
 ) -> None:
-    """Files with kind != 'AgentDefinition' are silently skipped in structured scan."""
+    """Files with invalid frontmatter are silently skipped in structured scan."""
     # Arrange
     agents_dir = tmp_path / "definitions"
     pipeline_dir = agents_dir / "pipeline"
@@ -662,33 +676,32 @@ def test_discover_agents_from_dir_skips_non_agent_kind(
     system_dir.mkdir(parents=True)
 
     # A valid pipeline agent
-    valid_doc = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "analyze-agent"},
-        "spec": {"categories": ["analyze"], "promptFile": "analyze-agent.md"},
-    }
-    # A YAML file with a different kind — should be ignored
-    wrong_kind_doc = {
-        "kind": "PipelineDefinition",
-        "metadata": {"name": "not-an-agent"},
-        "spec": {},
-    }
-    (pipeline_dir / "analyze-agent.yaml").write_text(yaml.dump(valid_doc))
-    (pipeline_dir / "not-an-agent.yaml").write_text(yaml.dump(wrong_kind_doc))
+    valid_md = (
+        "---\n"
+        "name: analyze-agent\n"
+        "categories:\n"
+        "  - analyze\n"
+        "---\n"
+        "# Analyze prompt\n"
+    )
+    # An .md file with missing frontmatter delimiters — should be ignored
+    invalid_md = "This is not a valid agent definition file.\n"
+    (pipeline_dir / "analyze-agent.md").write_text(valid_md)
+    (pipeline_dir / "not-an-agent.md").write_text(invalid_md)
 
     # Act
     reg = AgentRegistry(mock_db, str(agents_dir))
     reg._discover_agents_from_dir(pipeline_dir, group="pipeline")
 
-    # Assert — only the valid AgentDefinition is loaded
+    # Assert — only the valid .md file is loaded
     assert "analyze-agent" in reg._agents
     assert "not-an-agent" not in reg._agents
 
 
-def test_discover_agents_from_dir_handles_yaml_parse_error(
+def test_discover_agents_from_dir_handles_parse_error(
     mock_db: AsyncMock, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A YAML parse error in a file within a structured subdir is handled gracefully."""
+    """A parse error in an .md file within a structured subdir is handled gracefully."""
     import logging
 
     # Arrange
@@ -696,8 +709,8 @@ def test_discover_agents_from_dir_handles_yaml_parse_error(
     system_dir = agents_dir / "system"
     system_dir.mkdir(parents=True)
 
-    bad_yaml = "key: [unclosed bracket\nanother: value"
-    (system_dir / "bad-agent.yaml").write_text(bad_yaml)
+    bad_md = "---\nkey: [unclosed bracket\n---\n# Prompt\n"
+    (system_dir / "bad-agent.md").write_text(bad_md)
 
     # Act — must not raise
     reg = AgentRegistry(mock_db, str(agents_dir))
@@ -719,18 +732,23 @@ def test_discover_agents_from_dir_tags_correct_group(
     system_dir.mkdir(parents=True)
     pipeline_dir.mkdir(parents=True)
 
-    sys_doc = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "planner-agent"},
-        "spec": {"role": "planner", "promptFile": "planner-agent.md"},
-    }
-    pipe_doc = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "test-agent"},
-        "spec": {"categories": ["test"], "promptFile": "test-agent.md"},
-    }
-    (system_dir / "planner-agent.yaml").write_text(yaml.dump(sys_doc))
-    (pipeline_dir / "test-agent.yaml").write_text(yaml.dump(pipe_doc))
+    sys_md = (
+        "---\n"
+        "name: planner-agent\n"
+        "role: planner\n"
+        "---\n"
+        "# Planner prompt\n"
+    )
+    pipe_md = (
+        "---\n"
+        "name: test-agent\n"
+        "categories:\n"
+        "  - test\n"
+        "---\n"
+        "# Test prompt\n"
+    )
+    (system_dir / "planner-agent.md").write_text(sys_md)
+    (pipeline_dir / "test-agent.md").write_text(pipe_md)
 
     # Act
     reg = AgentRegistry(mock_db, str(agents_dir))
@@ -742,16 +760,16 @@ def test_discover_agents_from_dir_tags_correct_group(
     assert reg._agents["test-agent"]["_group"] == "pipeline"
 
 
-def test_discover_agents_from_dir_non_dict_yaml_skipped(
+def test_discover_agents_from_dir_non_dict_frontmatter_skipped(
     mock_db: AsyncMock, tmp_path: Path
 ) -> None:
-    """Non-dict YAML (e.g. a plain list) in a structured subdir is silently skipped."""
+    """Non-dict YAML frontmatter (e.g. a plain list) in an .md file is silently skipped."""
     # Arrange
     agents_dir = tmp_path / "definitions"
     pipeline_dir = agents_dir / "pipeline"
     pipeline_dir.mkdir(parents=True)
 
-    (pipeline_dir / "list-file.yaml").write_text("- item1\n- item2\n")
+    (pipeline_dir / "list-file.md").write_text("---\n- item1\n- item2\n---\n# Prompt\n")
 
     # Act
     reg = AgentRegistry(mock_db, str(agents_dir))
@@ -961,25 +979,34 @@ async def test_system_agents_never_compete_for_pipeline_slots_in_structured_scan
     system_dir.mkdir(parents=True)
     pipeline_dir.mkdir(parents=True)
 
-    # Add a system agent with a role, plus two competing pipeline agents for 'review'
-    system_defn = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "planner-agent"},
-        "spec": {"role": "planner", "promptFile": "planner-agent.md"},
-    }
-    pipeline_defn_a = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "review-agent"},
-        "spec": {"categories": ["review"], "priority": 50, "promptFile": "review-agent.md"},
-    }
-    pipeline_defn_b = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "review-agent-alt"},
-        "spec": {"categories": ["review"], "priority": 30, "promptFile": "review-agent-alt.md"},
-    }
-    (system_dir / "planner-agent.yaml").write_text(yaml.dump(system_defn))
-    (pipeline_dir / "review-agent.yaml").write_text(yaml.dump(pipeline_defn_a))
-    (pipeline_dir / "review-agent-alt.yaml").write_text(yaml.dump(pipeline_defn_b))
+    system_md = (
+        "---\n"
+        "name: planner-agent\n"
+        "role: planner\n"
+        "---\n"
+        "# Planner prompt\n"
+    )
+    pipeline_md_a = (
+        "---\n"
+        "name: review-agent\n"
+        "categories:\n"
+        "  - review\n"
+        "priority: 50\n"
+        "---\n"
+        "# Review prompt\n"
+    )
+    pipeline_md_b = (
+        "---\n"
+        "name: review-agent-alt\n"
+        "categories:\n"
+        "  - review\n"
+        "priority: 30\n"
+        "---\n"
+        "# Alt review prompt\n"
+    )
+    (system_dir / "planner-agent.md").write_text(system_md)
+    (pipeline_dir / "review-agent.md").write_text(pipeline_md_a)
+    (pipeline_dir / "review-agent-alt.md").write_text(pipeline_md_b)
 
     # Act
     reg = AgentRegistry(mock_db, str(agents_dir))
@@ -1004,27 +1031,27 @@ async def test_system_agents_never_compete_for_pipeline_slots_in_structured_scan
 async def test_discover_agents_from_dir_spec_is_shallow_copy(
     mock_db: AsyncMock, tmp_path: Path
 ) -> None:
-    """Mutating a spec in _agents must not affect the on-disk YAML content.
+    """Mutating a spec in _agents must not affect the on-disk file content.
 
-    The ``dict(raw.get("spec", raw))`` shallow copy introduced in
+    The ``dict(frontmatter)`` shallow copy introduced in
     _discover_agents_from_dir ensures the registry's spec dict is isolated
-    from the raw YAML-parsed object so that in-memory mutations do not
+    from the parsed frontmatter so that in-memory mutations do not
     propagate back to re-reads of the file.
     """
-    # Arrange: write a valid pipeline agent YAML file
+    # Arrange: write a valid pipeline agent .md file
     agents_dir = tmp_path / "pipeline"
     agents_dir.mkdir(parents=True)
-    agent_defn = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "canary-agent"},
-        "spec": {
-            "categories": ["canary"],
-            "priority": 5,
-            "promptFile": "canary-agent.md",
-        },
-    }
-    yaml_file = agents_dir / "canary-agent.yaml"
-    yaml_file.write_text(yaml.dump(agent_defn))
+    md_content = (
+        "---\n"
+        "name: canary-agent\n"
+        "categories:\n"
+        "  - canary\n"
+        "priority: 5\n"
+        "---\n"
+        "# Canary prompt\n"
+    )
+    md_file = agents_dir / "canary-agent.md"
+    md_file.write_text(md_content)
 
     reg = AgentRegistry(mock_db, str(tmp_path))
 
@@ -1038,34 +1065,35 @@ async def test_discover_agents_from_dir_spec_is_shallow_copy(
     reg._agents["canary-agent"]["categories"] = ["mutated"]
     reg._agents["canary-agent"]["_injected_key"] = "should_not_appear_on_disk"
 
-    # Re-read the YAML file from disk — it must be unchanged
-    reloaded = yaml.safe_load(yaml_file.read_text())
-    assert reloaded["spec"]["categories"] == ["canary"]
-    assert "_injected_key" not in reloaded["spec"]
+    # Re-read the file from disk — frontmatter must be unchanged
+    reloaded_fm, _ = _parse_md_agent_file(md_file)
+    assert reloaded_fm["categories"] == ["canary"]
+    assert "_injected_key" not in reloaded_fm
 
 
 @pytest.mark.asyncio
 async def test_discover_agents_flat_scan_spec_is_shallow_copy(
     mock_db: AsyncMock, tmp_path: Path
 ) -> None:
-    """Flat-scan path also isolates registry spec from the raw YAML parse tree.
+    """Flat-scan path also isolates registry spec from the parsed frontmatter.
 
     The flat scan in ``_discover_agents`` (used when system/ and pipeline/
     subdirectories do NOT exist) applies the same ``dict()`` shallow copy.
     """
-    # Arrange: write a YAML agent directly in agents_dir (flat layout)
+    # Arrange: write an .md agent directly in agents_dir (flat layout)
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir(parents=True)
-    agent_defn = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "flat-agent"},
-        "spec": {
-            "categories": ["flat"],
-            "priority": 1,
-        },
-    }
-    yaml_file = agents_dir / "flat-agent.yaml"
-    yaml_file.write_text(yaml.dump(agent_defn))
+    md_content = (
+        "---\n"
+        "name: flat-agent\n"
+        "categories:\n"
+        "  - flat\n"
+        "priority: 1\n"
+        "---\n"
+        "# Flat agent prompt\n"
+    )
+    md_file = agents_dir / "flat-agent.md"
+    md_file.write_text(md_content)
 
     mock_db.fetch_all.return_value = []
     mock_db.execute.return_value = None
@@ -1083,10 +1111,10 @@ async def test_discover_agents_flat_scan_spec_is_shallow_copy(
     reg._agents["flat-agent"]["categories"] = ["mutated"]
     reg._agents["flat-agent"]["_injected_key"] = "should_not_appear_on_disk"
 
-    # Re-read YAML from disk — must be unchanged
-    reloaded = yaml.safe_load(yaml_file.read_text())
-    assert reloaded["spec"]["categories"] == ["flat"]
-    assert "_injected_key" not in reloaded["spec"]
+    # Re-read file from disk — frontmatter must be unchanged
+    reloaded_fm, _ = _parse_md_agent_file(md_file)
+    assert reloaded_fm["categories"] == ["flat"]
+    assert "_injected_key" not in reloaded_fm
 
 
 # ---------------------------------------------------------------------------
@@ -1374,3 +1402,153 @@ class TestSetColumnExtraction:
         # has two word=patterns — but only the first is a real SET target.
         # This test documents the current behavior.
         assert "active_count" in columns
+
+
+# ---------------------------------------------------------------------------
+# _parse_md_agent_file — hybrid .md parsing
+# ---------------------------------------------------------------------------
+
+
+class TestParseMdAgentFile:
+    """Tests for the _parse_md_agent_file() utility function."""
+
+    def test_valid_md_file(self, tmp_path: Path) -> None:
+        """Parses a valid hybrid .md file into frontmatter dict and prompt body."""
+        md = (
+            "---\n"
+            "name: test-agent\n"
+            "version: \"1.0.0\"\n"
+            "categories:\n"
+            "  - test\n"
+            "---\n"
+            "# Test Agent\n"
+            "\n"
+            "This is the prompt body.\n"
+        )
+        f = tmp_path / "test-agent.md"
+        f.write_text(md)
+
+        frontmatter, prompt = _parse_md_agent_file(f)
+
+        assert frontmatter["name"] == "test-agent"
+        assert frontmatter["version"] == "1.0.0"
+        assert frontmatter["categories"] == ["test"]
+        assert "# Test Agent" in prompt
+        assert "This is the prompt body." in prompt
+
+    def test_missing_opening_delimiter(self, tmp_path: Path) -> None:
+        """Raises ValueError when the file is missing the opening '---'."""
+        f = tmp_path / "bad.md"
+        f.write_text("name: test-agent\n---\n# Prompt\n")
+
+        with pytest.raises(ValueError, match="Missing opening '---'"):
+            _parse_md_agent_file(f)
+
+    def test_missing_closing_delimiter(self, tmp_path: Path) -> None:
+        """Raises ValueError when the file has opening '---' but no closing '---'."""
+        f = tmp_path / "bad.md"
+        f.write_text("---\nname: test-agent\n# No closing delimiter\n")
+
+        with pytest.raises(ValueError, match="Missing closing '---'"):
+            _parse_md_agent_file(f)
+
+    def test_non_dict_yaml(self, tmp_path: Path) -> None:
+        """Raises ValueError when the frontmatter YAML parses to a non-dict type."""
+        f = tmp_path / "bad.md"
+        f.write_text("---\n- item1\n- item2\n---\n# Prompt\n")
+
+        with pytest.raises(ValueError, match="did not parse as a dict"):
+            _parse_md_agent_file(f)
+
+    def test_triple_dash_in_prompt_body(self, tmp_path: Path) -> None:
+        """Triple dashes in the prompt body do not interfere with parsing."""
+        md = (
+            "---\n"
+            "name: safe-agent\n"
+            "---\n"
+            "# Prompt\n"
+            "\n"
+            "---\n"
+            "This section has a horizontal rule.\n"
+        )
+        f = tmp_path / "safe.md"
+        f.write_text(md)
+
+        frontmatter, prompt = _parse_md_agent_file(f)
+        assert frontmatter["name"] == "safe-agent"
+        assert "---" in prompt
+        assert "horizontal rule" in prompt
+
+
+# ---------------------------------------------------------------------------
+# get_agent_prompt_content — new method for hybrid .md agents
+# ---------------------------------------------------------------------------
+
+
+def test_get_agent_prompt_content_returns_body(tmp_path: Path) -> None:
+    """get_agent_prompt_content returns the prompt body from a hybrid .md file."""
+    mock_db = AsyncMock(spec=Database)
+    agents_dir = tmp_path / "definitions" / "pipeline"
+    agents_dir.mkdir(parents=True)
+
+    md = (
+        "---\n"
+        "name: my-agent\n"
+        "categories:\n"
+        "  - test\n"
+        "---\n"
+        "# My Agent Prompt\n"
+        "\n"
+        "This is the body.\n"
+    )
+    md_file = agents_dir / "my-agent.md"
+    md_file.write_text(md)
+
+    reg = AgentRegistry(mock_db, str(tmp_path / "definitions"))
+    reg._agents = {
+        "my-agent": {
+            "_definition_file": str(md_file),
+            "categories": ["test"],
+        }
+    }
+
+    content = reg.get_agent_prompt_content("my-agent")
+    assert content is not None
+    assert "# My Agent Prompt" in content
+    assert "This is the body." in content
+
+
+def test_get_agent_prompt_content_returns_none_for_json_agent(tmp_path: Path) -> None:
+    """get_agent_prompt_content returns None for agents loaded from JSON (no .md file)."""
+    mock_db = AsyncMock(spec=Database)
+    reg = AgentRegistry(mock_db, str(tmp_path))
+    reg._agents = {
+        "json-agent": {
+            "name": "json-agent",
+            "categories": ["test"],
+            # No _definition_file
+        }
+    }
+    assert reg.get_agent_prompt_content("json-agent") is None
+
+
+def test_get_agent_prompt_file_returns_md_path_for_hybrid_agent(tmp_path: Path) -> None:
+    """get_agent_prompt_file returns the .md definition file path for hybrid agents."""
+    mock_db = AsyncMock(spec=Database)
+    agents_dir = tmp_path / "definitions" / "pipeline"
+    agents_dir.mkdir(parents=True)
+
+    md_file = agents_dir / "my-agent.md"
+    md_file.write_text("---\nname: my-agent\n---\n# Prompt\n")
+
+    reg = AgentRegistry(mock_db, str(tmp_path / "definitions"))
+    reg._agents = {
+        "my-agent": {
+            "_definition_file": str(md_file),
+            "categories": ["test"],
+            # No promptFile key — hybrid .md agent
+        }
+    }
+
+    result = reg.get_agent_prompt_file("my-agent")
+    assert result == md_file.resolve()

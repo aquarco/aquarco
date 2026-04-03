@@ -35,37 +35,30 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 # ---------------------------------------------------------------------------
 
 
-def _make_agent_yaml(
+def _make_agent_md(
     tmp_path: Path,
     *,
     categories: list[str] | None = None,
     name: str = "test-agent",
-    prompt_file: str | None = None,
 ) -> Path:
-    """Create a minimal valid agent definition YAML for testing."""
+    """Create a minimal valid hybrid .md agent definition for testing."""
     if categories is None:
         categories = ["implement"]
 
-    # Create prompt file
-    prompt_path = tmp_path / "prompt.md"
-    prompt_path.write_text("Agent prompt content here.")
+    cats_yaml = "\n".join(f"  - {c}" for c in categories)
+    content = (
+        "---\n"
+        f"name: {name}\n"
+        'version: "1.0.0"\n'
+        'description: "A test agent for validation testing"\n'
+        f"categories:\n{cats_yaml}\n"
+        "---\n"
+        "# Agent prompt\n\n"
+        "Agent prompt content here.\n"
+    )
 
-    doc = {
-        "apiVersion": "aquarco.agents/v1",
-        "kind": "AgentDefinition",
-        "metadata": {
-            "name": name,
-            "version": "1.0.0",
-            "description": "A test agent for validation testing",
-        },
-        "spec": {
-            "categories": categories,
-            "promptFile": prompt_file or str(prompt_path.name),
-        },
-    }
-
-    agent_file = tmp_path / f"{name}.yaml"
-    agent_file.write_text(yaml.dump(doc))
+    agent_file = tmp_path / f"{name}.md"
+    agent_file.write_text(content)
     return agent_file
 
 
@@ -125,7 +118,7 @@ class TestValidateDefinitionCategories:
 
     def test_old_name_docs_rejected(self, tmp_path: Path) -> None:
         """Category 'docs' should produce a validation error."""
-        agent_file = _make_agent_yaml(tmp_path, categories=["docs"])
+        agent_file = _make_agent_md(tmp_path, categories=["docs"])
         errors, record = validate_definition(agent_file)
         assert record is None
         cat_errors = [e for e in errors if "categories" in e.field]
@@ -134,7 +127,7 @@ class TestValidateDefinitionCategories:
 
     def test_old_name_implementation_rejected(self, tmp_path: Path) -> None:
         """Category 'implementation' should produce a validation error."""
-        agent_file = _make_agent_yaml(tmp_path, categories=["implementation"])
+        agent_file = _make_agent_md(tmp_path, categories=["implementation"])
         errors, record = validate_definition(agent_file)
         assert record is None
         cat_errors = [e for e in errors if "categories" in e.field]
@@ -144,7 +137,7 @@ class TestValidateDefinitionCategories:
     def test_new_canonical_names_accepted(self, tmp_path: Path) -> None:
         """All canonical category names pass validation."""
         for cat in CANONICAL_CATEGORIES:
-            agent_file = _make_agent_yaml(
+            agent_file = _make_agent_md(
                 tmp_path, categories=[cat], name=f"agent-{cat}"
             )
             errors, record = validate_definition(agent_file)
@@ -155,7 +148,7 @@ class TestValidateDefinitionCategories:
 
     def test_multiple_old_names_all_flagged(self, tmp_path: Path) -> None:
         """Using both old names at once produces two errors."""
-        agent_file = _make_agent_yaml(
+        agent_file = _make_agent_md(
             tmp_path, categories=["docs", "implementation"]
         )
         errors, record = validate_definition(agent_file)
@@ -165,7 +158,7 @@ class TestValidateDefinitionCategories:
 
     def test_mixed_old_and_new_rejects_old(self, tmp_path: Path) -> None:
         """Mixing a valid and an old category name still flags the old one."""
-        agent_file = _make_agent_yaml(
+        agent_file = _make_agent_md(
             tmp_path, categories=["review", "docs"]
         )
         errors, record = validate_definition(agent_file)
@@ -305,10 +298,15 @@ class TestSchemaCrossValidation:
         )
 
         pipeline_enum = set(
-            pipeline_schema["properties"]["spec"]["properties"]["categories"]["items"]["enum"]
+            pipeline_schema["properties"]["categories"]["items"]["enum"]
         )
+        # agent-definition-v1 uses oneOf; extract categories from the first branch
+        agent_cats_branch = [
+            branch for branch in agent_schema["oneOf"]
+            if "categories" in branch.get("required", [])
+        ][0]
         agent_enum = set(
-            agent_schema["properties"]["spec"]["properties"]["categories"]["items"]["enum"]
+            agent_cats_branch["properties"]["categories"]["items"]["enum"]
         )
         assert pipeline_enum == agent_enum
 
@@ -318,7 +316,7 @@ class TestSchemaCrossValidation:
             (_REPO_ROOT / "config" / "schemas" / "pipeline-agent-v1.json").read_text()
         )
         schema_cats = set(
-            pipeline_schema["properties"]["spec"]["properties"]["categories"]["items"]["enum"]
+            pipeline_schema["properties"]["categories"]["items"]["enum"]
         )
         assert schema_cats == VALID_CATEGORIES
 
@@ -338,12 +336,14 @@ class TestAgentModeEnvVar:
 
     @pytest.fixture()
     def agent_env_vars(self) -> dict[str, str]:
-        """Load AGENT_MODE from all pipeline agent YAML files."""
+        """Load AGENT_MODE from all pipeline agent .md files."""
+        from aquarco_supervisor.pipeline.agent_registry import _parse_md_agent_file
+
         agents_dir = _REPO_ROOT / "config" / "agents" / "definitions" / "pipeline"
         result: dict[str, str] = {}
-        for f in sorted(agents_dir.glob("*.yaml")):
-            doc = yaml.safe_load(f.read_text())
-            env = doc.get("spec", {}).get("environment", {})
+        for f in sorted(agents_dir.glob("*.md")):
+            frontmatter, _ = _parse_md_agent_file(f)
+            env = frontmatter.get("environment", {})
             if "AGENT_MODE" in env:
                 result[f.stem] = env["AGENT_MODE"]
         return result

@@ -1,3 +1,44 @@
+---
+name: implementation-agent
+version: "1.0.0"
+description: "Implements features and bug fixes by writing and modifying code"
+
+model: opus
+
+categories:
+  - implement
+
+priority: 10
+
+tools:
+  allowed:
+    - Read
+    - Write
+    - Edit
+    - Bash
+    - Grep
+    - Glob
+
+resources:
+  maxTokens: 200000
+  timeoutMinutes: 60
+  maxConcurrent: 1
+  maxTurns: 100
+  maxCost: 15.0
+
+environment:
+  AGENT_MODE: "implementation"
+
+conditions:
+  filePatterns:
+    - "src/**"
+    - "lib/**"
+    - "packages/**"
+
+healthCheck:
+  enabled: true
+  intervalSeconds: 300
+---
 # Implementation Agent — System Prompt
 
 You are an implementation agent operating inside the Aquarco autonomous execution environment. Your responsibility is to read the design document and implement the solution by writing and modifying code, then committing the result.
