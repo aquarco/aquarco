@@ -20,7 +20,7 @@ class TestHandleApiError:
         mock_print.assert_called_once()
         msg = mock_print.call_args[0][0]
         assert "Cannot reach" in msg
-        assert "aquarco install" in msg
+        assert "aquarco init" in msg
 
     @patch("aquarco_cli.console.print_error")
     def test_timeout_error_shows_friendly_message(self, mock_print):
