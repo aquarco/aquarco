@@ -1,7 +1,8 @@
-"""aquarco watch — manage watched repositories."""
+"""aquarco repos — manage watched repositories."""
 
 from __future__ import annotations
 
+import json
 from urllib.parse import urlparse
 
 import typer
@@ -14,7 +15,10 @@ from aquarco_cli.graphql_client import (
     GraphQLClient,
 )
 
-app = typer.Typer(help="Manage watched repositories.")
+app = typer.Typer(
+    help="Manage repositories.",
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 def _repo_name_from_url(url: str) -> str:
@@ -67,7 +71,9 @@ def add(
 
 
 @app.command("list")
-def list_repos() -> None:
+def list_repos(
+    json_output: bool = typer.Option(False, "--json", help="Output repository list as JSON"),
+) -> None:
     """List all watched repositories."""
     client = GraphQLClient()
     try:
@@ -77,6 +83,11 @@ def list_repos() -> None:
         raise typer.Exit(code=1) from exc
 
     repos = data["repositories"]
+
+    if json_output:
+        console.print_json(json.dumps({"repositories": repos}))
+        return
+
     if not repos:
         console.print("No repositories registered.")
         return

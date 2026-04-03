@@ -229,6 +229,32 @@ class Supervisor:
         if not self._tq or not self._registry or not self._executor or not self._db:
             return
 
+        # Check drain mode — skip dispatch when draining
+        try:
+            drain_val = await self._db.fetch_val(
+                "SELECT value FROM supervisor_state WHERE key = 'drain_mode'"
+            )
+        except Exception:
+            drain_val = None  # table may not exist yet (pre-migration)
+
+        if drain_val == "true":
+            log.info("drain_mode_active", msg="Skipping task dispatch — drain mode enabled")
+            # Check if all work is idle → auto-restart
+            active_count = await self._db.fetch_val(
+                "SELECT COALESCE(SUM(active_count), 0) FROM agent_instances"
+            )
+            executing_count = await self._db.fetch_val(
+                "SELECT COUNT(*) FROM tasks WHERE status IN ('executing', 'queued', 'planning')"
+            )
+            if (active_count or 0) == 0 and (executing_count or 0) == 0:
+                log.info("drain_mode_idle", msg="All work idle — clearing drain flag and restarting")
+                # Clear drain flag before restart to prevent restart loop
+                await self._db.execute(
+                    "UPDATE supervisor_state SET value = 'false', updated_at = NOW() WHERE key = 'drain_mode'"
+                )
+                self._handle_shutdown()
+            return
+
         # Check capacity
         active = await self._db.fetch_val(
             "SELECT COALESCE(SUM(active_count), 0) FROM agent_instances"

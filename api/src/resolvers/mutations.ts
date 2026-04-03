@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { Context } from '../context.js'
-import { mapRepository, mapStage, mapAgentDefinition, mapRepoAgentScan, fetchAgentWithOverrides } from './queries.js'
+import { mapRepository, mapStage, mapAgentDefinition, mapRepoAgentScan, fetchAgentWithOverrides, getDrainStatus } from './queries.js'
 import { mapTask } from './mappers.js'
 
 // GraphQL enum values are UPPER_CASE; DB stores lower_case
@@ -707,5 +707,20 @@ export const Mutation = {
       const message = err instanceof Error ? err.message : 'Failed to create PR'
       return prErrorPayload(message)
     }
+  },
+
+  async setDrainMode(
+    _: unknown,
+    args: { enabled: boolean },
+    ctx: Context
+  ) {
+    const value = args.enabled ? 'true' : 'false'
+    await ctx.pool.query(
+      `INSERT INTO supervisor_state (key, value, updated_at)
+       VALUES ('drain_mode', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+      [value]
+    )
+    return getDrainStatus(ctx.pool)
   },
 }

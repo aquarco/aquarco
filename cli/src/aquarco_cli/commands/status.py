@@ -6,6 +6,7 @@ import json
 import time
 from typing import Optional
 
+import httpx
 import typer
 
 from aquarco_cli.console import console, handle_api_error, make_table, print_error, print_info, print_warning
@@ -18,7 +19,7 @@ from aquarco_cli.graphql_client import (
     GraphQLClient,
 )
 
-app = typer.Typer()
+app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
 MAX_FOLLOW_ERRORS = 5
 
@@ -135,12 +136,31 @@ def _print_task_detail(client: GraphQLClient, task_id: str) -> None:
 
 @app.callback(invoke_without_command=True)
 def status(
-    task_id: Optional[str] = typer.Argument(None, help="Task ID for detailed view"),
-    follow: bool = typer.Option(False, "--follow", "-f", help="Follow real-time updates"),
-    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
-    limit: int = typer.Option(10, "--limit", "-l", help="Number of recent tasks to show"),
+    task_id: Optional[str] = typer.Argument(
+        None,
+        help="Optional task ID (e.g. 'github-issue-aquarco-42') for detailed view. "
+        "When omitted, shows the dashboard overview.",
+    ),
+    follow: bool = typer.Option(
+        False, "--follow", "-f",
+        help="Continuously poll for updates until the task reaches a terminal state. "
+        "Requires a TASK_ID.",
+    ),
+    json_output: bool = typer.Option(
+        False, "--json",
+        help="Output raw JSON instead of formatted tables. "
+        "Works with both dashboard and single-task views.",
+    ),
+    limit: int = typer.Option(
+        10, "--limit", "-l",
+        help="Maximum number of recent tasks to display in the dashboard view.",
+    ),
 ) -> None:
-    """Show task overview or detailed task status."""
+    """Show task overview or detailed task status.
+
+    Without arguments, displays the dashboard with task summary and recent tasks.
+    Pass a TASK_ID to see detailed information including stages, cost, and timing.
+    """
     client = GraphQLClient()
 
     if follow and not task_id:
@@ -164,6 +184,9 @@ def status(
                         try:
                             ps = client.execute(QUERY_PIPELINE_STATUS, {"taskId": task_id})
                             consecutive_errors = 0
+                        except (httpx.ConnectError, httpx.TimeoutException) as conn_exc:
+                            handle_api_error(conn_exc)
+                            raise typer.Exit(code=1) from conn_exc
                         except Exception as poll_exc:
                             consecutive_errors += 1
                             print_warning(f"Poll error: {poll_exc}")

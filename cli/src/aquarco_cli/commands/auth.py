@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import webbrowser
 
@@ -19,11 +20,56 @@ from aquarco_cli.graphql_client import (
     GraphQLError,
 )
 
-app = typer.Typer(help="Manage authentication for Claude and GitHub.")
+app = typer.Typer(
+    help="Manage authentication for Claude and GitHub.",
+    context_settings={"help_option_names": ["-h", "--help"]},
+    invoke_without_command=True,
+)
+
+
+@app.callback()
+def auth_callback(ctx: typer.Context) -> None:
+    """Manage authentication for Claude and GitHub.
+
+    When invoked without a subcommand, automatically detects unauthenticated
+    services and runs their login flows.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+
+    client = GraphQLClient()
+    try:
+        claude_data = client.execute(QUERY_CLAUDE_AUTH_STATUS)
+        github_data = client.execute(QUERY_GITHUB_AUTH_STATUS)
+    except Exception as exc:
+        handle_api_error(exc)
+        raise typer.Exit(code=1) from exc
+
+    cs = claude_data["claudeAuthStatus"]
+    gs = github_data["githubAuthStatus"]
+
+    if cs["authenticated"] and gs["authenticated"]:
+        print_info("All services are already authenticated.")
+        ctx.invoke(status)
+        return
+
+    if not cs["authenticated"]:
+        print_info("Claude is not authenticated. Starting login flow...")
+        ctx.invoke(claude)
+
+    if not gs["authenticated"]:
+        print_info("GitHub is not authenticated. Starting login flow...")
+        ctx.invoke(github)
+
+    # Show final status
+    print_info("Checking final auth status...")
+    ctx.invoke(status)
 
 
 @app.command()
-def status() -> None:
+def status(
+    json_output: bool = typer.Option(False, "--json", help="Output auth status as JSON"),
+) -> None:
     """Check authentication status for Claude and GitHub."""
     client = GraphQLClient()
     try:
@@ -35,6 +81,13 @@ def status() -> None:
 
     cs = claude["claudeAuthStatus"]
     gs = github["githubAuthStatus"]
+
+    if json_output:
+        console.print_json(json.dumps({
+            "claudeAuthStatus": cs,
+            "githubAuthStatus": gs,
+        }))
+        return
 
     table = make_table("Auth Status", [
         ("Service", "cyan"),

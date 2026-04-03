@@ -38,7 +38,7 @@ def handle_api_error(exc: Exception) -> None:
     """Print a user-friendly message for common API connectivity issues."""
     if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException)):
         print_error(
-            "Cannot reach the Aquarco API. Is the VM running? Try 'aquarco install' or 'aquarco ui'."
+            "Cannot reach the Aquarco API. Is the VM running? Try 'aquarco init' or 'aquarco ui'."
         )
     else:
         print_error(str(exc))

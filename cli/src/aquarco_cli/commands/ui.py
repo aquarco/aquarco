@@ -6,54 +6,123 @@ import webbrowser
 
 import typer
 
+from aquarco_cli.config import get_config
 from aquarco_cli.console import print_error, print_info, print_success
 from aquarco_cli.vagrant import VagrantHelper
 
-app = typer.Typer(help="Start or stop the Aquarco web UI.")
+app = typer.Typer(
+    help="Start or stop the Aquarco web UI.",
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 COMPOSE_DIR = "/home/agent/aquarco/docker"
-UP_CMD = f"cd {COMPOSE_DIR} && sudo docker compose up -d web api postgres caddy"
-STOP_CMD = f"cd {COMPOSE_DIR} && sudo docker compose stop web api"
+
+
+def _ensure_running() -> VagrantHelper:
+    """Return a VagrantHelper or exit if VM is not running."""
+    vagrant = VagrantHelper()
+    if not vagrant.is_running():
+        print_error("VM is not running. Start it with 'aquarco init' first.")
+        raise typer.Exit(code=1)
+    return vagrant
+
+
+def _start_and_open(
+    vagrant: VagrantHelper,
+    services: str,
+    url: str,
+    no_open: bool,
+) -> None:
+    """Start compose services, print URL, and optionally open browser."""
+    cmd = f"cd {COMPOSE_DIR} && sudo docker compose up -d {services}"
+    try:
+        vagrant.ssh(cmd, stream=True)
+    except Exception as exc:
+        print_error(f"Failed to start services: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    print_success(f"Service is running at {url}")
+    if not no_open:
+        webbrowser.open(url)
 
 
 @app.callback(invoke_without_command=True)
 def ui(
     ctx: typer.Context,
-    open_browser: bool = typer.Option(False, "--open", "-o", help="Open browser after starting"),
+    no_open: bool = typer.Option(False, "--no-open", help="Do not open the browser after starting"),
 ) -> None:
-    """Start the web UI (web + API + Postgres + Caddy)."""
+    """Start the web UI (web + API + Postgres + Caddy).
+
+    Without a subcommand, starts the full web stack and opens the browser.
+    """
     if ctx.invoked_subcommand is not None:
         return
 
-    vagrant = VagrantHelper()
-    if not vagrant.is_running():
-        print_error("VM is not running. Start it with 'aquarco install' first.")
-        raise typer.Exit(code=1)
+    # Default behavior: start web
+    port = get_config().port
+    vagrant = _ensure_running()
+    _start_and_open(
+        vagrant,
+        "web api postgres caddy",
+        f"http://localhost:{port}",
+        no_open,
+    )
 
-    print_info("Starting UI services...")
-    try:
-        vagrant.ssh(UP_CMD, stream=True)
-    except Exception as exc:
-        print_error(f"Failed to start UI: {exc}")
-        raise typer.Exit(code=1) from exc
 
-    print_success("Web UI is running at http://localhost:8080")
+@app.command()
+def web(
+    no_open: bool = typer.Option(False, "--no-open", help="Do not open the browser"),
+) -> None:
+    """Start the web UI and open it in the browser."""
+    port = get_config().port
+    vagrant = _ensure_running()
+    _start_and_open(
+        vagrant,
+        "web api postgres caddy",
+        f"http://localhost:{port}",
+        no_open,
+    )
 
-    if open_browser:
-        webbrowser.open("http://localhost:8080")
+
+@app.command()
+def db(
+    no_open: bool = typer.Option(False, "--no-open", help="Do not open the browser"),
+) -> None:
+    """Start Adminer (database UI) and open it in the browser."""
+    port = get_config().port
+    vagrant = _ensure_running()
+    _start_and_open(
+        vagrant,
+        "adminer postgres",
+        f"http://localhost:{port}/adminer/",
+        no_open,
+    )
+
+
+@app.command()
+def api(
+    no_open: bool = typer.Option(False, "--no-open", help="Do not open the browser"),
+) -> None:
+    """Start the GraphQL API and open the playground."""
+    port = get_config().port
+    vagrant = _ensure_running()
+    _start_and_open(
+        vagrant,
+        "api postgres",
+        f"http://localhost:{port}/api/graphql",
+        no_open,
+    )
 
 
 @app.command()
 def stop() -> None:
-    """Stop the web UI services."""
-    vagrant = VagrantHelper()
-    if not vagrant.is_running():
-        print_error("VM is not running.")
-        raise typer.Exit(code=1)
+    """Stop UI services (web, adminer) but keep the API running."""
+    vagrant = _ensure_running()
 
     print_info("Stopping UI services...")
+    cmd = f"cd {COMPOSE_DIR} && sudo docker compose stop web adminer"
     try:
-        vagrant.ssh(STOP_CMD, stream=True)
+        vagrant.ssh(cmd, stream=True)
     except Exception as exc:
         print_error(f"Failed to stop UI: {exc}")
         raise typer.Exit(code=1) from exc

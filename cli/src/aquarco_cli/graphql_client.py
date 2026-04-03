@@ -189,6 +189,18 @@ MUTATION_GITHUB_LOGIN_POLL = """
 mutation { githubLoginPoll { success username error } }
 """
 
+# -- Drain mode --------------------------------------------------------------
+
+QUERY_DRAIN_STATUS = """
+query { drainStatus { enabled activeAgents activeTasks } }
+"""
+
+MUTATION_SET_DRAIN_MODE = """
+mutation SetDrainMode($enabled: Boolean!) {
+  setDrainMode(enabled: $enabled) { enabled activeAgents activeTasks }
+}
+"""
+
 # -- Shared constants --------------------------------------------------------
 
 TERMINAL_STATUSES = {"COMPLETED", "FAILED", "TIMEOUT", "CLOSED"}

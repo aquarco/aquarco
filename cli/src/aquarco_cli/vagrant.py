@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Sequence
@@ -39,7 +40,8 @@ class VagrantHelper:
         else:
             cmd = ["vagrant", *args]
 
-        kwargs: dict = {"cwd": str(self.vagrant_dir)}
+        env = {**os.environ, "AQUARCO_PORT": str(get_config().port)}
+        kwargs: dict = {"cwd": str(self.vagrant_dir), "env": env}
 
         if stream:
             # Stream stdout/stderr to the terminal in real time

@@ -22,7 +22,8 @@ Vagrant.configure("2") do |config|
   # -------------------------------------------------------------------------
   # Port forwarding — Aquarco system ports
   # -------------------------------------------------------------------------
-  config.vm.network "forwarded_port", guest: 8080, host: 8080, id: "proxy"         # Caddy reverse proxy (single entry point)
+  aquarco_port = ENV.fetch('AQUARCO_PORT', '8080').to_i
+  config.vm.network "forwarded_port", guest: 8080, host: aquarco_port, id: "proxy"  # Caddy reverse proxy (single entry point)
   config.vm.network "forwarded_port", guest: 5432, host: 15432, id: "postgres"    # PostgreSQL (system) — host 15432 to avoid local PG conflict
 
   # tools

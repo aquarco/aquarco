@@ -74,6 +74,12 @@ services:
       PORT: ${PORT:-4000}
       REPOS_BASE: ${REPOS_BASE:-/home/agent/repos}
       CHOKIDAR_USEPOLLING: "true"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/api/graphql?query=%7B__typename%7D"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       migrations:
         condition: service_completed_successfully
@@ -98,8 +104,15 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/graphql}
       NODE_ENV: ${NODE_ENV:-development}
       WATCHPACK_POLLING: "true"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
   # ── Caddy Reverse Proxy ─────────────────────────────────────────────────────
   caddy:
@@ -115,5 +128,19 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - web
-      - api
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  # ── Adminer (DB UI) ────────────────────────────────────────────────────────
+  adminer:
+    image: adminer:4
+    restart: unless-stopped
+    networks:
+      - aquarco
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
