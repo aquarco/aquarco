@@ -100,12 +100,8 @@ def resolve_config(
     global_overlay_base: Path | None = None,
     repo_overlay: ConfigOverlay | None = None,
     repo_overlay_base: Path | None = None,
-    autoloaded_agents: list[dict[str, Any]] | None = None,
 ) -> ResolvedConfig:
-    """Apply config layers: default -> global -> per-repo -> autoloaded.
-
-    The optional *autoloaded_agents* list is merged as a 4th layer after
-    repo_overlay using EXTEND strategy (add/override by name).
+    """Apply config layers: default -> global -> per-repo.
 
     Overlay agents are tagged with ``_config_base`` so that ``promptFile``
     can be resolved relative to their source directory.
@@ -130,10 +126,6 @@ def resolve_config(
         pipelines = merge_pipelines(
             pipelines, repo_overlay.pipelines, repo_overlay.merge.pipelines,
         )
-
-    # Layer 4: autoloaded agents (always EXTEND strategy)
-    if autoloaded_agents:
-        agents = merge_agents(agents, autoloaded_agents, MergeStrategy.EXTEND)
 
     return ResolvedConfig(agents, pipelines)
 

@@ -1369,7 +1369,7 @@ class TestRealAgentDefinitions:
         )
         schema = _system_agent_schema()
         definitions = load_agent_definitions_from_files(system_dir, schema=schema)
-        assert len(definitions) == 3  # planner, condition-evaluator, repo-descriptor
+        assert len(definitions) == 2  # planner, condition-evaluator
 
     def test_planner_agent_has_role(self) -> None:
         """planner-agent.md must have role (not categories/priority)."""

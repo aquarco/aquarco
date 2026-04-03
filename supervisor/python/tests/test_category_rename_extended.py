@@ -16,7 +16,6 @@ from typing import Any
 import pytest
 import yaml
 
-from aquarco_supervisor.agent_autoloader import analyze_agent_prompt
 from aquarco_supervisor.cli.agents import VALID_CATEGORIES, validate_definition
 
 # ---------------------------------------------------------------------------
@@ -167,131 +166,6 @@ class TestValidateDefinitionCategories:
         cat_errors = [e for e in errors if "categories" in e.field]
         assert len(cat_errors) == 1
         assert "docs" in cat_errors[0].message
-
-
-# ---------------------------------------------------------------------------
-# _infer_category edge cases
-# ---------------------------------------------------------------------------
-
-
-class TestInferCategoryEdgeCases:
-    """Edge cases in _infer_category not covered by consistency tests."""
-
-    def test_security_content_maps_to_review(self) -> None:
-        """Security-focused content should map to 'review', not a separate category.
-
-        Note: content must not contain 'audit' since that substring matches
-        the 'analyze' category hints before reaching 'review'.
-        """
-        result = analyze_agent_prompt(
-            "Performs OWASP vulnerability scanning and security checks.",
-            "security-scanner.md",
-        )
-        assert result["category"] == "review"
-
-    def test_audit_keyword_maps_to_analyze(self) -> None:
-        """Content containing 'audit' matches 'analyze' hints before 'review'."""
-        result = analyze_agent_prompt(
-            "Performs security audits on the codebase.",
-            "auditor.md",
-        )
-        assert result["category"] == "analyze"
-
-    def test_name_based_matching_analyze(self) -> None:
-        """Category can be inferred from agent filename alone."""
-        result = analyze_agent_prompt(
-            "This agent does things.",  # No content hints
-            "analyzer-bot.md",
-        )
-        assert result["category"] == "analyze"
-
-    def test_name_based_matching_test(self) -> None:
-        """Agent named with 'test' in filename maps to test."""
-        result = analyze_agent_prompt("Generic agent.", "test-runner.md")
-        assert result["category"] == "test"
-
-    def test_name_based_matching_document(self) -> None:
-        """Agent named with 'document' in filename maps to document."""
-        result = analyze_agent_prompt("Generic agent.", "document-writer.md")
-        assert result["category"] == "document"
-
-    def test_empty_content_falls_back_to_implement(self) -> None:
-        """Empty content with no name hints returns 'implement'."""
-        result = analyze_agent_prompt("", "generic.md")
-        assert result["category"] == "implement"
-
-    def test_first_matching_hint_wins(self) -> None:
-        """When content matches multiple categories, first in dict order wins."""
-        # 'analyze' hints are checked before 'implement' hints
-        result = analyze_agent_prompt(
-            "Analyzes code then implements changes.", "multi.md"
-        )
-        assert result["category"] == "analyze"
-
-    def test_playwright_maps_to_test(self) -> None:
-        """Content mentioning Playwright maps to test category."""
-        result = analyze_agent_prompt(
-            "Runs Playwright end-to-end browser tests.", "e2e.md"
-        )
-        assert result["category"] == "test"
-
-    def test_qa_lint_maps_to_review(self) -> None:
-        """Quality assurance and linting content maps to review."""
-        result = analyze_agent_prompt(
-            "Performs QA checks and linting on pull requests.", "qa.md"
-        )
-        assert result["category"] == "review"
-
-    def test_architect_maps_to_design(self) -> None:
-        """Architecture-related content maps to design."""
-        result = analyze_agent_prompt(
-            "Architects the system and creates design plans.", "architect.md"
-        )
-        assert result["category"] == "design"
-
-    def test_case_insensitive_matching(self) -> None:
-        """Category matching is case-insensitive."""
-        result = analyze_agent_prompt(
-            "RUNS PLAYWRIGHT E2E TESTS", "TEST-AGENT.md"
-        )
-        assert result["category"] == "test"
-
-
-# ---------------------------------------------------------------------------
-# generate_agent_definition structure
-# ---------------------------------------------------------------------------
-
-
-class TestGenerateAgentDefinitionStructure:
-    """Verify generate_agent_definition outputs correct API structure."""
-
-    def test_api_version_present(self) -> None:
-        from aquarco_supervisor.agent_autoloader import generate_agent_definition
-
-        analysis = {"name": "x", "description": "desc", "tools": ["Read"]}
-        defn = generate_agent_definition(analysis, "repo", "content")
-        assert defn["apiVersion"] == "aquarco.agents/v1"
-
-    def test_kind_is_agent_definition(self) -> None:
-        from aquarco_supervisor.agent_autoloader import generate_agent_definition
-
-        analysis = {"name": "x", "description": "desc", "tools": ["Read"]}
-        defn = generate_agent_definition(analysis, "repo", "content")
-        assert defn["kind"] == "AgentDefinition"
-
-    def test_metadata_name_includes_repo(self) -> None:
-        from aquarco_supervisor.agent_autoloader import generate_agent_definition
-
-        analysis = {"name": "my-agent", "description": "desc", "tools": ["Read"]}
-        defn = generate_agent_definition(analysis, "my-repo", "content")
-        assert defn["metadata"]["name"] == "my-repo-my-agent"
-
-    def test_autoloaded_label_set(self) -> None:
-        from aquarco_supervisor.agent_autoloader import generate_agent_definition
-
-        analysis = {"name": "x", "description": "desc", "tools": ["Read"]}
-        defn = generate_agent_definition(analysis, "repo", "content")
-        assert defn["metadata"]["labels"]["source"] == "autoloaded"
 
 
 # ---------------------------------------------------------------------------

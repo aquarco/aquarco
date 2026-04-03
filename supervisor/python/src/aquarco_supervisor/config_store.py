@@ -392,67 +392,7 @@ async def sync_pipeline_definitions_to_db(
 
 
 # ---------------------------------------------------------------------------
-# Autoloaded agents helpers
-# ---------------------------------------------------------------------------
-
-async def deactivate_autoloaded_agents(
-    db: Database,
-    repo_name: str,
-) -> int:
-    """Deactivate all previously autoloaded agents for a repository.
-
-    Sets is_active=false for all agents with source='autoload:<repo_name>'.
-    Returns the number of agents deactivated.
-    """
-    rows = await db.fetch_all(
-        """UPDATE agent_definitions
-           SET is_active = false
-           WHERE source = %(source)s AND is_active = true
-           RETURNING name""",
-        {"source": f"autoload:{repo_name}"},
-    )
-    count = len(rows)
-    log.info("autoloaded_agents_deactivated", repo_name=repo_name, count=count)
-    return count
-
-
-async def read_autoloaded_agents_from_db(
-    db: Database,
-    repo_name: str,
-) -> list[dict[str, Any]]:
-    """Fetch active autoloaded agents for a specific repository.
-
-    Returns flat frontmatter-style dicts for agents with
-    source='autoload:<repo_name>'.  The flat format matches what
-    ``_parse_md_frontmatter`` returns, so consumers don't need to handle
-    two different dict shapes.
-    """
-    rows = await db.fetch_all(
-        """SELECT name, version, description, labels, spec, is_active
-           FROM agent_definitions
-           WHERE source = %(source)s AND is_active = true
-           ORDER BY name, version""",
-        {"source": f"autoload:{repo_name}"},
-    )
-    docs: list[dict[str, Any]] = []
-    for row in rows:
-        spec = row["spec"] if isinstance(row["spec"], dict) else json.loads(row["spec"])
-        doc: dict[str, Any] = {
-            "name": row["name"],
-            "version": row["version"],
-            "description": row["description"],
-        }
-        labels = row.get("labels")
-        if labels:
-            doc["labels"] = labels
-        # Merge spec fields into flat dict
-        doc.update(spec)
-        docs.append(doc)
-    return docs
-
-
-# ---------------------------------------------------------------------------
-# DB → Config  (read from database and serialize to hybrid .md files)
+# DB → Config  (read from database and serialize to YAML files)
 # ---------------------------------------------------------------------------
 
 async def read_agent_definitions_from_db(

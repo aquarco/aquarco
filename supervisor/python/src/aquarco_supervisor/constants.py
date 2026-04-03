@@ -13,5 +13,4 @@ from __future__ import annotations
 SYSTEM_AGENT_NAMES: frozenset[str] = frozenset({
     "planner-agent",
     "condition-evaluator-agent",
-    "repo-descriptor-agent",
 })

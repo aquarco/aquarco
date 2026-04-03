@@ -17,7 +17,6 @@ from .exceptions import RateLimitError, RetryableError, _cooldown_for_error
 from .cli.auth_helper import auth_watch
 from .cli.repo_manager import repo_app
 from .cli.status import status
-from .agent_autoloader import autoload_repo_agents, create_scan_record, has_claude_agents
 from .config import load_config, load_pipelines, load_secrets
 from .config_store import sync_all_agent_definitions_to_db, sync_pipeline_definitions_to_db
 from .database import Database
@@ -154,13 +153,9 @@ class Supervisor:
                 # Re-read secrets (token may appear after user logs in via web UI)
                 self._refresh_secrets()
 
-                # Clone pending repos (and auto-scan for agents)
+                # Clone pending repos
                 if self._clone_worker:
                     await self._clone_worker.clone_pending_repos()
-                    await self._auto_scan_new_repos()
-
-                # Process IPC agent scan commands
-                await self._process_agent_scan_commands()
 
                 # Pull ready repos (every 30s)
                 if self._should_run("repo-pull", 30) and self._pull_worker:
@@ -521,69 +516,6 @@ class Supervisor:
             )
             askpass_path.chmod(stat.S_IRWXU)
         os.environ["GIT_ASKPASS"] = str(askpass_path)
-
-    async def _auto_scan_new_repos(self) -> None:
-        """After successful clone, auto-scan repos that have .claude/agents/."""
-        if not self._db:
-            return
-        try:
-            rows = await self._db.fetch_all(
-                """SELECT r.name, r.clone_dir FROM repositories r
-                   WHERE r.clone_status = 'ready'
-                     AND NOT EXISTS (
-                       SELECT 1 FROM repo_agent_scans s WHERE s.repo_name = r.name
-                     )"""
-            )
-            for row in rows:
-                repo_path = Path(row["clone_dir"])
-                if has_claude_agents(repo_path):
-                    log.info("auto_scanning_new_repo", repo_name=row["name"])
-                    scan_id = await create_scan_record(self._db, row["name"])
-                    await autoload_repo_agents(
-                        repo_path, row["name"], self._db, scan_id=scan_id,
-                    )
-        except Exception:
-            log.exception("auto_scan_new_repos_error")
-
-    async def _process_agent_scan_commands(self) -> None:
-        """Process IPC agent scan command files from the API."""
-        if not self._db:
-            return
-        ipc_dir = Path(os.environ.get("IPC_DIR", "/var/lib/aquarco/claude-ipc"))
-        if not ipc_dir.is_dir():
-            return
-
-        import json as _json
-
-        for cmd_file in sorted(ipc_dir.glob("agent-scan-*.json")):
-            try:
-                data = _json.loads(cmd_file.read_text())
-                cmd_file.unlink()
-
-                if data.get("command") != "agent-scan":
-                    continue
-
-                repo_name = data["repoName"]
-                scan_id = data["scanId"]
-                clone_dir = data["cloneDir"]
-
-                log.info(
-                    "processing_agent_scan_command",
-                    repo_name=repo_name,
-                    scan_id=scan_id,
-                )
-
-                await autoload_repo_agents(
-                    Path(clone_dir), repo_name, self._db, scan_id=scan_id,
-                )
-
-            except Exception:
-                log.exception("agent_scan_command_error", file=str(cmd_file))
-                # Clean up the file even on error
-                try:
-                    cmd_file.unlink(missing_ok=True)
-                except OSError:
-                    pass
 
     def _handle_shutdown(self) -> None:
         """Signal handler for SIGTERM/SIGINT."""
