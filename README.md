@@ -317,7 +317,6 @@ spec:
     anthropicKeyFile: /home/agent/.anthropic-key
   pipelinesFile: /home/agent/aquarco/config/pipelines.yaml
   agentsDir: /home/agent/aquarco/config/agents/definitions
-  promptsDir: /home/agent/aquarco/config/agents/prompts
 ```
 
 Secrets are re-read from disk every loop iteration (~5s). When a token file
@@ -328,31 +327,32 @@ SIGHUP triggers a full config reload: `systemctl reload aquarco-supervisor-pytho
 
 ### Agent Definitions (`config/agents/definitions/`)
 
-Kubernetes-style YAML files defining each agent's tools, environment variables,
-and system prompt path. Agents are split into two subdirectories:
+Hybrid markdown files with YAML frontmatter defining each agent's tools, environment variables,
+and system prompt. Each agent is a single `.md` file containing frontmatter followed by markdown content.
+Agents are split into two subdirectories:
 
 | Directory | Schema | Contains |
 |-----------|--------|----------|
-| `definitions/system/` | `system-agent-v1.json` | `planner-agent`, `condition-evaluator-agent`, `repo-descriptor-agent` |
-| `definitions/pipeline/` | `pipeline-agent-v1.json` | `analyze-agent`, `design-agent`, `implementation-agent`, `review-agent`, `test-agent`, `docs-agent` |
+| `definitions/system/` | `system-agent-v1.json` | `planner-agent.md`, `condition-evaluator-agent.md`, `repo-descriptor-agent.md` |
+| `definitions/pipeline/` | `pipeline-agent-v1.json` | `analyze-agent.md`, `design-agent.md`, `implementation-agent.md`, `review-agent.md`, `test-agent.md`, `docs-agent.md` |
 
-**System agents** orchestrate pipeline execution and are invoked directly by the executor. They use `spec.role` (e.g., `planner`, `condition-evaluator`) instead of `spec.categories`, and have lower resource defaults (max 20 turns, 0.5 USD default cost cap). System agents are never eligible for category-based stage selection.
+**System agents** orchestrate pipeline execution and are invoked directly by the executor. They use `role` in frontmatter (e.g., `planner`, `condition-evaluator`) instead of `categories`, and have lower resource defaults (max 20 turns, 0.5 USD default cost cap). System agents are never eligible for category-based stage selection.
 
-**Pipeline agents** execute pipeline stages and are selected by category. They use `spec.categories` and `spec.priority` for stage-to-agent mapping.
+**Pipeline agents** execute pipeline stages and are selected by category. They use `categories` and `priority` in frontmatter for stage-to-agent mapping.
 
-Key fields under `spec`:
+Key frontmatter fields:
 
 - `model` — Claude model to use for this agent (e.g., `claude-sonnet-4-6`, `claude-haiku-4-5`, `sonnet`, `opus`). When omitted, the CLI uses its default model. Can be overridden per-repo via the config overlay system.
 - `tools.allowed` / `tools.denied` — tool access control for Claude CLI
 - `environment` — env vars passed to Claude CLI subprocess
-- `promptFile` — filename (relative to `prompts/`) of the agent's markdown prompt template
 - `role` *(system agents only)* — well-known values: `planner`, `condition-evaluator`, `repo-descriptor`
 - `categories` *(pipeline agents only)* — pipeline stage categories this agent handles
+- `priority` *(pipeline agents only)* — priority for agent selection within a category (lower = higher priority)
 
 > **Notes:**
 > - Output schemas are defined in `pipelines.yaml` under `categories:` rather than in agent definitions. Agent-level `outputSchema` is still supported as a fallback for autoloaded agents.
 > - Autoloaded agents (from repository `.claude/agents/`) always validate against the pipeline schema and are tagged as pipeline agents.
-> - A flat `definitions/*.yaml` layout is still supported for backward compatibility; all flat-scanned agents are treated as pipeline agents.
+> - A flat `definitions/*.yaml` layout is no longer supported; all agent definitions must use the hybrid `.md` format.
 
 ### Pipelines (`config/pipelines.yaml`)
 
@@ -399,7 +399,7 @@ solution-architect  ←── coordinates all agents
      └── frontend        ── React + MUI + Next.js
 ```
 
-Agent definitions live in `config/agents/definitions/` (K8s-style YAML) and
+Agent definitions live in `config/agents/definitions/` (hybrid .md files with YAML frontmatter) and
 `.claude/agents/` (Claude Code agent system prompts). Slash commands:
 
 | Command                       | Description                                 |
