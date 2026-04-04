@@ -229,22 +229,9 @@ The Agents page provides two tabs for managing agent definitions:
   Each agent can be individually disabled/enabled, and non-default agents can be edited. Modified agents are stored in the `agent_overrides` table. A "Create PR" button commits changes back to the config repository.
 - **Repository Agents** — lists repositories with custom agents in an accordion layout. Agents can be disabled, edited, and reset. PR creation targets the specific repository.
 
-Agent sources are distinguished by an `AgentSource` enum: `DEFAULT` (built-in), `GLOBAL_CONFIG` (from a global config repo), `REPOSITORY` (repo-specific), and `AUTOLOADED` (discovered from `.claude/agents/`).
+Agent sources are distinguished by an `AgentSource` enum: `DEFAULT` (built-in), `GLOBAL_CONFIG` (from a global config repo), and `REPOSITORY` (repo-specific).
 
-Agent groups are distinguished by an `AgentGroup` enum: `SYSTEM` (orchestration agents) and `PIPELINE` (stage execution agents). Autoloaded agents are always `PIPELINE`.
-
-### Agent Autoloading
-
-Repositories containing a `.claude/agents/` directory with `.md` prompt files are automatically detected. The autoloader:
-
-1. **Scans** the directory for valid `.md` files (max 20 per repo, 50KB size limit)
-2. **Analyzes** each prompt via Claude CLI to infer agent metadata (categories, tools, description)
-3. **Generates** aquarco agent YAML definitions and writes them to `aquarco-config/agents/` in the repo
-4. **Stores** agents in the database with `source='autoload:<repo_name>'`
-
-Autoloaded agents are merged as a 4th config layer: `default → global_overlay → repo_overlay → autoloaded`. They inherit conservative default tools (`Read`, `Grep`, `Glob`) which can be overridden via the `modifyAgent` mutation.
-
-A **Reload Agents** button on the Repositories page allows on-demand rescanning. Scans are rate-limited to once per 5 minutes per repository.
+Agent groups are distinguished by an `AgentGroup` enum: `SYSTEM` (orchestration agents) and `PIPELINE` (stage execution agents).
 
 ### Claude Login (PKCE OAuth via IPC)
 
@@ -361,7 +348,7 @@ Agents are split into two subdirectories:
 
 | Directory | Schema | Contains |
 |-----------|--------|----------|
-| `definitions/system/` | `system-agent-v1.json` | `planner-agent.md`, `condition-evaluator-agent.md`, `repo-descriptor-agent.md` |
+| `definitions/system/` | `system-agent-v1.json` | `planner-agent.md`, `condition-evaluator-agent.md` |
 | `definitions/pipeline/` | `pipeline-agent-v1.json` | `analyze-agent.md`, `design-agent.md`, `implementation-agent.md`, `review-agent.md`, `test-agent.md`, `docs-agent.md` |
 
 **System agents** orchestrate pipeline execution and are invoked directly by the executor. They use `role` in frontmatter (e.g., `planner`, `condition-evaluator`) instead of `categories`, and have lower resource defaults (max 20 turns, 0.5 USD default cost cap). System agents are never eligible for category-based stage selection.
@@ -373,13 +360,12 @@ Key frontmatter fields:
 - `model` — Claude model to use for this agent (e.g., `claude-sonnet-4-6`, `claude-haiku-4-5`, `sonnet`, `opus`). When omitted, the CLI uses its default model. Can be overridden per-repo via the config overlay system.
 - `tools.allowed` / `tools.denied` — tool access control for Claude CLI
 - `environment` — env vars passed to Claude CLI subprocess
-- `role` *(system agents only)* — well-known values: `planner`, `condition-evaluator`, `repo-descriptor`
+- `role` *(system agents only)* — well-known values: `planner`, `condition-evaluator`
 - `categories` *(pipeline agents only)* — pipeline stage categories this agent handles
 - `priority` *(pipeline agents only)* — priority for agent selection within a category (lower = higher priority)
 
 > **Notes:**
-> - Output schemas are defined in `pipelines.yaml` under `categories:` rather than in agent definitions. Agent-level `outputSchema` is still supported as a fallback for autoloaded agents.
-> - Autoloaded agents (from repository `.claude/agents/`) always validate against the pipeline schema and are tagged as pipeline agents.
+> - Output schemas are defined in `pipelines.yaml` under `categories:` rather than in agent definitions. Agent-level `outputSchema` is still supported as a fallback for backward compatibility.
 > - A flat `definitions/*.yaml` layout is no longer supported; all agent definitions must use the hybrid `.md` format.
 
 ### Pipelines (`config/pipelines.yaml`)

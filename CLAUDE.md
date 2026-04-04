@@ -81,7 +81,7 @@ changes.
 config/
   agents/
     definitions/
-      system/    ← System agents (planner, condition-evaluator, repo-descriptor) — hybrid .md files with YAML frontmatter
+      system/    ← System agents (planner, condition-evaluator) — hybrid .md files with YAML frontmatter
       pipeline/  ← Pipeline stage agents (analyze, design, implement, test, review, docs) — hybrid .md files with YAML frontmatter
   pipelines.yaml   ← Pipeline definitions (stages, agents, tools)
   schemas/         ← JSON schemas for agent definition frontmatter
@@ -93,56 +93,8 @@ supervisor/config/
 Each agent is a single hybrid `.md` file containing YAML frontmatter followed by the markdown system prompt.
 Agents are organized into two subdirectories by role:
 
-- **`system/`** — Orchestration agents invoked directly by the executor. Frontmatter includes `role` field (e.g., `planner`, `condition-evaluator`, `repo-descriptor`) instead of `categories`. Never selected for category-based stage dispatch. Validated against `config/schemas/system-agent-v1.json`.
+- **`system/`** — Orchestration agents invoked directly by the executor. Frontmatter includes `role` field (e.g., `planner`, `condition-evaluator`) instead of `categories`. Never selected for category-based stage dispatch. Validated against `config/schemas/system-agent-v1.json`.
 - **`pipeline/`** — Stage execution agents selected by category. Frontmatter includes `categories` and `priority` fields. Validated against `config/schemas/pipeline-agent-v1.json`.
-
-**File format:**
-```markdown
----
-name: agent-name
-version: "1.0.0"
-description: "Agent description"
-
-model: sonnet  # Optional; defaults to CLI default when omitted
-
-# System agents use 'role':
-role: planner
-
-# Pipeline agents use 'categories':
-categories:
-  - analyze
-  - design
-
-priority: 1  # Pipeline agents only; lower = higher priority
-
-tools:
-  allowed:
-    - Read
-    - Grep
-    - Glob
-  denied:
-    - Write
-    - Edit
-
-resources:
-  maxTokens: 50000
-  timeoutMinutes: 15
-  maxConcurrent: 3
-  maxTurns: 20
-  maxCost: 1.0
-
-environment:
-  AGENT_MODE: "analyze"
-  STRICT_MODE: "true"
-
-healthCheck:
-  enabled: true
-  intervalSeconds: 300
----
-# Agent System Prompt
-
-Your markdown system prompt goes here...
-```
 
 The `model` field is optional; when omitted the CLI uses its default. The config overlay system
 supports per-repo model overrides. Output schemas are defined at the pipeline category level
