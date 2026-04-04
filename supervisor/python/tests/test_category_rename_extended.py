@@ -75,8 +75,10 @@ class TestPipelineStageCategories:
     def test_all_stage_categories_are_canonical(self, pipelines_doc: dict) -> None:
         """Every stage.category in pipelines.yaml must be a canonical name."""
         pipelines = pipelines_doc.get("pipelines", [])
+        if isinstance(pipelines, dict):
+            pipelines = list(pipelines.values())
         for pipeline_def in pipelines:
-            pipeline_name = pipeline_def.get("name", "<unnamed>")
+            pipeline_name = pipeline_def.get("name", "unknown")
             stages = pipeline_def.get("stages", [])
             for idx, stage in enumerate(stages):
                 cat = stage.get("category")
@@ -88,8 +90,10 @@ class TestPipelineStageCategories:
     def test_no_stage_uses_old_names(self, pipelines_doc: dict) -> None:
         """No pipeline stage references deprecated category names."""
         pipelines = pipelines_doc.get("pipelines", [])
+        if isinstance(pipelines, dict):
+            pipelines = list(pipelines.values())
         for pipeline_def in pipelines:
-            pipeline_name = pipeline_def.get("name", "<unnamed>")
+            pipeline_name = pipeline_def.get("name", "unknown")
             stages = pipeline_def.get("stages", [])
             for idx, stage in enumerate(stages):
                 cat = stage.get("category")
@@ -102,7 +106,10 @@ class TestPipelineStageCategories:
         """Every category referenced in stages has a top-level definition."""
         defined = {c["name"] for c in pipelines_doc.get("categories", [])}
         used: set[str] = set()
-        for pipeline_def in pipelines_doc.get("pipelines", []):
+        pipelines = pipelines_doc.get("pipelines", [])
+        if isinstance(pipelines, dict):
+            pipelines = list(pipelines.values())
+        for pipeline_def in pipelines:
             for stage in pipeline_def.get("stages", []):
                 used.add(stage["category"])
         assert used <= defined, f"Undefined categories used in stages: {used - defined}"

@@ -57,6 +57,7 @@ EXPECTED_MIGRATIONS = [
     "033_add_stage_session_id",
     "034_checkpoint_stage_fk",
     "035_simplify_tasks",
+    "036_drop_repo_agent_scans",
 ]
 
 # Build expected dependency map: migration_name -> depends_on_name
