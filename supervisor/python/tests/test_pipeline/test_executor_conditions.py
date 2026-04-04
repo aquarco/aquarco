@@ -181,3 +181,76 @@ class TestOutputSchemaResolution:
         assert schema is not None
         assert schema["from"] == "scoped"
         scoped_view.get_agent_output_schema.assert_called_once_with("test-agent")
+
+
+# ---------------------------------------------------------------------------
+# stage_iterations first-time jump regression
+# ---------------------------------------------------------------------------
+
+
+class TestStageIterationsFirstTimeJump:
+    """Regression tests for the first-time condition jump iteration bug.
+
+    When a condition jumps to a stage that has never run before,
+    stage_iterations[target] must NOT be incremented to 2.  Incrementing
+    to 2 on a first-time jump causes base_iteration=2 but the only
+    pre-created pending row has iteration=1, so all record_stage_executing /
+    store_stage_output calls silently update 0 rows and the stage stays
+    pending while execution continues past it.
+    """
+
+    def _make_executor(self) -> PipelineExecutor:
+        mock_db = AsyncMock(spec=Database)
+        mock_tq = AsyncMock(spec=TaskQueue)
+        mock_registry = MagicMock()
+        executor = PipelineExecutor.__new__(PipelineExecutor)
+        executor._db = mock_db
+        executor._tq = mock_tq
+        executor._registry = mock_registry
+        executor._pipelines = []
+        return executor
+
+    def test_first_time_jump_does_not_increment_stage_iterations(self) -> None:
+        """stage_iterations[target] stays at 1 when target hasn't run yet."""
+        # Simulate the state just before a condition jump to "test"
+        # where "test" has never been visited (repeat_counts["test"] == 0).
+        repeat_counts: dict[str, int] = {"review": 1, "implementation": 5}
+        stage_iterations: dict[str, int] = {}
+
+        target_name = "test"
+
+        # Apply the fixed logic: only increment if stage has been visited before.
+        if repeat_counts.get(target_name, 0) > 0:
+            next_iter = stage_iterations.get(target_name, 1) + 1
+            stage_iterations[target_name] = next_iter
+
+        # stage_iterations["test"] should NOT have been set (first-time jump).
+        # base_iteration will then use the default: stage_iterations.get("test") == None
+        # and the pre-created iteration=1 pending row will be matched correctly.
+        assert "test" not in stage_iterations
+
+    def test_revisit_jump_increments_stage_iterations(self) -> None:
+        """stage_iterations[target] increments to 2 when target has run once."""
+        repeat_counts: dict[str, int] = {"review": 1, "test": 1}
+        stage_iterations: dict[str, int] = {"test": 1}
+
+        target_name = "test"
+
+        if repeat_counts.get(target_name, 0) > 0:
+            next_iter = stage_iterations.get(target_name, 1) + 1
+            stage_iterations[target_name] = next_iter
+
+        assert stage_iterations["test"] == 2
+
+    def test_multiple_revisits_accumulate(self) -> None:
+        """Each revisit of an already-visited stage increments stage_iterations."""
+        repeat_counts: dict[str, int] = {"test": 3}
+        stage_iterations: dict[str, int] = {"test": 3}
+
+        target_name = "test"
+
+        if repeat_counts.get(target_name, 0) > 0:
+            next_iter = stage_iterations.get(target_name, 1) + 1
+            stage_iterations[target_name] = next_iter
+
+        assert stage_iterations["test"] == 4

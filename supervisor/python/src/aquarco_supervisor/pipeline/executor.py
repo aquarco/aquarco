@@ -600,10 +600,14 @@ class PipelineExecutor:
                     if cond_result.jump_to and cond_result.jump_to in stages_by_name:
                         target_idx = stages_by_name[cond_result.jump_to]
                         target_name = cond_result.jump_to
-                        # Increment iteration for the target stage so a new
-                        # set of stage rows is created (preserving history).
-                        next_iter = stage_iterations.get(target_name, 1) + 1
-                        stage_iterations[target_name] = next_iter
+                        # Increment iteration for the target stage only when
+                        # it has already been visited at least once.  For a
+                        # first-time jump the pre-created iteration=1 pending
+                        # row must be used; incrementing to 2 would produce a
+                        # mismatched iteration that silently updates 0 DB rows.
+                        if repeat_counts.get(target_name, 0) > 0:
+                            next_iter = stage_iterations.get(target_name, 1) + 1
+                            stage_iterations[target_name] = next_iter
                         log.info(
                             "condition_jump",
                             task_id=task_id,
@@ -864,7 +868,7 @@ class PipelineExecutor:
                 wt_dir = str(
                     wt_base / f"{safe_task_id}-{safe_agent}-s{stage_num}"
                 )
-                sub_branch = f"{branch_name}/{safe_agent}-s{stage_num}"
+                sub_branch = f"{branch_name}--{safe_agent}-s{stage_num}"
                 if Path(wt_dir).exists():
                     try:
                         await _run_git(clone_dir, "worktree", "remove", wt_dir, "--force")
@@ -1076,7 +1080,6 @@ class PipelineExecutor:
         cumulative_cache_write = 0
         cumulative_output = 0
         iteration = 0
-        max_resume_iterations = 10
         last_successful_output: dict[str, Any] | None = None
 
         while True:
@@ -1146,17 +1149,6 @@ class PipelineExecutor:
                         cumulative_cost=cumulative_cost,
                         max_cost=max_cost,
                         iterations=iteration,
-                    )
-                    break
-
-                if iteration >= max_resume_iterations:
-                    log.warning(
-                        "max_resume_iterations_reached",
-                        task_id=task_id,
-                        stage=stage_num,
-                        agent=agent_name,
-                        iterations=iteration,
-                        max_resume_iterations=max_resume_iterations,
                     )
                     break
 

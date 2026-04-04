@@ -6,6 +6,47 @@ import json
 import warnings
 from typing import Any
 
+
+def _resolve_stage_status(
+    output: dict[str, Any],
+    raw_output: str | None,
+) -> tuple[str, str | None]:
+    """Determine the correct stage status and error message from agent output.
+
+    Rules (in priority order):
+    - subtype="success", is_error=False  → completed
+    - subtype="error_max_turns"          → max_turns
+    - subtype="success", is_error=True   → scan raw_output for rate_limit_event
+                                           → rate_limited (with resetsAt) or failed
+    - anything else                      → failed
+    """
+    subtype = output.get("_subtype")
+    is_error = output.get("_is_error", False)
+
+    if subtype == "success" and not is_error:
+        return "completed", None
+
+    if subtype == "error_max_turns":
+        return "max_turns", "Agent reached max_turns limit"
+
+    if subtype == "success" and is_error:
+        if raw_output:
+            for line in raw_output.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                    if isinstance(msg, dict) and msg.get("type") == "rate_limit_event":
+                        info = msg.get("rate_limit_info", {})
+                        resets_at = info.get("resetsAt")
+                        return "rate_limited", f"Rate limited by Claude API; resetsAt={resets_at}"
+                except json.JSONDecodeError:
+                    continue
+        return "failed", "Agent returned is_error=true with no rate limit event"
+
+    return "failed", f"Unexpected output subtype={subtype!r}"
+
 from .database import Database
 from .logging import get_logger
 from .models import Task, TaskStatus
@@ -305,11 +346,22 @@ class TaskQueue:
         iteration: int = 1,
         run: int = 1,
     ) -> None:
-        """Upsert a completed stage record."""
+        """Upsert a stage record with a status derived from the agent output.
+
+        Status rules:
+        - subtype="success", is_error=False  → completed
+        - subtype="error_max_turns"          → max_turns
+        - subtype="success", is_error=True   → rate_limited (rate_limit_event found) or failed
+        - anything else                      → failed
+        """
         # raw_output is accumulated line-by-line during execution via
         # update_stage_live_output.  The value from _execute_agent is authoritative
         # (full NDJSON from claude_output.raw) and overwrites the streamed version.
         raw_output = output.pop("_raw_output", None)
+
+        # Determine status before serialising so _subtype/_is_error are still present.
+        status, error_msg = _resolve_stage_status(output, raw_output)
+
         # Extract spending metadata before serializing structured_output.
         # Prefer cumulative values (sum across resume iterations) over
         # per-iteration values which only cover the last CLI invocation.
@@ -335,10 +387,11 @@ class TaskQueue:
             await self._db.execute(
                 """
                 UPDATE stages
-                SET agent = %(agent)s, status = 'completed',
+                SET agent = %(agent)s, status = %(status)s,
                     structured_output = %(output)s::jsonb,
                     raw_output = %(raw)s,
                     live_output = NULL,
+                    error_message = %(error_msg)s,
                     cost_usd = %(cost_usd)s,
                     tokens_input = %(tokens_in)s,
                     tokens_output = %(tokens_out)s,
@@ -351,6 +404,8 @@ class TaskQueue:
                 {
                     "id": stage_id,
                     "agent": agent,
+                    "status": status,
+                    "error_msg": error_msg,
                     "output": structured_json,
                     "raw": raw_output,
                     **spending_params,
@@ -360,10 +415,11 @@ class TaskQueue:
             await self._db.execute(
                 """
                 UPDATE stages
-                SET agent = %(agent)s, status = 'completed',
+                SET agent = %(agent)s, status = %(status)s,
                     structured_output = %(output)s::jsonb,
                     raw_output = %(raw)s,
                     live_output = NULL,
+                    error_message = %(error_msg)s,
                     cost_usd = %(cost_usd)s,
                     tokens_input = %(tokens_in)s,
                     tokens_output = %(tokens_out)s,
@@ -380,6 +436,8 @@ class TaskQueue:
                     "iteration": iteration,
                     "run": run,
                     "agent": agent,
+                    "status": status,
+                    "error_msg": error_msg,
                     "output": structured_json,
                     "raw": raw_output,
                     **spending_params,
@@ -390,19 +448,20 @@ class TaskQueue:
             await self._db.execute(
                 """
                 INSERT INTO stages (task_id, stage_number, category, agent, status,
-                                   structured_output, raw_output,
+                                   structured_output, raw_output, error_message,
                                    cost_usd, tokens_input, tokens_output,
                                    cache_read_tokens, cache_write_tokens,
                                    started_at, completed_at)
-                VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s, 'completed',
-                        %(output)s::jsonb, %(raw)s,
+                VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s, %(status)s,
+                        %(output)s::jsonb, %(raw)s, %(error_msg)s,
                         %(cost_usd)s, %(tokens_in)s, %(tokens_out)s,
                         %(cache_read)s, %(cache_write)s,
                         NOW(), NOW())
                 ON CONFLICT (task_id, stage_number) DO UPDATE
-                SET agent = %(agent)s, status = 'completed',
+                SET agent = %(agent)s, status = %(status)s,
                     structured_output = %(output)s::jsonb,
                     raw_output = %(raw)s,
+                    error_message = %(error_msg)s,
                     cost_usd = %(cost_usd)s,
                     tokens_input = %(tokens_in)s,
                     tokens_output = %(tokens_out)s,
@@ -416,6 +475,8 @@ class TaskQueue:
                     "stage": stage_num,
                     "category": category,
                     "agent": agent,
+                    "status": status,
+                    "error_msg": error_msg,
                     "output": structured_json,
                     "raw": raw_output,
                     **spending_params,

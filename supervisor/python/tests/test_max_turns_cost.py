@@ -237,14 +237,12 @@ class TestExecutorAutoResume:
         assert output["_iterations"] == 2
 
     @pytest.mark.asyncio
-    async def test_max_resume_iterations_guard(self, sample_pipelines: Any) -> None:
-        """Resume stops after max_resume_iterations (10) to prevent infinite loops."""
+    async def test_zero_max_cost_stops_after_first_max_turns(self, sample_pipelines: Any) -> None:
+        """Resume stops immediately when max_cost=0 (cumulative_cost >= max_cost on first hit)."""
         mock_db = AsyncMock(spec=Database)
         mock_tq = AsyncMock(spec=TaskQueue)
-        # Very high max_cost so it doesn't interfere
-        registry = _make_mock_registry(max_cost=1000.0)
+        registry = _make_mock_registry(max_cost=0.0)
 
-        # All calls hit max_turns with zero cost (simulating broken cost reporting)
         max_turns_output = ClaudeOutput(
             structured={
                 "_subtype": "error_max_turns",
@@ -265,9 +263,9 @@ class TestExecutorAutoResume:
                 "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
-        # Should stop at 10 iterations (max_resume_iterations)
-        assert mock_exec.call_count == 10
-        assert output["_iterations"] == 10
+        # Stops after 1 call: cumulative_cost (0.0) >= max_cost (0.0)
+        assert mock_exec.call_count == 1
+        assert output["_iterations"] == 1
 
     @pytest.mark.asyncio
     async def test_no_session_id_stops_resume(self, sample_pipelines: Any) -> None:

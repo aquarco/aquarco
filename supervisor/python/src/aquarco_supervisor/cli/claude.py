@@ -733,6 +733,8 @@ def _extract_from_result_message(msg: dict[str, Any]) -> dict[str, Any]:
         output["_num_turns"] = msg["num_turns"]
     if "session_id" in msg:
         output["_session_id"] = msg["session_id"]
+    if "is_error" in msg:
+        output["_is_error"] = msg["is_error"]
 
     return output
 
