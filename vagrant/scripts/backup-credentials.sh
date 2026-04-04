@@ -45,11 +45,19 @@ fi
 
 # ── Write manifest ──────────────────────────────────────────────────────────
 
+_json_array() {
+  if [[ $# -eq 0 ]]; then
+    echo '[]'
+  else
+    printf '%s\n' "$@" | jq -R . | jq -s .
+  fi
+}
+
 cat > "${BACKUP_DIR}/manifest.json" <<MANIFEST
 {
   "timestamp": "${TIMESTAMP}",
-  "found": $(printf '%s\n' "${found[@]+"${found[@]}"}" | jq -R . | jq -s .),
-  "missing": $(printf '%s\n' "${missing[@]+"${missing[@]}"}" | jq -R . | jq -s .)
+  "found": $(_json_array "${found[@]+"${found[@]}"}"),
+  "missing": $(_json_array "${missing[@]+"${missing[@]}"}")
 }
 MANIFEST
 chmod 600 "${BACKUP_DIR}/manifest.json"

@@ -8,6 +8,10 @@
 
 services:
 
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:${AQUARCO_POSTGRES_VERSION}
+
   # ── Database Migrations ──────────────────────────────────────────────────────
   migrations:
     build: !reset null
@@ -38,6 +42,10 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/graphql}
       NODE_ENV: production
+
+  # ── Caddy Reverse Proxy ─────────────────────────────────────────────────────
+  caddy:
+    image: caddy:${AQUARCO_CADDY_VERSION}
 
   # ── Adminer — dev only ─────────────────────────────────────────────────────
   adminer:

@@ -256,6 +256,67 @@ class TestLockVenvExecution:
         assert len(lock_cmds) == 0, "Lock venv must NOT be called after pip install failure (hard-fail)"
 
 
+class TestBackupRollbackIntegration:
+    """Tests that rollback is invoked when a backup exists and a step fails."""
+
+    @patch("aquarco_cli.commands.update._run_rollback")
+    @patch("aquarco_cli.commands.update._backup_credentials", return_value="/var/lib/aquarco/backups/20260404T180000")
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_rollback_called_on_step_failure_with_backup(
+        self, mock_cls, mock_health, mock_drain, mock_backup, mock_rollback
+    ):
+        """When a backup dir exists and a step fails, _run_rollback must be called."""
+        from aquarco_cli.vagrant import VagrantError
+
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_vagrant.ssh.side_effect = VagrantError("step failed")
+
+        result = runner.invoke(app, ["update"])
+        assert result.exit_code == 1
+        mock_rollback.assert_called_once_with(mock_vagrant, "/var/lib/aquarco/backups/20260404T180000")
+
+    @patch("aquarco_cli.commands.update._run_rollback")
+    @patch("aquarco_cli.commands.update._backup_credentials", return_value=None)
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_rollback_not_called_when_no_backup(
+        self, mock_cls, mock_health, mock_drain, mock_backup, mock_rollback
+    ):
+        """When backup is None and a step fails, _run_rollback must NOT be called."""
+        from aquarco_cli.vagrant import VagrantError
+
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_vagrant.ssh.side_effect = VagrantError("step failed")
+
+        result = runner.invoke(app, ["update"])
+        assert result.exit_code == 1
+        mock_rollback.assert_not_called()
+
+    @patch("aquarco_cli.commands.update._run_rollback")
+    @patch("aquarco_cli.commands.update._backup_credentials", return_value="/var/lib/aquarco/backups/20260404T180000")
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_rollback_called_on_provision_failure_with_backup(
+        self, mock_cls, mock_health, mock_drain, mock_backup, mock_rollback
+    ):
+        """When provisioning fails and backup exists, rollback must be invoked."""
+        from aquarco_cli.vagrant import VagrantError
+
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_vagrant.provision.side_effect = VagrantError("provision failed")
+
+        result = runner.invoke(app, ["update"])
+        assert result.exit_code == 1
+        mock_rollback.assert_called_once_with(mock_vagrant, "/var/lib/aquarco/backups/20260404T180000")
+
+
 class TestDrainModeIntegration:
     """Tests for drain mode prompts in update."""
 
