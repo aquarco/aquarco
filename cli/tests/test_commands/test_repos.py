@@ -1,4 +1,4 @@
-"""Tests for the watch command."""
+"""Tests for the repos command."""
 
 from __future__ import annotations
 
@@ -7,14 +7,14 @@ from unittest.mock import patch
 import httpx
 from typer.testing import CliRunner
 
-from aquarco_cli.commands.watch import _repo_name_from_url
+from aquarco_cli.commands.repos import _repo_name_from_url
 from aquarco_cli.main import app
 
 runner = CliRunner()
 
 
-class TestWatchAdd:
-    @patch("aquarco_cli.commands.watch.GraphQLClient")
+class TestReposAdd:
+    @patch("aquarco_cli.commands.repos.GraphQLClient")
     def test_add_repo(self, mock_cls):
         mock_client = mock_cls.return_value
         mock_client.execute.return_value = {
@@ -23,12 +23,12 @@ class TestWatchAdd:
                 "errors": None,
             }
         }
-        result = runner.invoke(app, ["watch", "add", "https://github.com/user/myrepo"])
+        result = runner.invoke(app, ["repos", "add", "https://github.com/user/myrepo"])
         assert result.exit_code == 0
         assert "myrepo" in result.output
         assert "registered" in result.output.lower()
 
-    @patch("aquarco_cli.commands.watch.GraphQLClient")
+    @patch("aquarco_cli.commands.repos.GraphQLClient")
     def test_add_repo_with_options(self, mock_cls):
         mock_client = mock_cls.return_value
         mock_client.execute.return_value = {
@@ -38,7 +38,7 @@ class TestWatchAdd:
             }
         }
         result = runner.invoke(app, [
-            "watch", "add", "https://github.com/user/repo",
+            "repos", "add", "https://github.com/user/repo",
             "--name", "custom", "--branch", "develop", "--poller", "github-tasks",
         ])
         assert result.exit_code == 0
@@ -49,8 +49,8 @@ class TestWatchAdd:
         assert variables["input"]["branch"] == "develop"
 
 
-class TestWatchList:
-    @patch("aquarco_cli.commands.watch.GraphQLClient")
+class TestReposList:
+    @patch("aquarco_cli.commands.repos.GraphQLClient")
     def test_list_repos(self, mock_cls):
         mock_client = mock_cls.return_value
         mock_client.execute.return_value = {
@@ -58,14 +58,14 @@ class TestWatchList:
                 {"name": "repo1", "url": "https://github.com/u/repo1", "branch": "main", "cloneStatus": "READY", "pollers": ["github-tasks"], "taskCount": 5, "lastClonedAt": None, "lastPulledAt": None, "headSha": None, "errorMessage": None},
             ]
         }
-        result = runner.invoke(app, ["watch", "list"])
+        result = runner.invoke(app, ["repos", "list"])
         assert result.exit_code == 0
         assert "repo1" in result.output
         assert "READY" in result.output
 
 
-class TestWatchRemove:
-    @patch("aquarco_cli.commands.watch.GraphQLClient")
+class TestReposRemove:
+    @patch("aquarco_cli.commands.repos.GraphQLClient")
     def test_remove_repo(self, mock_cls):
         mock_client = mock_cls.return_value
         mock_client.execute.return_value = {
@@ -74,11 +74,11 @@ class TestWatchRemove:
                 "errors": None,
             }
         }
-        result = runner.invoke(app, ["watch", "remove", "repo1"])
+        result = runner.invoke(app, ["repos", "remove", "repo1"])
         assert result.exit_code == 0
         assert "removed" in result.output.lower()
 
-    @patch("aquarco_cli.commands.watch.GraphQLClient")
+    @patch("aquarco_cli.commands.repos.GraphQLClient")
     def test_remove_repo_with_errors(self, mock_cls):
         mock_client = mock_cls.return_value
         mock_client.execute.return_value = {
@@ -87,7 +87,7 @@ class TestWatchRemove:
                 "errors": [{"message": "Repository not found"}],
             }
         }
-        result = runner.invoke(app, ["watch", "remove", "nonexistent"])
+        result = runner.invoke(app, ["repos", "remove", "nonexistent"])
         assert result.exit_code == 1
         assert "not found" in result.output.lower()
 
@@ -106,26 +106,26 @@ class TestRepoNameFromUrl:
         assert _repo_name_from_url("https://gitlab.com/org/sub/repo") == "repo"
 
 
-class TestWatchListEmpty:
-    @patch("aquarco_cli.commands.watch.GraphQLClient")
+class TestReposListEmpty:
+    @patch("aquarco_cli.commands.repos.GraphQLClient")
     def test_empty_repos(self, mock_cls):
         mock_client = mock_cls.return_value
         mock_client.execute.return_value = {"repositories": []}
-        result = runner.invoke(app, ["watch", "list"])
+        result = runner.invoke(app, ["repos", "list"])
         assert result.exit_code == 0
         assert "no repositories" in result.output.lower()
 
 
-class TestWatchAddErrors:
-    @patch("aquarco_cli.commands.watch.GraphQLClient")
+class TestReposAddErrors:
+    @patch("aquarco_cli.commands.repos.GraphQLClient")
     def test_add_repo_api_connection_error(self, mock_cls):
         mock_client = mock_cls.return_value
         mock_client.execute.side_effect = httpx.ConnectError("refused")
-        result = runner.invoke(app, ["watch", "add", "https://github.com/u/r"])
+        result = runner.invoke(app, ["repos", "add", "https://github.com/u/r"])
         assert result.exit_code == 1
         assert "cannot reach" in result.output.lower()
 
-    @patch("aquarco_cli.commands.watch.GraphQLClient")
+    @patch("aquarco_cli.commands.repos.GraphQLClient")
     def test_add_repo_mutation_errors(self, mock_cls):
         mock_client = mock_cls.return_value
         mock_client.execute.return_value = {
@@ -134,6 +134,6 @@ class TestWatchAddErrors:
                 "errors": [{"field": "url", "message": "Invalid URL"}],
             }
         }
-        result = runner.invoke(app, ["watch", "add", "bad-url"])
+        result = runner.invoke(app, ["repos", "add", "bad-url"])
         assert result.exit_code == 1
         assert "invalid url" in result.output.lower()

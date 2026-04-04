@@ -1,16 +1,19 @@
-"""aquarco install — bootstrap the Aquarco VM."""
+"""aquarco init — bootstrap the Aquarco VM."""
 
 from __future__ import annotations
 
+import json
 import shutil
+from pathlib import Path
 
 import typer
 
+from aquarco_cli.config import get_config, reset_config
 from aquarco_cli.console import print_error, print_info, print_success
 from aquarco_cli.health import print_health_table
 from aquarco_cli.vagrant import VagrantHelper
 
-app = typer.Typer()
+app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
 
 def _check_prerequisite(binary: str, display_name: str, install_url: str) -> bool:
@@ -23,8 +26,32 @@ def _check_prerequisite(binary: str, display_name: str, install_url: str) -> boo
 
 
 @app.callback(invoke_without_command=True)
-def install() -> None:
+def init(
+    ctx: typer.Context,
+    port: int = typer.Option(
+        8080, "--port",
+        help="Host port for the Caddy reverse proxy (default: 8080). "
+        "Saved to ~/.aquarco.json for future commands.",
+    ),
+) -> None:
     """One-command bootstrap of a working Aquarco environment."""
+    # Save port configuration when --port is explicitly provided or config already exists
+    config_file = Path.home() / ".aquarco.json"
+    # Click's get_parameter_source returns ParameterSource.COMMANDLINE when user passed --port
+    import click
+    port_source = ctx.get_parameter_source("port")
+    port_explicitly_set = port_source is not None and port_source == click.core.ParameterSource.COMMANDLINE
+    if port_explicitly_set or config_file.exists():
+        try:
+            existing = {}
+            if config_file.exists():
+                existing = json.loads(config_file.read_text())
+            existing["port"] = port
+            config_file.write_text(json.dumps(existing, indent=2) + "\n")
+            reset_config()  # reload with new port
+        except OSError as exc:
+            print_error(f"Failed to save port configuration: {exc}")
+
     # 1. Check prerequisites
     ok = True
     ok = _check_prerequisite(
@@ -52,7 +79,7 @@ def install() -> None:
     all_healthy = print_health_table()
 
     if all_healthy:
-        print_success("Aquarco installed successfully!")
+        print_success("Aquarco initialized successfully!")
     else:
         print_error(
             "Some services are not healthy. Check the table above and try "

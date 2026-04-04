@@ -30,10 +30,15 @@ class TestMainApp:
     def test_help_flag(self):
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "install" in result.output
+        assert "init" in result.output
         assert "update" in result.output
         assert "auth" in result.output
-        assert "watch" in result.output
+        assert "repos" in result.output
         assert "run" in result.output
         assert "status" in result.output
         assert "ui" in result.output
+
+    def test_h_alias(self):
+        result = runner.invoke(app, ["-h"])
+        assert result.exit_code == 0
+        assert "init" in result.output

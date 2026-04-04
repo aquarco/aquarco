@@ -25,7 +25,7 @@ const port = parseInt(process.env.PORT ?? '4000', 10)
 const { url } = await startStandaloneServer(server, {
   listen: { port },
   context: async ({ req }) => {
-    return createContext(pool)
+    return createContext(pool, req)
   },
 })
 

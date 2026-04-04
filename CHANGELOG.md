@@ -1,5 +1,34 @@
 # Changelog
 
+## [2026-04-03] — Aquarco CLI enhancements (#71)
+
+### Added
+- **`-h` alias for `--help`** on all CLI commands — added `context_settings={"help_option_names": ["-h", "--help"]}` to main app and all sub-apps (Typer/Click integration)
+- **`--port` option on `aquarco init`** — allows custom port configuration (default 8080) with propagation to Vagrant port forwarding and Caddyfile template
+- **Docker healthchecks** for `web` (Next.js on 3000) and `api` (GraphQL on 4000) services in `compose.yml` with `depends_on: condition: service_healthy` chains to ensure services are up before dependent services start
+- **Smart `aquarco auth` command** — bare invocation (`aquarco auth` without subcommand) now auto-detects unauthenticated services, runs Claude OAuth and GitHub device flows as needed, and shows status at the end
+- **`aquarco repos` subcommands with `--json` support** — `aquarco repos list` now supports `--json` output for machine-readable repository listing
+- **`aquarco auth status` with `--json` support** — output authentication status as JSON
+- **`aquarco ui` subcommands** — new command structure with `aquarco ui web` (default), `aquarco ui db` (Adminer), `aquarco ui api` (GraphQL playground), and `aquarco ui stop` (stop all services except API)
+- **`--no-open` flag for `aquarco ui`** — inverted flag; browser opens by default, use `--no-open` to suppress it
+- **GraphQL drain mode API** — new `setDrainMode(enabled: Boolean!)` mutation and `drainStatus` query for graceful supervisor restart: supervisor stops picking up new work when drain is enabled, waits for all stages to reach WAITING state, then auto-restarts
+- **Graceful supervisor restart in `aquarco update`** — three-way prompt when active agents are present: "Yes" (restart immediately), "No" (abort), "Plan update when idle" (enable drain mode)
+- **Graceful error messages for API connectivity issues** — `aquarco auth status`, `aquarco status`, `aquarco repos list` and other API-dependent commands now catch connection errors and show friendly message instead of raw exception
+- **Improved `aquarco status --help` text** — clarified that `TASK_ID` is optional and documented all options and example usage
+
+### Changed
+- **Renamed `aquarco install` → `aquarco init`** — aligns with standard initialization terminology; all help text, tests, and error messages updated
+- **Renamed `aquarco watch` → `aquarco repos`** — better reflects the command's purpose; all subcommands (`add`, `list`, `remove`) and tests renamed accordingly
+- **Removed `git pull` step from `aquarco update`** — users manage host-side git themselves; VirtualBox shared folders sync code without git pull
+- **Supervisor drain mode integration** — supervisor main loop checks drain flag and halts new task pickup; auto-restarts when all stages reach WAITING; CLI `update.py` queries drain status and presents multi-phase flow
+- **Port persistence in `aquarco init`** — uses Click's `ParameterSource` detection to distinguish explicit `--port` flags from defaults; only saves config when explicitly passed
+
+### Fixed
+- **Authentication guard on `setDrainMode` mutation** — requires `AQUARCO_INTERNAL_API_KEY` environment variable for security
+- **Exception handling in `update.py` drain mode** — specific exception types (KeyError, TypeError) and descriptive logging instead of bare Exception catches
+- **Auth callback robustness** — catches all exceptions to ensure both Claude and GitHub login flows are always attempted
+- **Combined drain status query** — single atomic SQL query instead of 3 sequential queries for consistent reads
+
 ## [2026-03-31] — Per-agent model selection (#60)
 
 ### Added
@@ -21,14 +50,14 @@
 
 ### Added
 - **`aquarco` CLI** (`cli/`) — host-side Python CLI (Typer + Rich + httpx) for managing the Aquarco VM from macOS without SSHing manually
-- **`aquarco install`** — one-command bootstrap: checks prerequisites (VirtualBox, Vagrant), runs `vagrant up`, and verifies stack health
+- **`aquarco init`** — one-command bootstrap: checks prerequisites (VirtualBox, Vagrant), runs `vagrant up`, and verifies stack health. Supports `--port` option (default 8080)
 - **`aquarco update`** — pulls latest source, Docker images, runs migrations, restarts services, and re-provisions the VM. Supports `--dry-run`, `--skip-migrations`, and `--skip-provision` flags
 - **`aquarco auth claude`** — initiates Claude OAuth PKCE flow via the GraphQL API, opens browser for authorization
 - **`aquarco auth github`** — initiates GitHub device flow login via the GraphQL API
 - **`aquarco auth status`** — checks authentication status for both Claude and GitHub
-- **`aquarco watch add <url>`** — registers a repository for autonomous watching via `registerRepository` GraphQL mutation. Options: `--name`, `--branch`, `--poller`
-- **`aquarco watch list`** — lists all watched repositories with clone status and poller info
-- **`aquarco watch remove <name>`** — removes a watched repository
+- **`aquarco repos add <url>`** — registers a repository for autonomous watching via `registerRepository` GraphQL mutation. Options: `--name`, `--branch`, `--poller`
+- **`aquarco repos list`** — lists all watched repositories with clone status and poller info
+- **`aquarco repos remove <name>`** — removes a watched repository
 - **`aquarco run <title> --repo <name>`** — creates a task for agent execution via `createTask` mutation. Options: `--pipeline`, `--priority`, `--context` (JSON string or `@filepath`), `--follow`
 - **`aquarco status`** — dashboard overview with task counts, active agents, and cost. Options: `--json`, `--limit`
 - **`aquarco status <task-id>`** — detailed task view with stage history. Options: `--follow`, `--json`

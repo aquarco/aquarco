@@ -8,13 +8,13 @@ implement, test, review), and submit pull requests — all inside an isolated VM
 
 ```bash
 pip install -e cli/        # Install the aquarco CLI
-aquarco install            # Bootstrap the VM (~5 min)
+aquarco init               # Bootstrap the VM (~5 min)
 aquarco auth github        # Authenticate GitHub
 aquarco auth claude        # Authenticate Claude
-aquarco watch add https://github.com/user/repo  # Watch a repo
+aquarco repos add https://github.com/user/repo  # Watch a repo
 ```
 
-Open http://localhost:8080 or run `aquarco ui --open` to launch the dashboard.
+Open http://localhost:8080 or run `aquarco ui` to launch the dashboard.
 
 ## CLI Reference
 
@@ -24,21 +24,49 @@ Install: `pip install -e cli/` (requires Python 3.10+)
 
 | Command | Description |
 |---------|-------------|
-| `aquarco install` | Bootstrap the Aquarco VM (checks VirtualBox + Vagrant, runs `vagrant up`, verifies health) |
-| `aquarco update` | Update VM: pull source, Docker images, run migrations, restart services |
+| `aquarco init` | Bootstrap the Aquarco VM (checks VirtualBox + Vagrant, runs `vagrant up`, verifies health) |
+| `aquarco update` | Update VM: Docker images, migrations, restart services (with drain mode support) |
+| `aquarco auth` | Auto-detect unauthenticated services and run their login flows |
 | `aquarco auth claude` | Authenticate Claude via OAuth PKCE flow |
 | `aquarco auth github` | Authenticate GitHub via device flow |
 | `aquarco auth status` | Check Claude and GitHub auth status |
-| `aquarco watch add <url>` | Register a repository for autonomous watching |
-| `aquarco watch list` | List all watched repositories |
-| `aquarco watch remove <name>` | Remove a watched repository |
+| `aquarco repos add <url>` | Register a repository for autonomous watching |
+| `aquarco repos list` | List all watched repositories |
+| `aquarco repos remove <name>` | Remove a watched repository |
 | `aquarco run <title> -r <repo>` | Create a task for agent execution |
 | `aquarco status` | Dashboard overview (task counts, agents, cost) |
 | `aquarco status <id>` | Detailed task status with stage history |
-| `aquarco ui` | Start web UI services |
-| `aquarco ui stop` | Stop web UI services |
+| `aquarco ui web` | Start web UI and open dashboard (default) |
+| `aquarco ui db` | Start Adminer and open database admin |
+| `aquarco ui api` | Open GraphQL playground |
+| `aquarco ui stop` | Stop all UI services (web, adminer) |
 
-Common flags: `--follow` / `-f` (stream task progress), `--json` (machine-readable output), `--dry-run` (preview update steps).
+### Common Flags
+
+| Flag | Commands | Description |
+|------|----------|-------------|
+| `-h`, `--help` | All | Show command help (short `-h` alias available on all commands) |
+| `--json` | `status`, `repos list`, `auth status` | Output machine-readable JSON instead of formatted tables |
+| `--follow`, `-f` | `status`, `run` | Stream progress until task/execution reaches terminal state |
+| `--no-open` | `aquarco ui` | Do not open browser after starting services (opens by default) |
+| `--port` | `aquarco init` | Custom port for Aquarco services (default: 8080) |
+| `--dry-run` | `aquarco update` | Preview update steps without applying changes |
+
+### Smart Features
+
+#### Smart Authentication (`aquarco auth`)
+Running `aquarco auth` without a subcommand now auto-detects which services are missing authentication:
+- If Claude is not authenticated, runs the Claude OAuth PKCE flow
+- If GitHub is not authenticated, runs the GitHub device flow
+- Shows final authentication status for both services
+
+#### Graceful Updates with Drain Mode (`aquarco update`)
+When running `aquarco update` while agents are actively working, you now have three options:
+1. **Yes** — Restart the supervisor immediately (may interrupt running work)
+2. **No** — Cancel the update
+3. **Plan update when idle** — Enable drain mode: the supervisor stops picking up new work and waits for all running stages to complete, then auto-restarts automatically
+
+If you run `aquarco update` while drain mode is enabled, you can choose to wait, restart immediately, or cancel the pending update.
 
 ## Architecture
 
@@ -415,10 +443,10 @@ Agent definitions live in `config/agents/definitions/` (K8s-style YAML) and
 | Module | Purpose |
 |--------|---------|
 | `main.py` | Typer app, command registration, `--version` |
-| `commands/install.py` | Prerequisite checks, `vagrant up`, health verification |
-| `commands/update.py` | Git pull, Docker pull, migrations, service restart, `--dry-run` |
-| `commands/auth.py` | Claude OAuth + GitHub device flow via GraphQL API |
-| `commands/watch.py` | Repository add/list/remove via GraphQL mutations |
+| `commands/init.py` | Prerequisite checks, `vagrant up`, health verification, `--port` option |
+| `commands/update.py` | Docker pull, migrations, service restart, `--dry-run`, drain mode |
+| `commands/auth.py` | Claude OAuth + GitHub device flow via GraphQL API (smart auto-detect) |
+| `commands/repos.py` | Repository add/list/remove via GraphQL mutations |
 | `commands/run.py` | Task creation with optional `--follow` progress polling |
 | `commands/status.py` | Dashboard + task detail views, `--json` output |
 | `commands/ui.py` | Start/stop web UI Docker services |

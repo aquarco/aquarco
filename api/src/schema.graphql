@@ -36,6 +36,9 @@ type Query {
 
   # Dashboard stats
   dashboardStats: DashboardStats!
+
+  # Supervisor drain mode
+  drainStatus: DrainStatus!
 }
 
 type Mutation {
@@ -61,6 +64,9 @@ type Mutation {
   claudeLoginPoll: ClaudeLoginResult!
   claudeSubmitCode(code: String!): ClaudeLoginResult!
   claudeLogout: Boolean!
+
+  # Supervisor drain mode
+  setDrainMode(enabled: Boolean!): DrainStatus!
 
   # Repository actions
   retryClone(name: String!): RepositoryPayload!
@@ -415,6 +421,12 @@ type PipelineStageDefinition {
   category: String!
   required: Boolean!
   conditions: [PipelineCondition!]!
+}
+
+type DrainStatus {
+  enabled: Boolean!
+  activeAgents: Int!
+  activeTasks: Int!
 }
 
 type PipelineCondition {
