@@ -57,6 +57,8 @@ def auth_callback(ctx: typer.Context) -> None:
         print_info("Claude is not authenticated. Starting login flow...")
         try:
             ctx.invoke(claude)
+        except KeyboardInterrupt:
+            raise
         except (SystemExit, Exception) as exc:
             print_error(f"Claude login flow failed: {type(exc).__name__}. Continuing to check GitHub...")
 
@@ -64,6 +66,8 @@ def auth_callback(ctx: typer.Context) -> None:
         print_info("GitHub is not authenticated. Starting login flow...")
         try:
             ctx.invoke(github)
+        except KeyboardInterrupt:
+            raise
         except (SystemExit, Exception) as exc:
             print_error(f"GitHub login flow failed: {type(exc).__name__}.")
 

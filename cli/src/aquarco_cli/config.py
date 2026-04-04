@@ -35,6 +35,11 @@ class CliConfig:
         default_factory=lambda: os.environ.get("AQUARCO_VAGRANT_DIR", "")
     )
 
+    # Internal API key (for mutations like setDrainMode that require auth)
+    api_key: str = field(
+        default_factory=lambda: os.environ.get("AQUARCO_INTERNAL_API_KEY", "")
+    )
+
     # HTTP timeout in seconds
     http_timeout: float = field(
         default_factory=lambda: float(os.environ.get("AQUARCO_HTTP_TIMEOUT", "30"))
