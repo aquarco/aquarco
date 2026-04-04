@@ -6,14 +6,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from aquarco_supervisor.cli.agents import (
     KEBAB_CASE_RE,
-    REQUIRED_API_VERSION,
-    REQUIRED_KIND,
     SEMVER_RE,
     VALID_CATEGORIES,
+    VALID_ROLES,
     ValidationError,
     _build_registry,
     _get_field,
@@ -26,34 +24,23 @@ from aquarco_supervisor.cli.agents import (
 # ---------------------------------------------------------------------------
 
 
-def _write_definition(tmp_path: Path, data: dict[str, Any], filename: str = "test-agent.yaml") -> Path:
-    """Write a YAML definition file and return its path."""
+def _write_md_definition(tmp_path: Path, frontmatter: str, prompt: str = "# Test prompt\n",
+                          filename: str = "test-agent.md") -> Path:
+    """Write a hybrid .md definition file and return its path."""
     f = tmp_path / filename
-    f.write_text(yaml.dump(data))
+    f.write_text(f"---\n{frontmatter}---\n{prompt}")
     return f
 
 
-def _minimal_valid(defs_dir: Path, prompt_file: str = "agent.md") -> dict[str, Any]:
-    """Return a minimal dict that passes all validation checks.
-
-    Creates the prompt file relative to ``defs_dir`` (the directory where
-    the definition YAML will be written).
-    """
-    (defs_dir / prompt_file).write_text("# prompt")
-    return {
-        "apiVersion": REQUIRED_API_VERSION,
-        "kind": REQUIRED_KIND,
-        "metadata": {
-            "name": "my-agent",
-            "version": "1.0.0",
-            "description": "A description long enough.",
-        },
-        "spec": {
-            "categories": ["review"],
-            "promptFile": prompt_file,
-            "output": {"format": "task-file"},
-        },
-    }
+def _minimal_valid_frontmatter() -> str:
+    """Return minimal valid frontmatter YAML content."""
+    return (
+        'name: my-agent\n'
+        'version: "1.0.0"\n'
+        'description: "A description long enough."\n'
+        'categories:\n'
+        '  - review\n'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -88,12 +75,12 @@ class TestGetField:
 
 class TestValidationError:
     def test_str_representation(self) -> None:
-        err = ValidationError("metadata.name", "is required")
-        assert str(err) == "metadata.name: is required"
+        err = ValidationError("name", "is required")
+        assert str(err) == "name: is required"
 
     def test_fields_stored(self) -> None:
-        err = ValidationError("spec.priority", "must be 1-100")
-        assert err.field == "spec.priority"
+        err = ValidationError("priority", "must be 1-100")
+        assert err.field == "priority"
         assert err.message == "must be 1-100"
 
 
@@ -122,8 +109,6 @@ class TestSemverRegex:
         assert not SEMVER_RE.match(v)
 
     def test_four_part_version_matches_prefix(self) -> None:
-        # SEMVER_RE has no end-anchor, so "1.0.0.0" matches the leading "1.0.0"
-        # This documents the intentional (permissive) behaviour of the regex.
         assert SEMVER_RE.match("1.0.0.0")
 
 
@@ -134,12 +119,7 @@ class TestSemverRegex:
 
 class TestValidateDefinitionHappyPath:
     def test_minimal_valid_definition(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        f = _write_definition(defs_dir, data)
-
+        f = _write_md_definition(tmp_path, _minimal_valid_frontmatter())
         errors, record = validate_definition(f)
 
         assert errors == []
@@ -150,472 +130,268 @@ class TestValidateDefinitionHappyPath:
         assert record["priority"] == 50  # default
 
     def test_explicit_priority_returned(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["spec"]["priority"] = 75
-        f = _write_definition(defs_dir, data)
-
+        fm = _minimal_valid_frontmatter() + "priority: 75\n"
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
 
         assert errors == []
         assert record is not None
         assert record["priority"] == 75
 
-    def test_triggers_and_capabilities_included(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["spec"]["triggers"] = {"produces": ["analysis-done"], "consumes": ["task-created"]}
-        data["spec"]["capabilities"] = {"maxConcurrent": 3}
-        f = _write_definition(defs_dir, data)
-
-        errors, record = validate_definition(f)
-
-        assert errors == []
-        assert record is not None
-        assert record["triggers"]["produces"] == ["analysis-done"]
-        assert record["triggers"]["consumes"] == ["task-created"]
-        assert record["capabilities"] == {"maxConcurrent": 3}
-
-    def test_labels_included_from_metadata(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["metadata"]["labels"] = {"team": "platform"}
-        f = _write_definition(defs_dir, data)
-
-        errors, record = validate_definition(f)
-
-        assert errors == []
-        assert record is not None
-        assert record["labels"] == {"team": "platform"}
-
     def test_all_valid_categories_accepted(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["spec"]["categories"] = list(VALID_CATEGORIES)
-        f = _write_definition(defs_dir, data)
-
+        cats = "\n".join(f"  - {c}" for c in VALID_CATEGORIES)
+        fm = (
+            'name: my-agent\n'
+            'version: "1.0.0"\n'
+            'description: "A description long enough."\n'
+            f'categories:\n{cats}\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
         assert errors == []
 
-    def test_valid_without_output_section(self, tmp_path: Path) -> None:
-        """Agents without spec.output should now pass validation."""
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        del data["spec"]["output"]
-        f = _write_definition(defs_dir, data)
+    def test_system_agent_with_role(self, tmp_path: Path) -> None:
+        """System agents with role instead of categories should pass."""
+        fm = (
+            'name: planner-agent\n'
+            'version: "1.0.0"\n'
+            'description: "Plans pipeline execution"\n'
+            'role: planner\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
         assert errors == []
         assert record is not None
+        assert record["role"] == "planner"
+        assert record["categories"] == []
 
 
 # ---------------------------------------------------------------------------
-# validate_definition — YAML errors
+# validate_definition — frontmatter errors
 # ---------------------------------------------------------------------------
 
 
-class TestValidateDefinitionYamlErrors:
-    def test_invalid_yaml_returns_error(self, tmp_path: Path) -> None:
-        f = tmp_path / "bad.yaml"
-        f.write_text("{bad: yaml: [unclosed")
-
+class TestValidateDefinitionFrontmatterErrors:
+    def test_missing_opening_delimiter(self, tmp_path: Path) -> None:
+        f = tmp_path / "bad.md"
+        f.write_text("name: test\n---\n# Prompt\n")
         errors, record = validate_definition(f)
-
         assert len(errors) >= 1
-        assert errors[0].field == "(yaml)"
+        assert errors[0].field == "(frontmatter)"
         assert record is None
 
-    def test_non_mapping_root_returns_error(self, tmp_path: Path) -> None:
-        f = tmp_path / "list.yaml"
-        f.write_text("- item1\n- item2\n")
-
+    def test_missing_closing_delimiter(self, tmp_path: Path) -> None:
+        f = tmp_path / "bad.md"
+        f.write_text("---\nname: test\n# No closing\n")
         errors, record = validate_definition(f)
+        assert len(errors) >= 1
+        assert record is None
 
-        assert len(errors) == 1
-        assert errors[0].field == "(yaml)"
+    def test_invalid_yaml_in_frontmatter(self, tmp_path: Path) -> None:
+        f = tmp_path / "bad.md"
+        f.write_text("---\n{bad: yaml: [unclosed\n---\n# Prompt\n")
+        errors, record = validate_definition(f)
+        assert len(errors) >= 1
         assert record is None
 
 
 # ---------------------------------------------------------------------------
-# validate_definition — apiVersion / kind
-# ---------------------------------------------------------------------------
-
-
-class TestValidateDefinitionApiVersionKind:
-    def test_wrong_api_version(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["apiVersion"] = "wrong/v1"
-        f = _write_definition(defs_dir, data)
-
-        errors, record = validate_definition(f)
-
-        assert any(e.field == "apiVersion" for e in errors)
-        assert record is None
-
-    def test_missing_api_version(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        del data["apiVersion"]
-        f = _write_definition(defs_dir, data)
-
-        errors, record = validate_definition(f)
-        assert any(e.field == "apiVersion" for e in errors)
-
-    def test_wrong_kind(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["kind"] = "SomethingElse"
-        f = _write_definition(defs_dir, data)
-
-        errors, record = validate_definition(f)
-        assert any(e.field == "kind" for e in errors)
-        assert record is None
-
-    def test_missing_kind(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        del data["kind"]
-        f = _write_definition(defs_dir, data)
-
-        errors, record = validate_definition(f)
-        assert any(e.field == "kind" for e in errors)
-
-
-# ---------------------------------------------------------------------------
-# validate_definition — metadata.name
+# validate_definition — name
 # ---------------------------------------------------------------------------
 
 
 class TestValidateDefinitionName:
     def test_missing_name(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        del data["metadata"]["name"]
-        f = _write_definition(defs_dir, data)
-
+        fm = (
+            'version: "1.0.0"\n'
+            'description: "A description long enough."\n'
+            'categories:\n  - review\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        assert any(e.field == "metadata.name" for e in errors)
+        assert any(e.field == "name" for e in errors)
 
     @pytest.mark.parametrize("bad_name", ["MyAgent", "123bad", "_under", "with space", "CamelCase"])
     def test_invalid_kebab_case_names(self, tmp_path: Path, bad_name: str) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["metadata"]["name"] = bad_name
-        f = _write_definition(defs_dir, data)
-
+        fm = (
+            f'name: {bad_name}\n'
+            'version: "1.0.0"\n'
+            'description: "A description long enough."\n'
+            'categories:\n  - review\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        assert any(e.field == "metadata.name" for e in errors)
+        assert any(e.field == "name" for e in errors)
 
     @pytest.mark.parametrize("good_name", ["a", "my-agent", "agent-v2", "abc123"])
     def test_valid_kebab_case_names(self, tmp_path: Path, good_name: str) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["metadata"]["name"] = good_name
-        f = _write_definition(defs_dir, data)
-
+        fm = (
+            f'name: {good_name}\n'
+            'version: "1.0.0"\n'
+            'description: "A description long enough."\n'
+            'categories:\n  - review\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        name_errors = [e for e in errors if e.field == "metadata.name"]
+        name_errors = [e for e in errors if e.field == "name"]
         assert name_errors == []
 
 
 # ---------------------------------------------------------------------------
-# validate_definition — metadata.version (semver)
+# validate_definition — version (semver)
 # ---------------------------------------------------------------------------
 
 
 class TestValidateDefinitionVersion:
     def test_missing_version(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        del data["metadata"]["version"]
-        f = _write_definition(defs_dir, data)
-
+        fm = (
+            'name: my-agent\n'
+            'description: "A description long enough."\n'
+            'categories:\n  - review\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        assert any(e.field == "metadata.version" for e in errors)
+        assert any(e.field == "version" for e in errors)
 
     @pytest.mark.parametrize("bad_ver", ["v1.0.0", "1.0", "1", "not-a-version"])
     def test_invalid_semver(self, tmp_path: Path, bad_ver: str) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["metadata"]["version"] = bad_ver
-        f = _write_definition(defs_dir, data)
-
+        fm = (
+            'name: my-agent\n'
+            f'version: "{bad_ver}"\n'
+            'description: "A description long enough."\n'
+            'categories:\n  - review\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        assert any(e.field == "metadata.version" for e in errors)
-
-    @pytest.mark.parametrize("good_ver", ["0.0.0", "1.0.0", "10.20.30"])
-    def test_valid_semver(self, tmp_path: Path, good_ver: str) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["metadata"]["version"] = good_ver
-        f = _write_definition(defs_dir, data)
-
-        errors, record = validate_definition(f)
-        ver_errors = [e for e in errors if e.field == "metadata.version"]
-        assert ver_errors == []
+        assert any(e.field == "version" for e in errors)
 
 
 # ---------------------------------------------------------------------------
-# validate_definition — metadata.description
+# validate_definition — description
 # ---------------------------------------------------------------------------
 
 
 class TestValidateDefinitionDescription:
     def test_missing_description(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        del data["metadata"]["description"]
-        f = _write_definition(defs_dir, data)
-
+        fm = (
+            'name: my-agent\n'
+            'version: "1.0.0"\n'
+            'categories:\n  - review\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        assert any(e.field == "metadata.description" for e in errors)
+        assert any(e.field == "description" for e in errors)
 
     def test_description_too_short(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["metadata"]["description"] = "short"  # < 10 chars
-        f = _write_definition(defs_dir, data)
-
+        fm = (
+            'name: my-agent\n'
+            'version: "1.0.0"\n'
+            'description: "short"\n'
+            'categories:\n  - review\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        assert any(e.field == "metadata.description" for e in errors)
+        assert any(e.field == "description" for e in errors)
 
     def test_description_exactly_ten_chars_ok(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["metadata"]["description"] = "1234567890"  # exactly 10 chars
-        f = _write_definition(defs_dir, data)
-
+        fm = (
+            'name: my-agent\n'
+            'version: "1.0.0"\n'
+            'description: "1234567890"\n'
+            'categories:\n  - review\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        desc_errors = [e for e in errors if e.field == "metadata.description"]
+        desc_errors = [e for e in errors if e.field == "description"]
         assert desc_errors == []
 
 
 # ---------------------------------------------------------------------------
-# validate_definition — spec.categories
+# validate_definition — categories/role
 # ---------------------------------------------------------------------------
 
 
 class TestValidateDefinitionCategories:
-    def test_missing_categories(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        del data["spec"]["categories"]
-        f = _write_definition(defs_dir, data)
-
+    def test_missing_categories_and_role(self, tmp_path: Path) -> None:
+        fm = (
+            'name: my-agent\n'
+            'version: "1.0.0"\n'
+            'description: "A description long enough."\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        assert any(e.field == "spec.categories" for e in errors)
-
-    def test_empty_categories_list(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["spec"]["categories"] = []
-        f = _write_definition(defs_dir, data)
-
-        errors, record = validate_definition(f)
-        assert any(e.field == "spec.categories" for e in errors)
+        assert any(e.field == "categories/role" for e in errors)
 
     def test_invalid_category_value(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["spec"]["categories"] = ["invalid-category"]
-        f = _write_definition(defs_dir, data)
-
+        fm = (
+            'name: my-agent\n'
+            'version: "1.0.0"\n'
+            'description: "A description long enough."\n'
+            'categories:\n  - invalid-category\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        assert any("spec.categories[" in e.field for e in errors)
+        assert any("categories[" in e.field for e in errors)
 
-    def test_mixed_valid_and_invalid_categories(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["spec"]["categories"] = ["review", "BOGUS"]
-        f = _write_definition(defs_dir, data)
-
+    def test_invalid_role_value(self, tmp_path: Path) -> None:
+        fm = (
+            'name: my-agent\n'
+            'version: "1.0.0"\n'
+            'description: "A description long enough."\n'
+            'role: invalid-role\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        cat_errors = [e for e in errors if "spec.categories[" in e.field]
-        assert len(cat_errors) == 1
-        assert "BOGUS" in cat_errors[0].message
+        assert any(e.field == "role" for e in errors)
 
 
 # ---------------------------------------------------------------------------
-# validate_definition — spec.promptFile
+# validate_definition — prompt body
 # ---------------------------------------------------------------------------
 
 
-class TestValidateDefinitionPromptFile:
-    def test_missing_prompt_file_field(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        del data["spec"]["promptFile"]
-        f = _write_definition(defs_dir, data)
-
+class TestValidateDefinitionPromptBody:
+    def test_empty_prompt_body(self, tmp_path: Path) -> None:
+        f = _write_md_definition(tmp_path, _minimal_valid_frontmatter(), prompt="")
         errors, record = validate_definition(f)
-        assert any(e.field == "spec.promptFile" for e in errors)
+        assert any(e.field == "(prompt)" for e in errors)
 
-    def test_prompt_file_not_on_disk(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["spec"]["promptFile"] = "nonexistent.md"
-        f = _write_definition(defs_dir, data)
-
+    def test_whitespace_only_prompt_body(self, tmp_path: Path) -> None:
+        f = _write_md_definition(tmp_path, _minimal_valid_frontmatter(), prompt="   \n  \n")
         errors, record = validate_definition(f)
-        prompt_errors = [e for e in errors if e.field == "spec.promptFile"]
-        assert any("not found" in e.message for e in prompt_errors)
-
-    def test_prompt_file_exists_passes(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-        (defs_dir / "my-prompt.md").write_text("# hello")
-
-        data = _minimal_valid(defs_dir)
-        data["spec"]["promptFile"] = "my-prompt.md"
-        f = _write_definition(defs_dir, data)
-
-        errors, record = validate_definition(f)
-        prompt_errors = [e for e in errors if e.field == "spec.promptFile"]
-        assert prompt_errors == []
+        assert any(e.field == "(prompt)" for e in errors)
 
 
 # ---------------------------------------------------------------------------
-# validate_definition — spec.output.format
-# ---------------------------------------------------------------------------
-
-
-class TestValidateDefinitionOutputFormat:
-    def test_missing_output_section_is_ok(self, tmp_path: Path) -> None:
-        """spec.output is no longer required — schemas moved to pipeline categories."""
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        del data["spec"]["output"]
-        f = _write_definition(defs_dir, data)
-
-        errors, record = validate_definition(f)
-        # No output.format errors expected
-        output_errors = [e for e in errors if "output" in e.field]
-        assert output_errors == []
-
-    def test_output_format_still_accepted(self, tmp_path: Path) -> None:
-        """Having spec.output.format is still valid (backward compat)."""
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        f = _write_definition(defs_dir, data)
-
-        errors, record = validate_definition(f)
-        assert errors == []
-
-
-# ---------------------------------------------------------------------------
-# validate_definition — spec.priority
+# validate_definition — priority
 # ---------------------------------------------------------------------------
 
 
 class TestValidateDefinitionPriority:
     def test_priority_below_minimum(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["spec"]["priority"] = 0
-        f = _write_definition(defs_dir, data)
-
+        fm = _minimal_valid_frontmatter() + "priority: 0\n"
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        assert any(e.field == "spec.priority" for e in errors)
+        assert any(e.field == "priority" for e in errors)
 
     def test_priority_above_maximum(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["spec"]["priority"] = 101
-        f = _write_definition(defs_dir, data)
-
+        fm = _minimal_valid_frontmatter() + "priority: 101\n"
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        assert any(e.field == "spec.priority" for e in errors)
-
-    def test_priority_non_integer(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["spec"]["priority"] = "high"
-        f = _write_definition(defs_dir, data)
-
-        errors, record = validate_definition(f)
-        assert any(e.field == "spec.priority" for e in errors)
+        assert any(e.field == "priority" for e in errors)
 
     @pytest.mark.parametrize("prio", [1, 50, 100])
     def test_boundary_priorities_valid(self, tmp_path: Path, prio: int) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        data["spec"]["priority"] = prio
-        f = _write_definition(defs_dir, data)
-
+        fm = _minimal_valid_frontmatter() + f"priority: {prio}\n"
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
-        prio_errors = [e for e in errors if e.field == "spec.priority"]
+        prio_errors = [e for e in errors if e.field == "priority"]
         assert prio_errors == []
         assert record is not None
         assert record["priority"] == prio
 
     def test_priority_absent_defaults_to_50(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        data = _minimal_valid(defs_dir)
-        # no priority key in spec
-        f = _write_definition(defs_dir, data)
-
+        f = _write_md_definition(tmp_path, _minimal_valid_frontmatter())
         errors, record = validate_definition(f)
         assert errors == []
         assert record is not None
@@ -629,34 +405,20 @@ class TestValidateDefinitionPriority:
 
 class TestValidateDefinitionMultipleErrors:
     def test_multiple_errors_accumulated(self, tmp_path: Path) -> None:
-        defs_dir = tmp_path / "defs"
-        defs_dir.mkdir()
-
-        # Deliberately broken on several fields
-        data: dict[str, Any] = {
-            "apiVersion": "wrong/v1",
-            "kind": "WrongKind",
-            "metadata": {
-                "name": "BadName",  # not kebab-case
-                "version": "not-semver",
-                "description": "short",  # too short
-            },
-            "spec": {
-                "categories": [],
-                "output": {"format": "invalid"},
-            },
-        }
-        f = _write_definition(defs_dir, data)
-
+        fm = (
+            'name: BadName\n'
+            'version: "not-semver"\n'
+            'description: "short"\n'
+        )
+        f = _write_md_definition(tmp_path, fm)
         errors, record = validate_definition(f)
 
-        assert len(errors) >= 4
+        assert len(errors) >= 3
         assert record is None
         fields = {e.field for e in errors}
-        assert "apiVersion" in fields
-        assert "kind" in fields
-        assert "metadata.name" in fields
-        assert "metadata.version" in fields
+        assert "name" in fields
+        assert "version" in fields
+        assert "description" in fields
 
 
 # ---------------------------------------------------------------------------
@@ -675,14 +437,11 @@ class TestBuildRegistry:
             "name": name,
             "version": "1.0.0",
             "description": "Test agent",
-            "promptFile": "agent.md",
-            "definitionFile": f"{name}.yaml",
+            "definitionFile": f"{name}.md",
             "categories": categories,
             "priority": priority,
-            "triggers": {"produces": [], "consumes": []},
-            "capabilities": {},
             "resources": {},
-            "labels": {},
+            "tools": {},
         }
 
     def test_schema_version_present(self) -> None:

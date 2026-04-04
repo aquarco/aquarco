@@ -79,7 +79,15 @@ class TestSchemaEnums:
     ])
     def schema_categories_enum(self, request: pytest.FixtureRequest) -> list[str]:
         doc = _load_json(request.param)
-        items = doc["properties"]["spec"]["properties"]["categories"]["items"]
+        # Flat frontmatter schema — categories is a top-level property
+        if "categories" in doc.get("properties", {}):
+            items = doc["properties"]["categories"]["items"]
+        elif "oneOf" in doc:
+            # agent-definition-v1.json uses oneOf; extract from the categories branch
+            cats_branch = [b for b in doc["oneOf"] if "categories" in b.get("required", [])][0]
+            items = cats_branch["properties"]["categories"]["items"]
+        else:
+            raise KeyError("Cannot find categories enum in schema")
         return items["enum"]
 
     def test_schema_enum_matches_canonical(self, schema_categories_enum: list[str]) -> None:
@@ -219,18 +227,20 @@ class TestGenerateAgentDefinition:
 
 
 class TestAgentDefinitionFiles:
-    """Verify agent YAML definitions use only canonical category names."""
+    """Verify agent hybrid .md definitions use only canonical category names."""
 
     @pytest.fixture()
     def pipeline_agent_files(self) -> list[Path]:
         agents_dir = _REPO_ROOT / "config" / "agents" / "definitions" / "pipeline"
-        return list(agents_dir.glob("*.yaml")) + list(agents_dir.glob("*.yml"))
+        return list(agents_dir.glob("*.md"))
 
     def test_all_agent_categories_are_canonical(self, pipeline_agent_files: list[Path]) -> None:
         """Every pipeline agent's categories list uses only new names."""
+        from aquarco_supervisor.pipeline.agent_registry import _parse_md_agent_file
+
         for agent_file in pipeline_agent_files:
-            doc = yaml.safe_load(agent_file.read_text())
-            categories = doc.get("spec", {}).get("categories", [])
+            frontmatter, _ = _parse_md_agent_file(agent_file)
+            categories = frontmatter.get("categories", [])
             for cat in categories:
                 assert cat in CANONICAL_CATEGORIES, (
                     f"{agent_file.name}: category {cat!r} is not a canonical name"
@@ -238,9 +248,11 @@ class TestAgentDefinitionFiles:
 
     def test_no_agent_uses_old_category_names(self, pipeline_agent_files: list[Path]) -> None:
         """No pipeline agent uses the deprecated 'docs' or 'implementation' names."""
+        from aquarco_supervisor.pipeline.agent_registry import _parse_md_agent_file
+
         for agent_file in pipeline_agent_files:
-            doc = yaml.safe_load(agent_file.read_text())
-            categories = set(doc.get("spec", {}).get("categories", []))
+            frontmatter, _ = _parse_md_agent_file(agent_file)
+            categories = set(frontmatter.get("categories", []))
             assert categories.isdisjoint(OLD_CATEGORY_NAMES), (
                 f"{agent_file.name}: still uses old category names {categories & OLD_CATEGORY_NAMES}"
             )

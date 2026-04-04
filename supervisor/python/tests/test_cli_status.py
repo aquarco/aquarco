@@ -110,12 +110,13 @@ class TestGetRegistrySummary:
         assert result["agent_count"] == 0
         assert result["categories"] == []
 
-    def test_counts_yaml_files_when_no_registry_json(self, tmp_path: Path) -> None:
+    def test_counts_md_files_when_no_registry_json(self, tmp_path: Path) -> None:
         agents_dir = tmp_path / "agents" / "definitions"
-        agents_dir.mkdir(parents=True)
-        (agents_dir / "agent-a.yaml").write_text("name: a")
-        (agents_dir / "agent-b.yaml").write_text("name: b")
-        (agents_dir / "agent-c.yaml").write_text("name: c")
+        pipeline_dir = agents_dir / "pipeline"
+        pipeline_dir.mkdir(parents=True)
+        (pipeline_dir / "agent-a.md").write_text("---\nname: a\n---\n# Prompt\n")
+        (pipeline_dir / "agent-b.md").write_text("---\nname: b\n---\n# Prompt\n")
+        (pipeline_dir / "agent-c.md").write_text("---\nname: c\n---\n# Prompt\n")
 
         result = _get_registry_summary(str(agents_dir))
 

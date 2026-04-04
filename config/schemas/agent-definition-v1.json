@@ -2,54 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aquarco.agents/schemas/agent-definition-v1.json",
   "title": "AgentDefinition",
-  "description": "Schema for Aquarco agent definition YAML files (aquarco.agents/v1)",
+  "description": "Schema for Aquarco agent YAML frontmatter in hybrid .md definition files",
   "type": "object",
-  "required": ["apiVersion", "kind", "metadata", "spec"],
-  "additionalProperties": false,
-  "properties": {
-    "apiVersion": {
-      "type": "string",
-      "const": "aquarco.agents/v1",
-      "description": "API version — must be exactly aquarco.agents/v1"
-    },
-    "kind": {
-      "type": "string",
-      "const": "AgentDefinition",
-      "description": "Resource kind — must be exactly AgentDefinition"
-    },
-    "metadata": {
-      "type": "object",
-      "required": ["name", "version", "description"],
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*$",
-          "description": "Unique identifier in kebab-case"
-        },
-        "version": {
-          "type": "string",
-          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
-          "description": "Semantic version (semver 2.0.0 compatible)"
-        },
-        "description": {
-          "type": "string",
-          "minLength": 10,
-          "description": "Human-readable description of the agent's purpose"
-        },
-        "labels": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Arbitrary string labels for filtering and selection"
-        }
-      }
-    },
-    "spec": {
-      "type": "object",
-      "required": ["categories", "promptFile"],
-      "additionalProperties": false,
+  "required": ["name", "version", "description"],
+  "additionalProperties": true,
+  "oneOf": [
+    {
+      "required": ["categories"],
       "properties": {
         "categories": {
           "type": "array",
@@ -59,153 +18,145 @@
             "type": "string",
             "enum": ["review", "implement", "test", "design", "document", "analyze"]
           },
-          "description": "Task categories this agent handles"
+          "description": "Task categories this agent handles (pipeline agents)"
+        }
+      }
+    },
+    {
+      "required": ["role"],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["planner", "condition-evaluator", "repo-descriptor"],
+          "description": "Functional role (system agents)"
+        }
+      }
+    }
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Unique identifier in kebab-case"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+      "description": "Semantic version (semver 2.0.0 compatible)"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 10,
+      "description": "Human-readable description of the agent's purpose"
+    },
+    "model": {
+      "type": "string",
+      "enum": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5", "opus", "sonnet", "haiku"],
+      "description": "Claude model to use for this agent. When omitted, the CLI uses its default model."
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 50,
+      "description": "Priority within category — lower value means higher priority"
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true,
+          "description": "Whitelist of allowed tool names"
         },
-        "priority": {
+        "denied": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true,
+          "description": "Blacklist of denied tool names"
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "Maximum tokens per agent invocation"
+        },
+        "timeoutMinutes": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 100,
-          "default": 50,
-          "description": "Priority within category — lower value means higher priority"
+          "maximum": 480,
+          "description": "Execution timeout in minutes"
         },
-        "promptFile": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Filename of the system prompt markdown (relative to agents/prompts/)"
+        "maxConcurrent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Maximum concurrent instances of this agent"
         },
-        "tools": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "type": "array",
-              "items": { "type": "string" },
-              "uniqueItems": true,
-              "description": "Whitelist of allowed tool names — if omitted, all tools are allowed"
-            },
-            "denied": {
-              "type": "array",
-              "items": { "type": "string" },
-              "uniqueItems": true,
-              "description": "Blacklist of denied tool names — takes precedence over allowed"
-            }
-          }
+        "memoryMB": {
+          "type": "integer",
+          "minimum": 128,
+          "description": "Memory limit for the agent process in megabytes"
         },
-        "resources": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "maxTokens": {
-              "type": "integer",
-              "minimum": 1000,
-              "description": "Maximum tokens per agent invocation"
-            },
-            "timeoutMinutes": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 480,
-              "description": "Execution timeout in minutes"
-            },
-            "maxConcurrent": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 10,
-              "description": "Maximum concurrent instances of this agent"
-            },
-            "memoryMB": {
-              "type": "integer",
-              "minimum": 128,
-              "description": "Memory limit for the agent process in megabytes"
-            },
-            "maxTurns": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 200,
-              "default": 30,
-              "description": "Maximum conversation turns per Claude CLI invocation"
-            },
-            "maxCost": {
-              "type": "number",
-              "minimum": 0.01,
-              "default": 5.0,
-              "description": "Maximum cumulative cost in USD per stage (including continuations after max_turns)"
-            }
-          }
+        "maxTurns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 30,
+          "description": "Maximum conversation turns per Claude CLI invocation"
         },
-        "environment": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Environment variables passed to the agent process"
+        "maxCost": {
+          "type": "number",
+          "minimum": 0.01,
+          "default": 5.0,
+          "description": "Maximum cumulative cost in USD per stage"
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Environment variables passed to the agent process"
+    },
+    "healthCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
         },
-        "output": {
-          "type": "object",
-          "required": ["format"],
-          "additionalProperties": false,
-          "properties": {
-            "format": {
-              "type": "string",
-              "enum": ["task-file", "github-pr-comment", "commit", "issue", "none"],
-              "description": "Primary output mechanism for agent results"
-            },
-            "mustInclude": {
-              "type": "array",
-              "items": { "type": "string" },
-              "description": "Field names that must be present in the agent's output"
-            }
-          }
+        "intervalSeconds": {
+          "type": "integer",
+          "minimum": 30,
+          "default": 300
+        }
+      }
+    },
+    "conditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "filePatterns": {
+          "type": "array",
+          "items": { "type": "string" }
         },
-        "outputSchema": {
-          "type": "object",
-          "description": "JSON Schema object describing the structured output contract for downstream agents",
-          "properties": {
-            "type": { "type": "string" },
-            "required": {
-              "type": "array",
-              "items": { "type": "string" }
-            },
-            "properties": { "type": "object" }
-          }
+        "branchPatterns": {
+          "type": "array",
+          "items": { "type": "string" }
         },
-        "healthCheck": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": {
-              "type": "boolean",
-              "default": true,
-              "description": "Whether the supervisor polls this agent's health"
-            },
-            "intervalSeconds": {
-              "type": "integer",
-              "minimum": 30,
-              "default": 300,
-              "description": "How often (seconds) to run the health check"
-            }
-          }
-        },
-        "conditions": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Conditional activation constraints",
-          "properties": {
-            "filePatterns": {
-              "type": "array",
-              "items": { "type": "string" },
-              "description": "Glob patterns — agent only activates when matching files are changed"
-            },
-            "branchPatterns": {
-              "type": "array",
-              "items": { "type": "string" },
-              "description": "Regex patterns — agent only activates on matching branch names"
-            },
-            "labels": {
-              "type": "array",
-              "items": { "type": "string" },
-              "description": "Issue/PR labels — agent only activates when at least one label matches"
-            }
-          }
+        "labels": {
+          "type": "array",
+          "items": { "type": "string" }
         }
       }
     }

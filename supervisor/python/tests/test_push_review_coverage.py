@@ -163,22 +163,23 @@ async def test_flat_scan_discovery_loads_model(tmp_path: Path) -> None:
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir(parents=True)
 
-    agent_defn = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "flat-model-agent"},
-        "spec": {
-            "model": "claude-sonnet-4-6",
-            "categories": ["implementation"],
-            "priority": 10,
-        },
-    }
-    (agents_dir / "flat-model-agent.yaml").write_text(yaml.dump(agent_defn))
+    agent_md = (
+        "---\n"
+        "name: flat-model-agent\n"
+        "model: claude-sonnet-4-6\n"
+        "categories:\n"
+        "  - implementation\n"
+        "priority: 10\n"
+        "---\n"
+        "# Flat model agent prompt\n"
+    )
+    (agents_dir / "flat-model-agent.md").write_text(agent_md)
 
     db = AsyncMock(spec=Database)
     db.fetch_all = AsyncMock(return_value=[])
     db.execute = AsyncMock(return_value=None)
 
-    reg = AgentRegistry(db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(db, str(agents_dir))
     await reg.load(str(tmp_path / "nonexistent-registry.json"))
 
     assert reg.get_agent_model("flat-model-agent") == "claude-sonnet-4-6"
@@ -190,21 +191,22 @@ async def test_flat_scan_discovery_model_absent_returns_none(tmp_path: Path) -> 
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir(parents=True)
 
-    agent_defn = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "no-model-agent"},
-        "spec": {
-            "categories": ["review"],
-            "priority": 20,
-        },
-    }
-    (agents_dir / "no-model-agent.yaml").write_text(yaml.dump(agent_defn))
+    agent_md = (
+        "---\n"
+        "name: no-model-agent\n"
+        "categories:\n"
+        "  - review\n"
+        "priority: 20\n"
+        "---\n"
+        "# No model agent prompt\n"
+    )
+    (agents_dir / "no-model-agent.md").write_text(agent_md)
 
     db = AsyncMock(spec=Database)
     db.fetch_all = AsyncMock(return_value=[])
     db.execute = AsyncMock(return_value=None)
 
-    reg = AgentRegistry(db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(db, str(agents_dir))
     await reg.load(str(tmp_path / "nonexistent-registry.json"))
 
     assert reg.get_agent_model("no-model-agent") is None
@@ -481,7 +483,7 @@ async def test_autoloaded_agent_model_from_db(tmp_path: Path) -> None:
     system_dir.mkdir(parents=True)
     pipeline_dir.mkdir(parents=True)
 
-    reg = AgentRegistry(db, str(agents_dir), str(tmp_path / "prompts"))
+    reg = AgentRegistry(db, str(agents_dir))
     await reg.load(str(tmp_path / "nonexistent-registry.json"))
 
     assert reg.get_agent_model("auto-agent") == "claude-opus-4"

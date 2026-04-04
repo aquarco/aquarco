@@ -333,10 +333,26 @@ def test_condition_evaluator_md_schema_matches_inline_schema() -> None:
     # Locate the prompt file relative to the repo root (four levels up from this file)
     this_file = Path(__file__)
     repo_root = this_file.parents[4]  # tests/test_pipeline/ -> tests/ -> python/ -> supervisor/ -> repo root
-    prompt_file = repo_root / "config" / "agents" / "prompts" / "condition-evaluator-agent.md"
+    prompt_file = repo_root / "config" / "agents" / "definitions" / "system" / "condition-evaluator-agent.md"
 
     assert prompt_file.exists(), f"Prompt file not found: {prompt_file}"
-    content = prompt_file.read_text()
+    raw_content = prompt_file.read_text()
+
+    # Strip YAML frontmatter (between --- delimiters) to get just the Markdown body
+    if raw_content.startswith("---"):
+        after_open = raw_content[3:]
+        if after_open.startswith("\n"):
+            after_open = after_open[1:]
+        close_idx = after_open.find("\n---")
+        if close_idx != -1:
+            body_start = close_idx + 4  # len("\n---")
+            content = after_open[body_start:]
+            if content.startswith("\n"):
+                content = content[1:]
+        else:
+            content = raw_content
+    else:
+        content = raw_content
 
     # Extract the first JSON code block from the markdown file
     match = _re.search(r"```json\s*([\s\S]*?)```", content)

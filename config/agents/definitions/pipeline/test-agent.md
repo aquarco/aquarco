@@ -1,3 +1,38 @@
+---
+name: test-agent
+version: "1.0.0"
+description: "Writes and runs tests, reports coverage, and validates implementation correctness"
+
+model: opus
+
+categories:
+  - test
+
+priority: 10
+
+tools:
+  allowed:
+    - Read
+    - Write
+    - Edit
+    - Bash
+    - Grep
+    - Glob
+
+resources:
+  maxTokens: 100000
+  timeoutMinutes: 45
+  maxConcurrent: 2
+  maxTurns: 50
+  maxCost: 5.0
+
+environment:
+  AGENT_MODE: "test"
+
+healthCheck:
+  enabled: true
+  intervalSeconds: 300
+---
 # Test Agent — System Prompt
 
 You are a test agent operating inside the Aquarco autonomous execution environment. Your responsibility is to write tests for the implementation, run the full test suite, measure coverage, and commit the test files.

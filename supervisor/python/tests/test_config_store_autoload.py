@@ -11,8 +11,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from aquarco_supervisor.config_store import (
-    AGENT_API_VERSION,
-    AGENT_KIND,
     deactivate_autoloaded_agents,
     read_autoloaded_agents_from_db,
 )
@@ -79,8 +77,8 @@ async def test_deactivate_only_active_agents():
 
 
 @pytest.mark.asyncio
-async def test_read_autoloaded_agents_returns_yaml_dicts():
-    """Returns full YAML-ready dicts with correct structure."""
+async def test_read_autoloaded_agents_returns_flat_dicts():
+    """Returns flat frontmatter-style dicts with correct structure."""
     db = AsyncMock()
     db.fetch_all = AsyncMock(return_value=[
         {
@@ -97,13 +95,11 @@ async def test_read_autoloaded_agents_returns_yaml_dicts():
 
     assert len(docs) == 1
     doc = docs[0]
-    assert doc["apiVersion"] == AGENT_API_VERSION
-    assert doc["kind"] == AGENT_KIND
-    assert doc["metadata"]["name"] == "repo-agent-a"
-    assert doc["metadata"]["version"] == "1.0.0"
-    assert doc["metadata"]["description"] == "Agent A"
-    assert doc["metadata"]["labels"]["source"] == "autoloaded"
-    assert doc["spec"]["categories"] == ["test"]
+    assert doc["name"] == "repo-agent-a"
+    assert doc["version"] == "1.0.0"
+    assert doc["description"] == "Agent A"
+    assert doc["labels"]["source"] == "autoloaded"
+    assert doc["categories"] == ["test"]
 
 
 @pytest.mark.asyncio
@@ -156,9 +152,9 @@ async def test_read_autoloaded_agents_multiple():
     docs = await read_autoloaded_agents_from_db(db, "repo")
 
     assert len(docs) == 2
-    assert docs[0]["metadata"]["name"] == "alpha-agent"
-    assert docs[1]["metadata"]["name"] == "beta-agent"
+    assert docs[0]["name"] == "alpha-agent"
+    assert docs[1]["name"] == "beta-agent"
     # Alpha has no labels
-    assert "labels" not in docs[0]["metadata"]
+    assert "labels" not in docs[0]
     # Beta has labels
-    assert docs[1]["metadata"]["labels"] == {"key": "val"}
+    assert docs[1]["labels"] == {"key": "val"}

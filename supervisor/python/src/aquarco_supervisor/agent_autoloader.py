@@ -1,9 +1,9 @@
 """Autoload repository-specific agents from .claude/agents/*.md files.
 
 Scans a repository's .claude/agents/ directory for markdown agent prompts,
-analyzes them (optionally via Claude CLI), generates aquarco agent definition
-YAML files, writes them to aquarco-config/agents/ in the repo, and stores
-them in the database with source='autoload:<repo_name>'.
+analyzes them (optionally via Claude CLI), generates aquarco agent definitions,
+writes them as hybrid .md files to aquarco-config/agents/ in the repo, and
+stores them in the database with source='autoload:<repo_name>'.
 """
 
 from __future__ import annotations
@@ -202,7 +202,10 @@ def write_aquarco_config(
     repo_path: Path,
     definitions: list[dict[str, Any]],
 ) -> int:
-    """Write generated agent definition YAML files to aquarco-config/agents/.
+    """Write generated agent definition hybrid .md files to aquarco-config/agents/.
+
+    Each file uses YAML frontmatter + the inline prompt body, compatible with
+    ``_discover_agents_from_dir()`` which globs ``*.md``.
 
     Returns the number of files written.
     """
@@ -211,14 +214,32 @@ def write_aquarco_config(
 
     count = 0
     for defn in definitions:
-        name = defn.get("metadata", {}).get("name", "")
+        meta = defn.get("metadata", {})
+        spec = defn.get("spec", {})
+        name = meta.get("name", "")
         if not name:
             continue
 
-        out_path = config_dir / f"{name}.yaml"
-        out_path.write_text(
-            yaml.dump(defn, default_flow_style=False, sort_keys=False)
-        )
+        # Build flat frontmatter from k8s-style definition
+        frontmatter: dict[str, Any] = {
+            "name": name,
+            "version": meta.get("version", "1.0.0"),
+            "description": meta.get("description", ""),
+        }
+        if meta.get("labels"):
+            frontmatter["labels"] = meta["labels"]
+        # Copy spec fields (except promptInline which becomes the body)
+        for key, value in spec.items():
+            if key != "promptInline":
+                frontmatter[key] = value
+
+        # Use inline prompt as body, or generate a placeholder
+        prompt_body = spec.get("promptInline", f"# {name}\n\nAutoloaded agent definition.\n")
+
+        # Write hybrid .md file
+        out_path = config_dir / f"{name}.md"
+        frontmatter_yaml = yaml.dump(frontmatter, default_flow_style=False, sort_keys=False)
+        out_path.write_text(f"---\n{frontmatter_yaml}---\n{prompt_body}")
         count += 1
         log.debug("agent_definition_written", agent=name, path=str(out_path))
 

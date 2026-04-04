@@ -362,7 +362,7 @@ def test_generate_agent_definition_default_tools_fallback():
 
 
 def test_write_aquarco_config(tmp_path: Path):
-    """AC: Scanning creates agent definition YAML files in <repo>/aquarco-config/agents/."""
+    """AC: Scanning creates hybrid .md agent definition files in <repo>/aquarco-config/agents/."""
     definitions = [
         {
             "apiVersion": "aquarco.agents/v1",
@@ -382,8 +382,8 @@ def test_write_aquarco_config(tmp_path: Path):
     assert count == 2
 
     config_dir = tmp_path / "aquarco-config" / "agents"
-    assert (config_dir / "my-repo-agent-a.yaml").exists()
-    assert (config_dir / "my-repo-agent-b.yaml").exists()
+    assert (config_dir / "my-repo-agent-a.md").exists()
+    assert (config_dir / "my-repo-agent-b.md").exists()
 
 
 def test_write_aquarco_config_creates_directory(tmp_path: Path):
@@ -400,8 +400,8 @@ def test_write_aquarco_config_creates_directory(tmp_path: Path):
     assert (tmp_path / "aquarco-config" / "agents").is_dir()
 
 
-def test_write_aquarco_config_valid_yaml(tmp_path: Path):
-    """Written YAML files can be parsed back correctly."""
+def test_write_aquarco_config_valid_md(tmp_path: Path):
+    """Written hybrid .md files have valid frontmatter that can be parsed back."""
     defn = {
         "apiVersion": "aquarco.agents/v1",
         "kind": "AgentDefinition",
@@ -411,12 +411,15 @@ def test_write_aquarco_config_valid_yaml(tmp_path: Path):
 
     write_aquarco_config(tmp_path, [defn])
 
-    written = yaml.safe_load(
-        (tmp_path / "aquarco-config" / "agents" / "roundtrip.yaml").read_text()
-    )
-    assert written["apiVersion"] == "aquarco.agents/v1"
-    assert written["kind"] == "AgentDefinition"
-    assert written["metadata"]["name"] == "roundtrip"
+    md_file = tmp_path / "aquarco-config" / "agents" / "roundtrip.md"
+    content = md_file.read_text()
+    assert content.startswith("---\n")
+    # Parse the frontmatter
+    parts = content.split("---\n", 2)
+    frontmatter = yaml.safe_load(parts[1])
+    assert frontmatter["name"] == "roundtrip"
+    assert frontmatter["version"] == "1.0.0"
+    assert frontmatter["categories"] == ["test"]
 
 
 def test_write_aquarco_config_skips_nameless(tmp_path: Path):
@@ -790,8 +793,8 @@ async def test_autoload_repo_agents_with_3_agents(tmp_path: Path):
 
     # Verify aquarco-config was written
     config_dir = tmp_path / "aquarco-config" / "agents"
-    yaml_files = list(config_dir.glob("*.yaml"))
-    assert len(yaml_files) == 3
+    md_files = list(config_dir.glob("*.md"))
+    assert len(md_files) == 3
 
 
 @pytest.mark.asyncio
@@ -1003,17 +1006,18 @@ async def test_full_pipeline_3_agents(tmp_path: Path):
     assert result["agents_created"] == 3
     assert result["error"] is None
 
-    # Verify YAML files
+    # Verify hybrid .md files
     config_dir = tmp_path / "aquarco-config" / "agents"
-    for yaml_file in config_dir.glob("*.yaml"):
-        doc = yaml.safe_load(yaml_file.read_text())
-        assert doc["apiVersion"] == "aquarco.agents/v1"
-        assert doc["kind"] == "AgentDefinition"
-        assert doc["metadata"]["name"].startswith("acme-")
-        assert doc["metadata"]["labels"]["repository"] == "acme"
-        assert doc["metadata"]["labels"]["source"] == "autoloaded"
-        assert "categories" in doc["spec"]
-        assert "tools" in doc["spec"]
+    for md_file in config_dir.glob("*.md"):
+        content = md_file.read_text()
+        assert content.startswith("---\n")
+        parts = content.split("---\n", 2)
+        doc = yaml.safe_load(parts[1])
+        assert doc["name"].startswith("acme-")
+        assert doc["labels"]["repository"] == "acme"
+        assert doc["labels"]["source"] == "autoloaded"
+        assert "categories" in doc
+        assert "tools" in doc
 
 
 @pytest.mark.asyncio

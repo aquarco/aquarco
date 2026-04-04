@@ -119,7 +119,7 @@ def _get_registry_summary(agents_dir: str) -> dict[str, Any]:
         except (json.JSONDecodeError, KeyError, TypeError):
             pass
     elif agents_path.exists():
-        agent_count = sum(1 for _ in agents_path.glob("*.yaml"))
+        agent_count = sum(1 for _ in agents_path.rglob("*.md"))
 
     return {"agent_count": agent_count, "categories": categories}
 

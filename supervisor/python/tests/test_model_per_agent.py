@@ -74,9 +74,9 @@ def test_schema_has_model_field(schema_file: str) -> None:
     if not path.exists():
         pytest.skip(f"Schema file not found at {path}")
     schema = json.loads(path.read_text())
-    spec_props = schema["properties"]["spec"]["properties"]
-    assert "model" in spec_props, f"model field missing from {schema_file}"
-    assert spec_props["model"]["type"] == "string"
+    props = schema["properties"]
+    assert "model" in props, f"model field missing from {schema_file}"
+    assert props["model"]["type"] == "string"
 
 
 # ===========================================================================
@@ -86,25 +86,24 @@ def test_schema_has_model_field(schema_file: str) -> None:
 DEFINITIONS_DIR = Path(__file__).resolve().parents[3] / "config" / "agents" / "definitions"
 
 
-def _collect_yaml_definitions() -> list[Path]:
+def _collect_md_definitions() -> list[Path]:
     if not DEFINITIONS_DIR.exists():
         return []
-    return list(DEFINITIONS_DIR.rglob("*.yaml"))
+    return list(DEFINITIONS_DIR.rglob("*.md"))
 
 
 @pytest.mark.parametrize(
-    "yaml_path",
-    _collect_yaml_definitions(),
+    "md_path",
+    _collect_md_definitions(),
     ids=lambda p: str(p.relative_to(DEFINITIONS_DIR)),
 )
-def test_yaml_definition_has_model(yaml_path: Path) -> None:
-    """Every agent definition YAML must include a model field in spec."""
-    raw = yaml.safe_load(yaml_path.read_text())
-    if not isinstance(raw, dict) or raw.get("kind") != "AgentDefinition":
-        pytest.skip("Not an AgentDefinition")
-    spec = raw.get("spec", {})
-    assert "model" in spec, f"{yaml_path.name} is missing spec.model"
-    assert isinstance(spec["model"], str) and len(spec["model"]) > 0
+def test_md_definition_has_model(md_path: Path) -> None:
+    """Every agent definition .md must include a model field in frontmatter."""
+    from aquarco_supervisor.pipeline.agent_registry import _parse_md_agent_file
+
+    frontmatter, _ = _parse_md_agent_file(md_path)
+    assert "model" in frontmatter, f"{md_path.name} is missing model in frontmatter"
+    assert isinstance(frontmatter["model"], str) and len(frontmatter["model"]) > 0
 
 
 # ===========================================================================
@@ -147,35 +146,34 @@ def test_registry_get_agent_model_empty_string_returns_none(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
-async def test_discover_agents_loads_model_from_yaml(tmp_path: Path) -> None:
-    """YAML discovery preserves the model field in the loaded spec."""
+async def test_discover_agents_loads_model_from_md(tmp_path: Path) -> None:
+    """Hybrid .md discovery preserves the model field in the loaded spec."""
     agents_dir = tmp_path / "agents"
     system_dir = agents_dir / "system"
     pipeline_dir = agents_dir / "pipeline"
     system_dir.mkdir(parents=True)
     pipeline_dir.mkdir(parents=True)
 
-    defn = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "impl-agent"},
-        "spec": {
-            "model": "claude-opus-4",
-            "categories": ["implement"],
-            "promptFile": "impl.md",
-        },
-    }
-    (pipeline_dir / "impl-agent.yaml").write_text(yaml.dump(defn))
+    pipeline_md = (
+        "---\n"
+        "name: impl-agent\n"
+        "model: claude-opus-4\n"
+        "categories:\n"
+        "  - implement\n"
+        "---\n"
+        "# Implementation prompt\n"
+    )
+    (pipeline_dir / "impl-agent.md").write_text(pipeline_md)
 
-    sys_defn = {
-        "kind": "AgentDefinition",
-        "metadata": {"name": "planner"},
-        "spec": {
-            "model": "claude-haiku-4-5",
-            "role": "planner",
-            "promptFile": "planner.md",
-        },
-    }
-    (system_dir / "planner.yaml").write_text(yaml.dump(sys_defn))
+    system_md = (
+        "---\n"
+        "name: planner\n"
+        "model: claude-haiku-4-5\n"
+        "role: planner\n"
+        "---\n"
+        "# Planner prompt\n"
+    )
+    (system_dir / "planner.md").write_text(system_md)
 
     db = AsyncMock(spec=Database)
     db.fetch_all = AsyncMock(return_value=[])

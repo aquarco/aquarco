@@ -154,8 +154,10 @@ class ScopedAgentView:
 
         Resolution order:
         1. ``promptInline`` → written to a tempfile.
-        2. ``promptFile`` resolved relative to the agent's ``_definition_file``
-           parent directory (for YAML-discovered agents) or ``_config_base``
+        2. Hybrid ``.md`` definition file (no ``promptFile`` key) → return the
+           definition file path directly.
+        3. ``promptFile`` resolved relative to the agent's ``_definition_file``
+           parent directory (for discovered agents) or ``_config_base``
            (for overlay agents).
 
         If the agent spec has promptInline, writes it to a tempfile.
@@ -175,15 +177,19 @@ class ScopedAgentView:
             self._temp_files.append(path)
             return path
 
-        # File-based prompt: resolve relative to definition file or config base
-        prompt_file_name = (
+        # Hybrid .md file without an explicit promptFile → the definition IS the prompt
+        definition_file = spec.get("_definition_file")
+        has_prompt_file = (
             spec.get("promptFile")
             or spec.get("spec", {}).get("promptFile")
-            or f"{agent_name}.md"
         )
+        if definition_file and definition_file.endswith(".md") and not has_prompt_file:
+            return Path(definition_file).resolve()
+
+        # File-based prompt: resolve relative to definition file or config base
+        prompt_file_name = has_prompt_file or f"{agent_name}.md"
 
         # Determine base directory for resolution
-        definition_file = spec.get("_definition_file")
         config_base = spec.get("_config_base")
         if definition_file:
             base_dir = Path(definition_file).parent
@@ -196,6 +202,23 @@ class ScopedAgentView:
             )
 
         return (base_dir / prompt_file_name).resolve()
+
+    def get_agent_prompt_content(self, agent_name: str) -> str | None:
+        """Return the embedded Markdown prompt body from a hybrid .md file.
+
+        Returns ``None`` for agents without an embedded prompt.
+        """
+        spec = self._resolved.agents.get(agent_name, {})
+        definition_file = spec.get("_definition_file")
+        if not definition_file or not definition_file.endswith(".md"):
+            return None
+        try:
+            from .pipeline.agent_registry import _parse_md_agent_file
+
+            _frontmatter, prompt_body = _parse_md_agent_file(Path(definition_file))
+            return prompt_body.strip() or None
+        except (ValueError, yaml.YAMLError, OSError):
+            return None
 
     def get_agent_model(self, agent_name: str) -> str | None:
         """Get the model for an agent from resolved config, or None if not set."""

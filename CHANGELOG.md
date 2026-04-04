@@ -1,5 +1,20 @@
 # Changelog
 
+## [2026-04-03] — Merge agent definition and prompt file (#69)
+
+### Changed
+- **Agent file format** — agent definitions and system prompts now merged into single hybrid `.md` files with YAML frontmatter instead of separate YAML and markdown files
+  - Each agent is a single file in `config/agents/definitions/{system,pipeline}/agent-name.md`
+  - Frontmatter contains agent metadata (name, version, model, categories, tools, resources, environment)
+  - Markdown content contains the full system prompt
+- **Agent registry parsing** (`supervisor/python/src/aquarco_supervisor/pipeline/agent_registry.py`) — updated `_discover_agents_from_dir()` to glob `.md` files and extract YAML frontmatter instead of reading separate `.yaml` files
+- **Schema validation** (`config/schemas/`) — agent-definition-v1.json, system-agent-v1.json, and pipeline-agent-v1.json updated to validate flat frontmatter format instead of Kubernetes-style envelope
+- **Removed** — `config/agents/prompts/` directory (prompts now inline in `.md` files)
+
+### Migration
+- All 9 existing agents (3 system + 6 pipeline) migrated to new hybrid format
+- Agent discovery logic enhanced to handle both `role` (system agents) and `categories` (pipeline agents) in frontmatter
+
 ## [2026-04-03] — Aquarco CLI enhancements (#71)
 
 ### Added

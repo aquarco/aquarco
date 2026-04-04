@@ -1,8 +1,8 @@
 """Serialize agent/pipeline definitions to DB and deserialize back to config files.
 
 Two directions:
-  - config → DB:  load YAML files, validate against JSON schema, upsert into DB
-  - DB → config:  read from DB, validate against JSON schema, write YAML files
+  - config → DB:  load hybrid .md files, validate against JSON schema, upsert into DB
+  - DB → config:  read from DB, validate against JSON schema, write hybrid .md files
 
 Versioning:
   - Each definition is keyed by (name, version).
@@ -23,6 +23,7 @@ import yaml
 
 from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES as _SYSTEM_AGENT_NAMES
 from aquarco_supervisor.database import Database
+from aquarco_supervisor.pipeline.agent_registry import _parse_md_agent_file
 
 log = structlog.get_logger()
 
@@ -59,45 +60,56 @@ def validate_pipeline_definition(doc: dict[str, Any], schema: dict[str, Any]) ->
 
 
 # ---------------------------------------------------------------------------
-# Config → DB  (deserialize YAML files and store in database)
+# Config → DB  (deserialize hybrid .md files and store in database)
 # ---------------------------------------------------------------------------
+
+def _parse_md_frontmatter(path: Path) -> dict[str, Any]:
+    """Parse YAML frontmatter from a hybrid .md agent file.
+
+    Delegates to :func:`_parse_md_agent_file` and discards the prompt body.
+
+    Returns the frontmatter as a dict.
+    Raises :class:`ValueError` on missing delimiters or non-dict YAML.
+    """
+    frontmatter, _prompt_body = _parse_md_agent_file(path)
+    return frontmatter
+
 
 def load_agent_definitions_from_files(
     agents_dir: Path,
     schema: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Read all agent YAML files from *agents_dir*, optionally validate, return
-    a list of parsed documents (each is a full YAML dict with apiVersion/kind/
-    metadata/spec).
+    """Read all agent ``.md`` files from *agents_dir*, parse YAML frontmatter,
+    optionally validate, and return a list of flat frontmatter dicts.
     """
     definitions: list[dict[str, Any]] = []
     if not agents_dir.is_dir():
         log.warning("agents_dir_not_found", path=str(agents_dir))
         return definitions
 
-    for yaml_file in sorted(agents_dir.glob("*.yaml")):
+    for md_file in sorted(agents_dir.glob("*.md")):
         try:
-            raw = yaml.safe_load(yaml_file.read_text())
-        except yaml.YAMLError:
-            log.warning("agent_yaml_parse_error", file=str(yaml_file))
+            frontmatter = _parse_md_frontmatter(md_file)
+        except (ValueError, yaml.YAMLError) as exc:
+            log.warning("agent_md_parse_error", file=str(md_file), error=str(exc))
             continue
 
-        if not isinstance(raw, dict) or raw.get("kind") != AGENT_KIND:
-            log.warning("agent_yaml_not_agent_definition", file=str(yaml_file))
+        if not frontmatter.get("name"):
+            log.warning("agent_md_missing_name", file=str(md_file))
             continue
 
         if schema is not None:
             try:
-                validate_agent_definition(raw, schema)
+                validate_agent_definition(frontmatter, schema)
             except jsonschema.ValidationError as exc:
                 log.warning(
-                    "agent_yaml_schema_invalid",
-                    file=str(yaml_file),
+                    "agent_md_schema_invalid",
+                    file=str(md_file),
                     error=exc.message,
                 )
                 continue
 
-        definitions.append(raw)
+        definitions.append(frontmatter)
 
     return definitions
 
@@ -128,11 +140,30 @@ async def store_agent_definitions(
         raise ValueError(
             f"Invalid agent_group {agent_group!r}. Must be 'system' or 'pipeline'."
         )
+    # Keys that live outside spec in the flat frontmatter format
+    _FLAT_META_KEYS = {"name", "version", "description", "labels"}
+
     count = 0
     for doc in definitions:
-        meta = doc.get("metadata", {})
-        name = meta.get("name", "")
-        version = meta.get("version", "0.0.0")
+        # Detect flat (frontmatter) vs k8s (metadata/spec) format
+        if "metadata" in doc:
+            # Legacy k8s-style document
+            meta = doc["metadata"]
+            name = meta.get("name", "")
+            version = meta.get("version", "0.0.0")
+            description = meta.get("description", "")
+            labels = meta.get("labels", {})
+            spec = doc.get("spec", {})
+        else:
+            # Flat frontmatter format
+            name = doc.get("name", "")
+            version = doc.get("version", "0.0.0")
+            description = doc.get("description", "")
+            labels = doc.get("labels", {})
+            spec = {
+                k: v for k, v in doc.items() if k not in _FLAT_META_KEYS
+            }
+
         if not name:
             continue
 
@@ -160,9 +191,9 @@ async def store_agent_definitions(
             {
                 "name": name,
                 "version": version,
-                "description": meta.get("description", ""),
-                "labels": json.dumps(meta.get("labels", {})),
-                "spec": json.dumps(doc.get("spec", {})),
+                "description": description,
+                "labels": json.dumps(labels),
+                "spec": json.dumps(spec),
                 "source": source,
                 "agent_group": agent_group,
             },
@@ -185,7 +216,7 @@ async def sync_agent_definitions_to_db(
     agents_dir: Path,
     schema_path: Path | None = None,
 ) -> int:
-    """High-level: load agent YAML files, validate, store in DB.
+    """High-level: load hybrid .md agent files, validate, store in DB.
 
     Returns the number of definitions stored.
     """
@@ -240,14 +271,14 @@ async def sync_all_agent_definitions_to_db(
     # validation and be silently excluded.
     all_defs = load_agent_definitions_from_files(agents_dir, schema=None)
 
-    sys_defs = [
-        d for d in all_defs
-        if d.get("metadata", {}).get("name", "") in _SYSTEM_AGENT_NAMES
-    ]
-    pipe_defs = [
-        d for d in all_defs
-        if d.get("metadata", {}).get("name", "") not in _SYSTEM_AGENT_NAMES
-    ]
+    def _agent_name(d: dict[str, Any]) -> str:
+        """Extract agent name from either flat or k8s format."""
+        if "metadata" in d:
+            return d["metadata"].get("name", "")
+        return d.get("name", "")
+
+    sys_defs = [d for d in all_defs if _agent_name(d) in _SYSTEM_AGENT_NAMES]
+    pipe_defs = [d for d in all_defs if _agent_name(d) not in _SYSTEM_AGENT_NAMES]
 
     count = await store_agent_definitions(db, sys_defs, agent_group="system")
     count += await store_agent_definitions(db, pipe_defs, agent_group="pipeline")
@@ -391,7 +422,10 @@ async def read_autoloaded_agents_from_db(
 ) -> list[dict[str, Any]]:
     """Fetch active autoloaded agents for a specific repository.
 
-    Returns full YAML-ready dicts for agents with source='autoload:<repo_name>'.
+    Returns flat frontmatter-style dicts for agents with
+    source='autoload:<repo_name>'.  The flat format matches what
+    ``_parse_md_frontmatter`` returns, so consumers don't need to handle
+    two different dict shapes.
     """
     rows = await db.fetch_all(
         """SELECT name, version, description, labels, spec, is_active
@@ -402,32 +436,35 @@ async def read_autoloaded_agents_from_db(
     )
     docs: list[dict[str, Any]] = []
     for row in rows:
+        spec = row["spec"] if isinstance(row["spec"], dict) else json.loads(row["spec"])
         doc: dict[str, Any] = {
-            "apiVersion": AGENT_API_VERSION,
-            "kind": AGENT_KIND,
-            "metadata": {
-                "name": row["name"],
-                "version": row["version"],
-                "description": row["description"],
-            },
-            "spec": row["spec"],
+            "name": row["name"],
+            "version": row["version"],
+            "description": row["description"],
         }
         labels = row.get("labels")
         if labels:
-            doc["metadata"]["labels"] = labels
+            doc["labels"] = labels
+        # Merge spec fields into flat dict
+        doc.update(spec)
         docs.append(doc)
     return docs
 
 
 # ---------------------------------------------------------------------------
-# DB → Config  (read from database and serialize to YAML files)
+# DB → Config  (read from database and serialize to hybrid .md files)
 # ---------------------------------------------------------------------------
 
 async def read_agent_definitions_from_db(
     db: Database,
     active_only: bool = True,
 ) -> list[dict[str, Any]]:
-    """Read agent definitions from DB and return as full YAML-ready dicts.
+    """Read agent definitions from DB and return as k8s-style dicts.
+
+    .. note:: Returns the legacy apiVersion/kind/metadata/spec envelope format
+       used internally for DB storage.  Callers that need flat frontmatter dicts
+       (e.g. for schema validation or file export) must convert via
+       :func:`export_agent_definitions_to_files` which handles the mapping.
 
     Args:
         active_only: If True (default), return only the active version of each
@@ -465,14 +502,16 @@ async def export_agent_definitions_to_files(
     agents_dir: Path,
     schema: dict[str, Any] | None = None,
 ) -> int:
-    """Read active agent definitions from DB, validate against schema, write
-    YAML files.
+    """Read active agent definitions from DB, validate, and write hybrid .md files.
+
+    Each exported file uses the hybrid format (YAML frontmatter + empty prompt
+    placeholder) so that ``_discover_agents_from_dir()`` can re-import them.
 
     Returns the number of files written.
 
     .. warning:: **Not group-preserving.**
         ``agent_group`` is stored only in the database and is intentionally
-        excluded from the exported YAML documents (to keep the schema clean).
+        excluded from the exported documents (to keep the schema clean).
         All files are written into ``agents_dir`` as a flat list — the
         ``system/`` vs ``pipeline/`` subdirectory split is lost.
 
@@ -484,7 +523,7 @@ async def export_agent_definitions_to_files(
 
         **Migration guide**: If you need a group-preserving backup/restore,
         query the DB directly including the ``agent_group`` column, or copy the
-        source YAML files from ``config/agents/definitions/system/`` and
+        source .md files from ``config/agents/definitions/system/`` and
         ``config/agents/definitions/pipeline/`` instead of using this function.
     """
     agents_dir.mkdir(parents=True, exist_ok=True)
@@ -492,22 +531,42 @@ async def export_agent_definitions_to_files(
     docs = await read_agent_definitions_from_db(db, active_only=True)
     count = 0
     for doc in docs:
+        meta = doc.get("metadata", {})
+        spec = doc.get("spec", {})
+        name = meta.get("name", "")
+
+        # Build flat frontmatter from k8s-style doc
+        frontmatter: dict[str, Any] = {
+            "name": name,
+            "version": meta.get("version", "0.0.0"),
+            "description": meta.get("description", ""),
+        }
+        if meta.get("labels"):
+            frontmatter["labels"] = meta["labels"]
+        # Copy spec fields into frontmatter (flat format)
+        for key, value in spec.items():
+            if key != "promptInline":
+                frontmatter[key] = value
+
+        # Extract inline prompt if present, otherwise use a placeholder
+        prompt_body = spec.get("promptInline", f"# {name}\n\nExported agent definition.\n")
+
+        # Validate the flat frontmatter dict (not the k8s envelope)
         if schema is not None:
             try:
-                validate_agent_definition(doc, schema)
+                validate_agent_definition(frontmatter, schema)
             except jsonschema.ValidationError as exc:
                 log.warning(
                     "agent_db_schema_invalid",
-                    agent=doc["metadata"]["name"],
+                    agent=name,
                     error=exc.message,
                 )
                 continue
 
-        name = doc["metadata"]["name"]
-        out_path = agents_dir / f"{name}.yaml"
-        out_path.write_text(
-            yaml.dump(doc, default_flow_style=False, sort_keys=False)
-        )
+        # Write hybrid .md file
+        out_path = agents_dir / f"{name}.md"
+        frontmatter_yaml = yaml.dump(frontmatter, default_flow_style=False, sort_keys=False)
+        out_path.write_text(f"---\n{frontmatter_yaml}---\n{prompt_body}")
         count += 1
         log.debug("agent_definition_exported", agent=name, path=str(out_path))
 

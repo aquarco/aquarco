@@ -15,6 +15,49 @@ from ..logging import get_logger
 log = get_logger("agent-registry")
 
 
+def _parse_md_agent_file(path: Path) -> tuple[dict, str]:
+    """Split a hybrid .md agent file into (frontmatter_dict, prompt_body).
+
+    The file format is::
+
+        ---
+        <YAML frontmatter>
+        ---
+        <Markdown prompt body>
+
+    Raises :class:`ValueError` on missing delimiters or non-dict YAML.
+    """
+    content = path.read_text()
+
+    if not content.startswith("---"):
+        raise ValueError(f"Missing opening '---' delimiter in {path}")
+
+    # Find the closing delimiter (second '---' line)
+    after_open = content[3:]
+    # Skip past the newline after opening ---
+    if after_open.startswith("\n"):
+        after_open = after_open[1:]
+
+    close_idx = after_open.find("\n---")
+    if close_idx == -1:
+        raise ValueError(f"Missing closing '---' delimiter in {path}")
+
+    frontmatter_text = after_open[:close_idx]
+    # Prompt body starts after the closing --- and its newline
+    body_start = close_idx + 4  # len("\n---")
+    prompt_body = after_open[body_start:]
+    if prompt_body.startswith("\n"):
+        prompt_body = prompt_body[1:]
+
+    parsed = yaml.safe_load(frontmatter_text)
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f"Frontmatter in {path} did not parse as a dict (got {type(parsed).__name__})"
+        )
+
+    return parsed, prompt_body
+
+
 class AgentRegistry:
     """Manages agent definitions, capacity, and instance tracking."""
 
@@ -24,7 +67,7 @@ class AgentRegistry:
         self._agents: dict[str, dict[str, Any]] = {}
 
     async def load(self, registry_file: str | None = None) -> None:
-        """Load agent registry from JSON file or discover from YAML definitions.
+        """Load agent registry from JSON file or discover from hybrid .md definitions.
 
         Also loads autoloaded agents from the database for all registered
         repositories.
@@ -54,7 +97,7 @@ class AgentRegistry:
         log.info("registry_loaded", agent_count=len(self._agents))
 
     async def _discover_agents(self) -> None:
-        """Discover agents from YAML definition files.
+        """Discover agents from hybrid .md definition files.
 
         When ``agents_dir/system/`` and ``agents_dir/pipeline/`` subdirectories
         exist, scans each with the appropriate group tag.  Falls back to a flat
@@ -75,36 +118,32 @@ class AgentRegistry:
             # Flat scan — infer group from name
             from ..constants import SYSTEM_AGENT_NAMES as _SYSTEM_AGENT_NAMES  # noqa: PLC0415
 
-            for yaml_file in sorted(self._agents_dir.glob("*.yaml")):
+            for md_file in sorted(self._agents_dir.glob("*.md")):
                 try:
-                    raw = yaml.safe_load(yaml_file.read_text())
-                    if not isinstance(raw, dict) or raw.get("kind") != "AgentDefinition":
-                        continue
-                    name = raw.get("metadata", {}).get("name", yaml_file.stem)
-                    spec = dict(raw.get("spec", raw))  # shallow copy to avoid mutating parsed YAML
+                    frontmatter, _prompt = _parse_md_agent_file(md_file)
+                    name = frontmatter.get("name", md_file.stem)
+                    spec = dict(frontmatter)  # shallow copy
                     spec["name"] = name
                     group = "system" if name in _SYSTEM_AGENT_NAMES else "pipeline"
                     spec["_group"] = group
-                    spec["_definition_file"] = str(yaml_file)
+                    spec["_definition_file"] = str(md_file)
                     self._agents[name] = spec
-                except yaml.YAMLError:
-                    log.warning("agent_yaml_parse_error", file=str(yaml_file))
+                except (ValueError, yaml.YAMLError) as exc:
+                    log.warning("agent_md_parse_error", file=str(md_file), error=str(exc))
 
     def _discover_agents_from_dir(self, directory: Path, group: str) -> None:
         """Scan a single directory and add agents tagged with the given group."""
-        for yaml_file in sorted(directory.glob("*.yaml")):
+        for md_file in sorted(directory.glob("*.md")):
             try:
-                raw = yaml.safe_load(yaml_file.read_text())
-                if not isinstance(raw, dict) or raw.get("kind") != "AgentDefinition":
-                    continue
-                name = raw.get("metadata", {}).get("name", yaml_file.stem)
-                spec = dict(raw.get("spec", raw))  # shallow copy to avoid mutating parsed YAML
+                frontmatter, _prompt = _parse_md_agent_file(md_file)
+                name = frontmatter.get("name", md_file.stem)
+                spec = dict(frontmatter)  # shallow copy
                 spec["name"] = name
                 spec["_group"] = group
-                spec["_definition_file"] = str(yaml_file)
+                spec["_definition_file"] = str(md_file)
                 self._agents[name] = spec
-            except yaml.YAMLError:
-                log.warning("agent_yaml_parse_error", file=str(yaml_file))
+            except (ValueError, yaml.YAMLError) as exc:
+                log.warning("agent_md_parse_error", file=str(md_file), error=str(exc))
 
     async def _load_autoloaded_agents(self) -> None:
         """Load autoloaded agents from the database for all registered repositories."""
@@ -235,15 +274,22 @@ class AgentRegistry:
     def get_agent_prompt_file(self, agent_name: str) -> Path:
         """Get the prompt file path for an agent.
 
-        Resolves ``promptFile`` relative to the definition file's parent
-        directory.  Validates the resolved path stays within the agents
-        config tree (``agents_dir.parent``) to prevent path traversal.
+        For hybrid ``.md`` definition files (no ``promptFile`` key), returns
+        the definition file path itself.  For legacy agents with an explicit
+        ``promptFile``, resolves it relative to the definition file's parent
+        directory.  Validates the resolved path stays within the agents config
+        tree (``agents_dir.parent``) to prevent path traversal.
         """
         spec = self._agents.get(agent_name, {})
+        definition_file = spec.get("_definition_file")
+
+        # Hybrid .md file without an explicit promptFile → the definition IS the prompt
+        if definition_file and definition_file.endswith(".md") and "promptFile" not in spec:
+            return Path(definition_file).resolve()
+
         prompt_file: str = spec.get("promptFile", f"{agent_name}.md")
 
         # Determine the base directory for resolution
-        definition_file = spec.get("_definition_file")
         if definition_file:
             base_dir = Path(definition_file).parent
         else:
@@ -257,6 +303,22 @@ class AgentRegistry:
                 f"Prompt file path escapes config directory: {prompt_file}"
             )
         return resolved
+
+    def get_agent_prompt_content(self, agent_name: str) -> str | None:
+        """Return the embedded Markdown prompt body from a hybrid .md file.
+
+        Returns ``None`` for agents loaded from JSON registry or database
+        (no embedded prompt available).
+        """
+        spec = self._agents.get(agent_name, {})
+        definition_file = spec.get("_definition_file")
+        if not definition_file or not definition_file.endswith(".md"):
+            return None
+        try:
+            _frontmatter, prompt_body = _parse_md_agent_file(Path(definition_file))
+            return prompt_body.strip() or None
+        except (ValueError, yaml.YAMLError, OSError):
+            return None
 
     def get_agent_model(self, agent_name: str) -> str | None:
         """Get the model for an agent, or None if not set (CLI default)."""
@@ -334,7 +396,7 @@ class AgentRegistry:
         """Return all active agent definitions as serializable dicts.
 
         Tries the database first (agent_definitions table), falls back to
-        in-memory registry loaded from YAML files.
+        in-memory registry loaded from hybrid .md definition files.
         """
         try:
             rows = await self._db.fetch_all(
