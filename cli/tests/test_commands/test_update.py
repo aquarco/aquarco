@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from typer.testing import CliRunner
 
@@ -12,13 +12,12 @@ runner = CliRunner()
 
 
 class TestUpdateCommand:
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
-    @patch("aquarco_cli.commands.update.subprocess.run")
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_update_success(self, mock_cls, mock_subprocess, mock_health):
+    def test_update_success(self, mock_cls, mock_health, mock_drain):
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
-        mock_subprocess.return_value.returncode = 0
         result = runner.invoke(app, ["update"])
         assert result.exit_code == 0
         assert "successfully" in result.output.lower()
@@ -41,13 +40,12 @@ class TestUpdateCommand:
         # Ensure no SSH commands were executed
         mock_vagrant.ssh.assert_not_called()
 
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
-    @patch("aquarco_cli.commands.update.subprocess.run")
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_update_skip_migrations(self, mock_cls, mock_subprocess, mock_health):
+    def test_update_skip_migrations(self, mock_cls, mock_health, mock_drain):
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
-        mock_subprocess.return_value.returncode = 0
         result = runner.invoke(app, ["update", "--skip-migrations"])
         assert result.exit_code == 0
         # Verify migrations step was not called
@@ -55,65 +53,47 @@ class TestUpdateCommand:
             cmd = call[0][0] if call[0] else call[1].get("command", "")
             assert "migrations" not in cmd
 
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=False)
-    @patch("aquarco_cli.commands.update.subprocess.run")
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_update_unhealthy_warns(self, mock_cls, mock_subprocess, mock_health):
+    def test_update_unhealthy_warns(self, mock_cls, mock_health, mock_drain):
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
-        mock_subprocess.return_value.returncode = 0
         result = runner.invoke(app, ["update"])
         assert result.exit_code == 0
         assert "unhealthy" in result.output.lower()
 
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
-    @patch("aquarco_cli.commands.update.subprocess.run")
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_update_git_pull_failure_continues(self, mock_cls, mock_subprocess, mock_health):
-        """git pull failing should warn but continue."""
-        mock_vagrant = mock_cls.return_value
-        mock_vagrant.is_running.return_value = True
-        import subprocess as sp
-        mock_subprocess.side_effect = sp.CalledProcessError(1, "git", stderr="merge conflict")
-        result = runner.invoke(app, ["update"])
-        assert result.exit_code == 0
-        # ssh steps should still be called
-        assert mock_vagrant.ssh.called
-
-    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
-    @patch("aquarco_cli.commands.update.subprocess.run")
-    @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_update_ssh_step_failure_continues(self, mock_cls, mock_subprocess, mock_health):
+    def test_update_ssh_step_failure_continues(self, mock_cls, mock_health, mock_drain):
         """SSH step failure should continue to next step."""
         from aquarco_cli.vagrant import VagrantError
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
         mock_vagrant.ssh.side_effect = VagrantError("step failed")
-        mock_subprocess.return_value.returncode = 0
         result = runner.invoke(app, ["update"])
         assert result.exit_code == 0
         assert "continuing" in result.output.lower()
 
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
-    @patch("aquarco_cli.commands.update.subprocess.run")
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_update_skip_provision(self, mock_cls, mock_subprocess, mock_health):
+    def test_update_skip_provision(self, mock_cls, mock_health, mock_drain):
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
-        mock_subprocess.return_value.returncode = 0
         result = runner.invoke(app, ["update", "--skip-provision"])
         assert result.exit_code == 0
         mock_vagrant.provision.assert_not_called()
 
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
-    @patch("aquarco_cli.commands.update.subprocess.run")
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_update_provision_failure_warns(self, mock_cls, mock_subprocess, mock_health):
+    def test_update_provision_failure_warns(self, mock_cls, mock_health, mock_drain):
         from aquarco_cli.vagrant import VagrantError
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
         mock_vagrant.provision.side_effect = VagrantError("provision failed")
-        mock_subprocess.return_value.returncode = 0
         result = runner.invoke(app, ["update"])
         assert result.exit_code == 0
         assert "provisioning failed" in result.output.lower()
@@ -130,6 +110,13 @@ class TestUpdateCommand:
 
 class TestStepsDefinition:
     """Tests for the STEPS list structure and ordering."""
+
+    def test_no_git_pull_step(self):
+        """git pull step must NOT be present in STEPS."""
+        from aquarco_cli.commands.update import STEPS
+        step_names = [name for name, _ in STEPS]
+        for name in step_names:
+            assert "git pull" not in name.lower()
 
     def test_lock_venv_step_exists(self):
         """The 'Lock venv' step must be present in STEPS."""
@@ -185,14 +172,13 @@ class TestStepsDefinition:
 class TestLockVenvExecution:
     """Tests that the lock venv step is actually executed via SSH."""
 
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
-    @patch("aquarco_cli.commands.update.subprocess.run")
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_lock_venv_ssh_called(self, mock_cls, mock_subprocess, mock_health):
+    def test_lock_venv_ssh_called(self, mock_cls, mock_health, mock_drain):
         """The lock venv chmod command must be sent via SSH."""
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
-        mock_subprocess.return_value.returncode = 0
 
         runner.invoke(app, ["update"])
 
@@ -212,16 +198,15 @@ class TestLockVenvExecution:
         assert result.exit_code == 0
         assert "lock venv" in result.output.lower()
 
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
-    @patch("aquarco_cli.commands.update.subprocess.run")
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_lock_venv_runs_even_if_upgrade_fails(self, mock_cls, mock_subprocess, mock_health):
+    def test_lock_venv_runs_even_if_upgrade_fails(self, mock_cls, mock_health, mock_drain):
         """If pip install fails, lock venv should still execute (fail-safe)."""
         from aquarco_cli.vagrant import VagrantError
 
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
-        mock_subprocess.return_value.returncode = 0
 
         # Make only the pip install step fail
         def ssh_side_effect(cmd, **kwargs):
@@ -239,3 +224,54 @@ class TestLockVenvExecution:
         ]
         lock_cmds = [c for c in ssh_cmds if "a-w" in c and ".venv/lib/" in c]
         assert len(lock_cmds) == 1, "Lock venv must still be called after pip install failure"
+
+
+class TestDrainModeIntegration:
+    """Tests for drain mode prompts in update."""
+
+    @patch("aquarco_cli.commands.update._query_drain_status")
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_drain_idle_auto_proceeds(self, mock_cls, mock_health, mock_drain):
+        """When drain is enabled and all idle, auto-clear and proceed."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_drain.return_value = {"enabled": True, "activeAgents": 0, "activeTasks": 0}
+
+        with patch("aquarco_cli.commands.update.GraphQLClient") as mock_gql_cls:
+            mock_client = mock_gql_cls.return_value
+            mock_client.execute.return_value = {"setDrainMode": {"enabled": False, "activeAgents": 0, "activeTasks": 0}}
+            result = runner.invoke(app, ["update"])
+
+        assert result.exit_code == 0
+        assert "proceeding" in result.output.lower()
+
+    @patch("aquarco_cli.commands.update.Prompt.ask", return_value="plan")
+    @patch("aquarco_cli.commands.update._query_drain_status")
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_active_work_plan_sets_drain(self, mock_cls, mock_drain, mock_prompt):
+        """When active work and user chooses 'plan', drain mode is enabled."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_drain.return_value = {"enabled": False, "activeAgents": 2, "activeTasks": 3}
+
+        with patch("aquarco_cli.commands.update.GraphQLClient") as mock_gql_cls:
+            mock_client = mock_gql_cls.return_value
+            mock_client.execute.return_value = {"setDrainMode": {"enabled": True, "activeAgents": 2, "activeTasks": 3}}
+            result = runner.invoke(app, ["update"])
+
+        assert result.exit_code == 0
+        assert "drain mode enabled" in result.output.lower()
+
+    @patch("aquarco_cli.commands.update.Prompt.ask", return_value="no")
+    @patch("aquarco_cli.commands.update._query_drain_status")
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_active_work_abort(self, mock_cls, mock_drain, mock_prompt):
+        """When active work and user chooses 'no', update is aborted."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_drain.return_value = {"enabled": False, "activeAgents": 1, "activeTasks": 1}
+
+        result = runner.invoke(app, ["update"])
+        assert result.exit_code == 0
+        assert "aborted" in result.output.lower()

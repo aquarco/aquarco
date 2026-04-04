@@ -10,7 +10,6 @@ Covers gaps not addressed by test_category_rename_consistency.py:
 from __future__ import annotations
 
 import json
-import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -179,12 +178,24 @@ class TestInferCategoryEdgeCases:
     """Edge cases in _infer_category not covered by consistency tests."""
 
     def test_security_content_maps_to_review(self) -> None:
-        """Security-focused content should map to 'review', not a separate category."""
+        """Security-focused content should map to 'review', not a separate category.
+
+        Note: content must not contain 'audit' since that substring matches
+        the 'analyze' category hints before reaching 'review'.
+        """
         result = analyze_agent_prompt(
             "Performs OWASP vulnerability scanning and security checks.",
             "security-scanner.md",
         )
         assert result["category"] == "review"
+
+    def test_audit_keyword_maps_to_analyze(self) -> None:
+        """Content containing 'audit' matches 'analyze' hints before 'review'."""
+        result = analyze_agent_prompt(
+            "Performs security audits on the codebase.",
+            "auditor.md",
+        )
+        assert result["category"] == "analyze"
 
     def test_name_based_matching_analyze(self) -> None:
         """Category can be inferred from agent filename alone."""

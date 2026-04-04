@@ -6,6 +6,7 @@ import json
 import time
 from pathlib import Path
 
+import httpx
 import typer
 
 from aquarco_cli.console import console, handle_api_error, print_error, print_info, print_success, print_warning
@@ -16,7 +17,7 @@ from aquarco_cli.graphql_client import (
     GraphQLClient,
 )
 
-app = typer.Typer()
+app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
 MAX_FOLLOW_ERRORS = 5
 
@@ -96,6 +97,9 @@ def run(
             try:
                 ps_data = client.execute(QUERY_PIPELINE_STATUS, {"taskId": task_id})
                 consecutive_errors = 0
+            except (httpx.ConnectError, httpx.TimeoutException) as conn_exc:
+                handle_api_error(conn_exc)
+                raise typer.Exit(code=1) from conn_exc
             except Exception as poll_exc:
                 consecutive_errors += 1
                 print_warning(f"Poll error: {poll_exc}")

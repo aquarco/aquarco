@@ -315,6 +315,10 @@ export const Query = {
       })),
     }
   },
+
+  async drainStatus(_: unknown, __: unknown, ctx: Context) {
+    return getDrainStatus(ctx.pool)
+  },
 }
 
 function parseAgentSource(source: string): { sourceEnum: string; sourceRepo: string | null } {
@@ -431,3 +435,23 @@ export function mapStage(row: Record<string, unknown>) {
     liveOutput: row.live_output ?? null,
   }
 }
+
+// ── Drain status helper ──────────────────────────────────────────────────────
+
+async function getDrainStatus(pool: Pool) {
+  // Single atomic query for consistent point-in-time reads
+  const { rows } = await pool.query(`
+    SELECT
+      (SELECT value FROM supervisor_state WHERE key = 'drain_mode') AS drain_val,
+      (SELECT COALESCE(SUM(active_count), 0)::int FROM agent_instances) AS active_agents,
+      (SELECT COUNT(*)::int FROM tasks WHERE status IN ('executing', 'queued', 'planning')) AS active_tasks
+  `)
+  const row = rows[0]
+  return {
+    enabled: row?.drain_val === 'true',
+    activeAgents: row?.active_agents ?? 0,
+    activeTasks: row?.active_tasks ?? 0,
+  }
+}
+
+export { getDrainStatus }

@@ -12,11 +12,13 @@ runner = CliRunner()
 
 
 class TestUiStart:
+    @patch("aquarco_cli.commands.ui.get_config")
     @patch("aquarco_cli.commands.ui.VagrantHelper")
-    def test_ui_start(self, mock_cls):
+    def test_ui_start(self, mock_cls, mock_config):
+        mock_config.return_value.port = 8080
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
-        result = runner.invoke(app, ["ui"])
+        result = runner.invoke(app, ["ui", "--no-open"])
         assert result.exit_code == 0
         mock_vagrant.ssh.assert_called_once()
         assert "running" in result.output.lower()
@@ -30,13 +32,66 @@ class TestUiStart:
         assert "not running" in result.output.lower()
 
     @patch("aquarco_cli.commands.ui.webbrowser.open")
+    @patch("aquarco_cli.commands.ui.get_config")
     @patch("aquarco_cli.commands.ui.VagrantHelper")
-    def test_ui_start_with_open(self, mock_cls, mock_browser):
+    def test_ui_start_opens_browser_by_default(self, mock_cls, mock_config, mock_browser):
+        mock_config.return_value.port = 8080
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
-        result = runner.invoke(app, ["ui", "--open"])
+        result = runner.invoke(app, ["ui"])
         assert result.exit_code == 0
         mock_browser.assert_called_once_with("http://localhost:8080")
+
+    @patch("aquarco_cli.commands.ui.webbrowser.open")
+    @patch("aquarco_cli.commands.ui.get_config")
+    @patch("aquarco_cli.commands.ui.VagrantHelper")
+    def test_ui_no_open_suppresses_browser(self, mock_cls, mock_config, mock_browser):
+        mock_config.return_value.port = 8080
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        result = runner.invoke(app, ["ui", "--no-open"])
+        assert result.exit_code == 0
+        mock_browser.assert_not_called()
+
+
+class TestUiWeb:
+    @patch("aquarco_cli.commands.ui.webbrowser.open")
+    @patch("aquarco_cli.commands.ui.get_config")
+    @patch("aquarco_cli.commands.ui.VagrantHelper")
+    def test_ui_web(self, mock_cls, mock_config, mock_browser):
+        mock_config.return_value.port = 8080
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        result = runner.invoke(app, ["ui", "web", "--no-open"])
+        assert result.exit_code == 0
+        mock_browser.assert_not_called()
+        assert "running" in result.output.lower()
+
+
+class TestUiDb:
+    @patch("aquarco_cli.commands.ui.webbrowser.open")
+    @patch("aquarco_cli.commands.ui.get_config")
+    @patch("aquarco_cli.commands.ui.VagrantHelper")
+    def test_ui_db(self, mock_cls, mock_config, mock_browser):
+        mock_config.return_value.port = 9090
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        result = runner.invoke(app, ["ui", "db", "--no-open"])
+        assert result.exit_code == 0
+        assert "9090/adminer" in result.output
+
+
+class TestUiApi:
+    @patch("aquarco_cli.commands.ui.webbrowser.open")
+    @patch("aquarco_cli.commands.ui.get_config")
+    @patch("aquarco_cli.commands.ui.VagrantHelper")
+    def test_ui_api(self, mock_cls, mock_config, mock_browser):
+        mock_config.return_value.port = 8080
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        result = runner.invoke(app, ["ui", "api", "--no-open"])
+        assert result.exit_code == 0
+        assert "graphql" in result.output.lower()
 
 
 class TestUiStop:

@@ -2,21 +2,33 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+def _load_saved_port() -> int:
+    """Read port from ~/.aquarco.json if it exists."""
+    config_file = Path.home() / ".aquarco.json"
+    if config_file.exists():
+        try:
+            data = json.loads(config_file.read_text())
+            return int(data.get("port", 8080))
+        except (json.JSONDecodeError, ValueError, OSError):
+            pass
+    return 8080
 
 
 @dataclass
 class CliConfig:
     """Runtime configuration for the Aquarco CLI."""
 
+    # Port used for the Caddy reverse proxy
+    port: int = field(default_factory=_load_saved_port)
+
     # GraphQL endpoint (Caddy reverse-proxy)
-    api_url: str = field(
-        default_factory=lambda: os.environ.get(
-            "AQUARCO_API_URL", "http://localhost:8080/api/graphql"
-        )
-    )
+    api_url: str = field(default="")
 
     # Vagrant working directory (containing the Vagrantfile)
     vagrant_dir: str = field(
@@ -34,6 +46,15 @@ class CliConfig:
     )
 
     _MAX_PARENT_DEPTH: int = 10
+
+    def __post_init__(self) -> None:
+        """Resolve api_url from env or port-based default."""
+        if not self.api_url:
+            env_url = os.environ.get("AQUARCO_API_URL", "")
+            if env_url:
+                self.api_url = env_url
+            else:
+                self.api_url = f"http://localhost:{self.port}/api/graphql"
 
     def resolve_vagrant_dir(self) -> Path:
         """Return the path to the directory containing the Vagrantfile.
