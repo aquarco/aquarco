@@ -1,5 +1,20 @@
 # Changelog
 
+## [2026-04-04] — Remove repository specific agents (#79)
+
+### Removed
+- **`agent_autoloader.py`** — entire module removed; autoloading subsystem no longer scans repos for `.claude/agents/` files
+- **Autoloaded config layer** — removed from `config_overlay.py`; config merge now uses 3 layers: `default → global → repo`
+- **`_load_autoloaded_agents()`** from `pipeline/agent_registry.py` — no longer loads autoloaded agents at startup
+- **`_auto_scan_new_repos()` and `_process_agent_scan_commands()`** from `main.py` — autoload polling and IPC command handling removed
+- **`deactivate_autoloaded_agents()` and `read_autoloaded_agents_from_db()`** from `config_store.py` — autoload-specific DB functions removed
+- **`repo_agent_scans` table** — dropped via new migration `036_drop_repo_agent_scans.sql`
+- **`repo-descriptor-agent`** — system agent removed (was used for heuristic-based agent analysis, never formally wired in)
+- **Autoloaded agent fetching** from `pipeline/executor.py`'s `_resolve_layered_config()`
+
+### Migration Path
+The `agent_definitions` table columns `source` and `agent_group` are **preserved** — they are still used for tracking built-in, global, and repository-specific agents. Only the `autoload:` source prefix and the `repo_agent_scans` table are removed. Existing agent definitions with `source != 'autoload:*'` continue to work unchanged.
+
 ## [2026-04-03] — Merge agent definition and prompt file (#69)
 
 ### Changed
@@ -49,7 +64,7 @@
 ### Added
 - **`model` field** in agent definition schemas (`system-agent-v1.json`, `pipeline-agent-v1.json`) — optional string specifying which Claude model the agent should use (e.g., `claude-sonnet-4-6`, `claude-haiku-4-5`). When omitted, the CLI uses its default model.
 - **`get_agent_model()`** on `AgentRegistry` — retrieves the configured model for a given agent name, returning `None` when not set
-- **`get_agent_model()`** on `ScopedAgentView` (`config_overlay.py`) — resolves model through the multi-layer config overlay (default → global → repo → autoloaded), enabling per-repo model overrides
+- **`get_agent_model()`** on `ScopedAgentView` (`config_overlay.py`) — resolves model through the multi-layer config overlay (default → global → repo), enabling per-repo model overrides
 - **`--model` flag** passed to Claude CLI (`cli/claude.py`) — `execute_claude()` accepts an optional `model` parameter and appends `--model <value>` to the CLI args when set
 - **Model resolution in executor** (`pipeline/executor.py`) — both `_execute_agent()` and condition-evaluator invocations now resolve and pass the agent's model to the CLI
 - 39 new tests in `supervisor/python/tests/test_model_per_agent.py`

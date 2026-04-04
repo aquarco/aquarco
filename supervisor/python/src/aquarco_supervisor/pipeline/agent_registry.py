@@ -67,11 +67,7 @@ class AgentRegistry:
         self._agents: dict[str, dict[str, Any]] = {}
 
     async def load(self, registry_file: str | None = None) -> None:
-        """Load agent registry from JSON file or discover from hybrid .md definitions.
-
-        Also loads autoloaded agents from the database for all registered
-        repositories.
-        """
+        """Load agent registry from JSON file or discover from YAML definitions."""
         if registry_file:
             path = Path(registry_file)
         else:
@@ -89,9 +85,6 @@ class AgentRegistry:
                 raise AgentRegistryError(f"Failed to parse registry: {e}") from e
         else:
             await self._discover_agents()
-
-        # Load autoloaded agents from DB
-        await self._load_autoloaded_agents()
 
         await self._sync_agent_instances()
         log.info("registry_loaded", agent_count=len(self._agents))
@@ -144,26 +137,6 @@ class AgentRegistry:
                 self._agents[name] = spec
             except (ValueError, yaml.YAMLError) as exc:
                 log.warning("agent_md_parse_error", file=str(md_file), error=str(exc))
-
-    async def _load_autoloaded_agents(self) -> None:
-        """Load autoloaded agents from the database for all registered repositories."""
-        try:
-            rows = await self._db.fetch_all(
-                """SELECT ad.name, ad.spec, ad.source
-                   FROM agent_definitions ad
-                   WHERE ad.is_active = true
-                     AND ad.source LIKE 'autoload:%%'"""
-            )
-            for row in rows:
-                name = row["name"]
-                spec = row["spec"] if isinstance(row["spec"], dict) else json.loads(row["spec"])
-                spec["name"] = name
-                spec["_group"] = "pipeline"  # Autoloaded agents are always pipeline agents
-                self._agents[name] = spec
-            if rows:
-                log.info("autoloaded_agents_loaded", count=len(rows))
-        except Exception:
-            log.debug("autoloaded_agents_load_skipped", reason="DB query failed or table missing")
 
     async def _sync_agent_instances(self) -> None:
         """Ensure all agents have rows in agent_instances table.

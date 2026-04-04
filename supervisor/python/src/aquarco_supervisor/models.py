@@ -41,15 +41,6 @@ class CloneStatus(str, enum.Enum):
 
 
 
-class RepoAgentScanStatus(str, enum.Enum):
-    PENDING = "pending"
-    SCANNING = "scanning"
-    ANALYZING = "analyzing"
-    WRITING = "writing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
 class Complexity(str, enum.Enum):
     TRIVIAL = "trivial"
     LOW = "low"
@@ -174,19 +165,6 @@ class PollState(BaseModel):
     cursor: str = ""
     state_data: dict[str, Any] = Field(default_factory=dict)
 
-
-
-
-class RepoAgentScan(BaseModel):
-    id: int | None = None
-    repo_name: str
-    status: RepoAgentScanStatus = RepoAgentScanStatus.PENDING
-    agents_found: int = 0
-    agents_created: int = 0
-    error_message: str | None = None
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
-    created_at: datetime | None = None
 
 
 class PlannedStageAssignment(BaseModel):

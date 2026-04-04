@@ -1369,7 +1369,7 @@ class TestRealAgentDefinitions:
         )
         schema = _system_agent_schema()
         definitions = load_agent_definitions_from_files(system_dir, schema=schema)
-        assert len(definitions) == 3  # planner, condition-evaluator, repo-descriptor
+        assert len(definitions) == 2  # planner, condition-evaluator
 
     def test_planner_agent_has_role(self) -> None:
         """planner-agent.md must have role (not categories/priority)."""
@@ -1412,9 +1412,9 @@ class TestSystemAgentNamesConstant:
     def test_contains_expected_agents(self) -> None:
         from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES
 
-        expected = {"planner-agent", "condition-evaluator-agent", "repo-descriptor-agent"}
+        expected = {"planner-agent", "condition-evaluator-agent"}
         assert expected == set(SYSTEM_AGENT_NAMES), (
-            "SYSTEM_AGENT_NAMES must contain exactly the three known system agents"
+            "SYSTEM_AGENT_NAMES must contain exactly the known system agents"
         )
 
     def test_is_frozenset(self) -> None:
@@ -1433,11 +1433,6 @@ class TestSystemAgentNamesConstant:
         from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES
 
         assert "condition-evaluator-agent" in SYSTEM_AGENT_NAMES
-
-    def test_repo_descriptor_is_system(self) -> None:
-        from aquarco_supervisor.constants import SYSTEM_AGENT_NAMES
-
-        assert "repo-descriptor-agent" in SYSTEM_AGENT_NAMES
 
     def test_pipeline_agent_names_not_included(self) -> None:
         """Common pipeline agent names should NOT be listed as system agents."""
@@ -1465,8 +1460,8 @@ class TestSystemAgentNamesConstant:
 
         # All names in the constant must produce agent_group='system' via flat scan
         # (tested implicitly via test_falls_back_to_flat_scan in TestSyncAllAgentDefinitionsToDb)
-        assert len(SYSTEM_AGENT_NAMES) >= 3, (
-            "At minimum planner, condition-evaluator, and repo-descriptor must be listed"
+        assert len(SYSTEM_AGENT_NAMES) >= 2, (
+            "At minimum planner and condition-evaluator must be listed"
         )
 
     def test_system_agent_names_matches_filesystem(self) -> None:

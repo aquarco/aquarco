@@ -57,6 +57,8 @@ EXPECTED_MIGRATIONS = [
     "033_add_stage_session_id",
     "034_checkpoint_stage_fk",
     "035_simplify_tasks",
+    "036_supervisor_state",
+    "037_drop_repo_agent_scans",
 ]
 
 # Build expected dependency map: migration_name -> depends_on_name
@@ -355,7 +357,7 @@ class TestMigrationCount:
     """Ensure all expected migrations are present."""
 
     def test_expected_migration_count(self) -> None:
-        """All 26 expected migrations exist as .sql files."""
+        """All expected migrations exist as .sql files."""
         files = _migration_files()
         names = {f.stem for f in files}
         for expected in EXPECTED_MIGRATIONS:

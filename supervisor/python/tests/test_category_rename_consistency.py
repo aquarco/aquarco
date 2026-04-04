@@ -6,8 +6,6 @@ refactoring in commits e9bbd9a and 46870e2a.
 Acceptance criteria from review:
   - Schema enums in pipeline-agent-v1.json and agent-definition-v1.json use new names
   - VALID_CATEGORIES in cli/agents.py uses new names
-  - Autoloader category hints and fallback default use new names
-  - generate_agent_definition fallback uses new names
   - Pipeline categories in pipelines.yaml use new names
   - No source code references old category names 'implementation' or 'docs' as category values
 """
@@ -20,10 +18,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from aquarco_supervisor.agent_autoloader import (
-    analyze_agent_prompt,
-    generate_agent_definition,
-)
 from aquarco_supervisor.cli.agents import VALID_CATEGORIES
 
 
@@ -115,110 +109,6 @@ class TestPipelineCategories:
 
     def test_no_old_names_in_pipelines(self, pipeline_category_names: set[str]) -> None:
         assert pipeline_category_names.isdisjoint(OLD_CATEGORY_NAMES)
-
-
-# ---------------------------------------------------------------------------
-# Autoloader category inference
-# ---------------------------------------------------------------------------
-
-
-class TestAutoloaderCategoryInference:
-    """Verify autoloader maps content to new category names only."""
-
-    def test_docs_content_returns_document(self) -> None:
-        """Content about documentation returns 'document', not 'docs'."""
-        result = analyze_agent_prompt(
-            "This agent maintains documentation and README files.", "docs-writer.md"
-        )
-        assert result["category"] == "document"
-
-    def test_implementation_content_returns_implement(self) -> None:
-        """Content about implementation returns 'implement', not 'implementation'."""
-        result = analyze_agent_prompt(
-            "This agent implements new features and develops code.", "coder.md"
-        )
-        assert result["category"] == "implement"
-
-    def test_fallback_default_is_implement(self) -> None:
-        """Unrecognized content falls back to 'implement'."""
-        result = analyze_agent_prompt(
-            "A mysterious agent with no category hints.", "mystery.md"
-        )
-        assert result["category"] == "implement"
-
-    def test_changelog_content_returns_document(self) -> None:
-        """Content mentioning changelog maps to 'document'."""
-        result = analyze_agent_prompt("Maintains the CHANGELOG.", "changelog.md")
-        assert result["category"] == "document"
-
-    @pytest.mark.parametrize("content,expected", [
-        ("Analyzes and triages issues", "analyze"),
-        ("Designs system architecture", "design"),
-        ("Runs unit tests and e2e specs", "test"),
-        ("Performs quality reviews and linting", "review"),
-        ("Writes documentation and README", "document"),
-        ("Implements features and writes code", "implement"),
-    ])
-    def test_all_categories_reachable(self, content: str, expected: str) -> None:
-        """Every canonical category is reachable through content hints."""
-        result = analyze_agent_prompt(content, "agent.md")
-        assert result["category"] == expected
-
-    def test_no_inferred_category_is_old_name(self) -> None:
-        """None of the hint mappings produce old category names."""
-        test_contents = [
-            "documentation and docs",
-            "implement code",
-            "build features",
-            "write code",
-            "changelog maintenance",
-            "readme updates",
-            "",  # empty → default
-        ]
-        for content in test_contents:
-            result = analyze_agent_prompt(content, "agent.md")
-            assert result["category"] not in OLD_CATEGORY_NAMES, (
-                f"Content {content!r} produced old category {result['category']!r}"
-            )
-
-
-# ---------------------------------------------------------------------------
-# generate_agent_definition fallback
-# ---------------------------------------------------------------------------
-
-
-class TestGenerateAgentDefinition:
-    """Verify generate_agent_definition uses new category names."""
-
-    def test_default_category_when_missing(self) -> None:
-        """When analysis has no 'category' key, default is 'implement'."""
-        analysis = {"name": "test-agent", "description": "desc", "tools": ["Read"]}
-        defn = generate_agent_definition(analysis, "repo", "content")
-        assert defn["spec"]["categories"] == ["implement"]
-
-    def test_explicit_category_preserved(self) -> None:
-        """When analysis specifies a category, it is preserved."""
-        analysis = {
-            "name": "doc-agent",
-            "description": "docs",
-            "category": "document",
-            "tools": ["Read"],
-        }
-        defn = generate_agent_definition(analysis, "repo", "content")
-        assert defn["spec"]["categories"] == ["document"]
-
-    def test_definition_never_contains_old_names(self) -> None:
-        """Generated definitions should never reference old category names."""
-        for cat in CANONICAL_CATEGORIES:
-            analysis = {
-                "name": f"{cat}-agent",
-                "description": f"{cat} agent",
-                "category": cat,
-                "tools": ["Read"],
-            }
-            defn = generate_agent_definition(analysis, "repo", "content")
-            cats = defn["spec"]["categories"]
-            assert not OLD_CATEGORY_NAMES.intersection(cats)
 
 
 # ---------------------------------------------------------------------------

@@ -460,36 +460,6 @@ async def test_resume_mode_skips_output_schema(tmp_path: Path) -> None:
 
 
 # ===========================================================================
-# 6. AgentRegistry.get_agent_model with autoloaded agents
-# ===========================================================================
-
-
-@pytest.mark.asyncio
-async def test_autoloaded_agent_model_from_db(tmp_path: Path) -> None:
-    """Autoloaded agents from DB preserve model field in spec."""
-    db = AsyncMock(spec=Database)
-    db.fetch_all = AsyncMock(return_value=[
-        {
-            "name": "auto-agent",
-            "spec": {"model": "claude-opus-4", "categories": ["custom"]},
-            "source": "autoload:repo1",
-        },
-    ])
-    db.execute = AsyncMock(return_value=None)
-
-    agents_dir = tmp_path / "agents"
-    system_dir = agents_dir / "system"
-    pipeline_dir = agents_dir / "pipeline"
-    system_dir.mkdir(parents=True)
-    pipeline_dir.mkdir(parents=True)
-
-    reg = AgentRegistry(db, str(agents_dir))
-    await reg.load(str(tmp_path / "nonexistent-registry.json"))
-
-    assert reg.get_agent_model("auto-agent") == "claude-opus-4"
-
-
-# ===========================================================================
 # 7. Condition evaluator: model parameter forwarded to execute_claude kwargs
 # ===========================================================================
 

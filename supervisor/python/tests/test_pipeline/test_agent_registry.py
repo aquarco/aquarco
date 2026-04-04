@@ -468,28 +468,6 @@ async def test_discover_agents_from_system_and_pipeline_subdirs(
     assert "analyze-agent" in reg.get_agents_for_category("analyze")
 
 
-@pytest.mark.asyncio
-async def test_autoloaded_agents_tagged_as_pipeline(
-    mock_db: AsyncMock, tmp_path: Path
-) -> None:
-    """Autoloaded agents from DB are always tagged as pipeline agents."""
-    mock_db.fetch_all.return_value = [
-        {
-            "name": "repo-custom-agent",
-            "spec": {"categories": ["review"], "priority": 50},
-            "source": "autoload:my-repo",
-        }
-    ]
-    agents_dir = tmp_path / "agents"
-    agents_dir.mkdir()
-
-    reg = AgentRegistry(mock_db, str(agents_dir))
-    await reg.load(str(tmp_path / "nonexistent.json"))
-
-    assert reg.get_agent_group("repo-custom-agent") == "pipeline"
-    assert "repo-custom-agent" in reg.get_agents_for_category("review")
-
-
 # ---------------------------------------------------------------------------
 # get_all_agent_definitions_json — group field in output
 # ---------------------------------------------------------------------------
