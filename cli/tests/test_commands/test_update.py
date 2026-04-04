@@ -66,15 +66,15 @@ class TestUpdateCommand:
     @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_update_ssh_step_failure_continues(self, mock_cls, mock_health, mock_drain):
-        """SSH step failure should continue to next step."""
+    def test_update_ssh_step_failure_hard_fails(self, mock_cls, mock_health, mock_drain):
+        """SSH step failure should abort the update immediately (hard-fail)."""
         from aquarco_cli.vagrant import VagrantError
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
         mock_vagrant.ssh.side_effect = VagrantError("step failed")
         result = runner.invoke(app, ["update"])
-        assert result.exit_code == 0
-        assert "continuing" in result.output.lower()
+        assert result.exit_code == 1
+        assert "step failed" in result.output.lower()
 
     @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
@@ -89,13 +89,14 @@ class TestUpdateCommand:
     @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_update_provision_failure_warns(self, mock_cls, mock_health, mock_drain):
+    def test_update_provision_failure_hard_fails(self, mock_cls, mock_health, mock_drain):
+        """Provisioning failure should abort the update (hard-fail)."""
         from aquarco_cli.vagrant import VagrantError
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
         mock_vagrant.provision.side_effect = VagrantError("provision failed")
         result = runner.invoke(app, ["update"])
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         assert "provisioning failed" in result.output.lower()
 
     @patch("aquarco_cli.commands.update.VagrantHelper")
@@ -201,8 +202,8 @@ class TestLockVenvExecution:
     @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_lock_venv_runs_even_if_upgrade_fails(self, mock_cls, mock_health, mock_drain):
-        """If pip install fails, lock venv should still execute (fail-safe)."""
+    def test_pip_install_failure_hard_fails(self, mock_cls, mock_health, mock_drain):
+        """If pip install fails, update should abort (hard-fail semantics)."""
         from aquarco_cli.vagrant import VagrantError
 
         mock_vagrant = mock_cls.return_value
@@ -216,14 +217,15 @@ class TestLockVenvExecution:
         mock_vagrant.ssh.side_effect = ssh_side_effect
 
         result = runner.invoke(app, ["update"])
-        assert result.exit_code == 0
+        assert result.exit_code == 1
 
+        # Lock venv should NOT be called because hard-fail aborts before it
         ssh_cmds = [
             call[0][0] if call[0] else call[1].get("command", "")
             for call in mock_vagrant.ssh.call_args_list
         ]
         lock_cmds = [c for c in ssh_cmds if "a-w" in c and ".venv/lib/" in c]
-        assert len(lock_cmds) == 1, "Lock venv must still be called after pip install failure"
+        assert len(lock_cmds) == 0, "Lock venv must NOT be called after pip install failure (hard-fail)"
 
 
 class TestDrainModeIntegration:
