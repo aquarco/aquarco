@@ -6,8 +6,6 @@ networks:
 
 volumes:
   pgdata:
-  api_modules:
-  web_modules:
   caddy_data:
   caddy_config:
 
@@ -51,20 +49,19 @@ services:
 
   # ── GraphQL API ───────────────────────────────────────────────────────────────
   api:
-    image: node:20-alpine
+    build:
+      context: ../api
     restart: unless-stopped
     working_dir: /app
-    command: sh -c "npm install && npm run codegen && npm run dev"
+    command: sh -c "npm run codegen && npm run dev"
     networks:
       - aquarco
     ports:
       - "127.0.0.1:4000:4000"
     volumes:
       - ../api/src:/app/src
-      - ../api/package.json:/app/package.json
       - ../api/tsconfig.json:/app/tsconfig.json
       - ../api/codegen.yml:/app/codegen.yml
-      - api_modules:/app/node_modules
       - ${AGENT_SSH_DIR:-/home/agent/.ssh}:/agent-ssh
       - ${REPOS_BASE:-/home/agent/repos}:/repos
       - /var/lib/aquarco/claude-ipc:/claude-ipc
@@ -75,7 +72,7 @@ services:
       REPOS_BASE: ${REPOS_BASE:-/home/agent/repos}
       CHOKIDAR_USEPOLLING: "true"
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/api/graphql?query=%7B__typename%7D"]
+      test: ["CMD-SHELL", "nc -z localhost 4000"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -86,20 +83,19 @@ services:
 
   # ── Web UI (Next.js) ──────────────────────────────────────────────────────────
   web:
-    image: node:20-alpine
+    build:
+      context: ../web
     restart: unless-stopped
     working_dir: /app
-    command: sh -c "npm install && npm run dev"
+    command: sh -c "npm run dev"
     networks:
       - aquarco
     # No external ports — Caddy reverse proxy handles routing
     volumes:
       - ../web/src:/app/src
       - ../web/public:/app/public
-      - ../web/package.json:/app/package.json
       - ../web/tsconfig.json:/app/tsconfig.json
       - ../web/next.config.js:/app/next.config.js
-      - web_modules:/app/node_modules
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/graphql}
       NODE_ENV: ${NODE_ENV:-development}
