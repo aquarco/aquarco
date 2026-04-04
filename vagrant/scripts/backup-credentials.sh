@@ -68,8 +68,9 @@ fi
 # ── Exit status ─────────────────────────────────────────────────────────────
 
 if (( ${#found[@]} == 0 )); then
+  # Clean up the empty backup directory so it doesn't count toward MAX_BACKUPS
+  rm -rf "${BACKUP_DIR}"
   echo "ERROR: No credentials found to back up." >&2
-  echo "${BACKUP_DIR}"
   exit 1
 fi
 

@@ -12,8 +12,7 @@ services:
   migrations:
     build: !reset null
     image: ${AQUARCO_REGISTRY}/migrations:${AQUARCO_MIGRATIONS_VERSION}
-    volumes: !reset
-      - ../db/migrations:/db/migrations
+    volumes: !reset []
 
   # ── GraphQL API ──────────────────────────────────────────────────────────────
   api:

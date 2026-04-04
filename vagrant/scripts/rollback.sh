@@ -42,11 +42,23 @@ if [[ ! -d "${BACKUP_DIR}" ]]; then
   exit 1
 fi
 
+# ── Detect environment (dev vs production) ─────────────────────────────────
+
+AQUARCO_ENV="development"
+if [[ -f /etc/aquarco/env ]]; then
+  AQUARCO_ENV="$(cat /etc/aquarco/env)"
+fi
+
+COMPOSE_CMD=(sudo docker compose -f compose.yml)
+if [[ "${AQUARCO_ENV}" == "production" ]]; then
+  COMPOSE_CMD+=(-f compose.prod.yml --env-file versions.env)
+fi
+
 # ── Stop Docker services ────────────────────────────────────────────────────
 
-echo "[rollback] Stopping Docker Compose services..."
+echo "[rollback] Stopping Docker Compose services (env=${AQUARCO_ENV})..."
 cd "${COMPOSE_DIR}"
-sudo docker compose down --timeout 30 || true
+"${COMPOSE_CMD[@]}" down --timeout 30 || true
 
 # ── Restore credentials ─────────────────────────────────────────────────────
 
@@ -68,8 +80,8 @@ fi
 
 # ── Restart Docker services ─────────────────────────────────────────────────
 
-echo "[rollback] Starting Docker Compose services..."
-sudo docker compose up -d
+echo "[rollback] Starting Docker Compose services (env=${AQUARCO_ENV})..."
+"${COMPOSE_CMD[@]}" up -d
 
 # ── Wait for health ─────────────────────────────────────────────────────────
 
@@ -78,7 +90,7 @@ echo "[rollback] Waiting up to ${HEALTH_TIMEOUT}s for services to become healthy
 elapsed=0
 while (( elapsed < HEALTH_TIMEOUT )); do
   # Count unhealthy/starting containers
-  unhealthy="$(sudo docker compose ps --format json 2>/dev/null \
+  unhealthy="$("${COMPOSE_CMD[@]}" ps --format json 2>/dev/null \
     | jq -r 'select(.Health != null and .Health != "healthy" and .Health != "") | .Name' \
     | wc -l)"
 

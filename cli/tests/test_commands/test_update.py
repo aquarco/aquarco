@@ -11,6 +11,34 @@ from aquarco_cli.main import app
 runner = CliRunner()
 
 
+class TestProductionGuard:
+    """Tests for the production build guard — primary feature of this PR."""
+
+    @patch("aquarco_cli.commands.update.BUILD_TYPE", "production")
+    def test_production_build_blocks_update(self):
+        """aquarco update must exit 1 and print 'not available' for production builds."""
+        result = runner.invoke(app, ["update"])
+        assert result.exit_code == 1
+        assert "not available" in result.output.lower()
+
+    @patch("aquarco_cli.commands.update.BUILD_TYPE", "production")
+    def test_production_build_suggests_homebrew(self):
+        """Production guard message should suggest brew upgrade."""
+        result = runner.invoke(app, ["update"])
+        assert "brew upgrade" in result.output.lower()
+
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    @patch("aquarco_cli.commands.update.BUILD_TYPE", "development")
+    def test_development_build_allows_update(self, mock_cls, mock_health, mock_drain):
+        """aquarco update should proceed normally for development builds."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        result = runner.invoke(app, ["update"])
+        assert result.exit_code == 0
+
+
 class TestUpdateCommand:
     @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
