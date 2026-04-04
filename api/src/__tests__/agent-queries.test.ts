@@ -4,7 +4,6 @@
  * Covers acceptance criteria:
  *   - mapAgentDefinition maps source column to AgentSource enum and extracts sourceRepo
  *   - globalAgents query returns default + global agents with override/metrics state
- *   - repoAgentGroups query groups repo agents by repository name
  */
 
 import { jest, describe, it, expect } from '@jest/globals'
@@ -254,105 +253,49 @@ describe('Query.globalAgents', () => {
   })
 })
 
-// ── Query.repoAgentGroups ──────────────────────────────────────────────────────
+// ── mapAgentDefinition: autoload source ──────────────────────────────────────
 
-describe('Query.repoAgentGroups', () => {
-  const repoAgentRows: Record<string, unknown>[] = [
-    {
-      name: 'agent-a',
-      version: '1.0.0',
-      description: 'Agent A for app1',
-      spec: { timeout: 300 },
-      source: 'repo:app1',
-      is_disabled: false,
-      modified_spec: null,
-      active_count: 0,
-      total_executions: 0,
-      total_tokens_used: 0,
-      last_execution_at: null,
-    },
-    {
-      name: 'agent-b',
-      version: '1.0.0',
-      description: 'Agent B for app1',
-      spec: { timeout: 300 },
-      source: 'repo:app1',
-      is_disabled: false,
-      modified_spec: null,
-      active_count: 1,
-      total_executions: 5,
-      total_tokens_used: 1000,
-      last_execution_at: '2026-01-20T10:00:00Z',
-    },
-    {
-      name: 'agent-c',
-      version: '1.0.0',
-      description: 'Agent C for app2',
-      spec: { timeout: 600 },
-      source: 'repo:app2',
-      is_disabled: true,
-      modified_spec: null,
-      active_count: 0,
-      total_executions: 3,
-      total_tokens_used: 500,
-      last_execution_at: null,
-    },
-  ]
+describe('mapAgentDefinition autoload source', () => {
+  const baseRow: Record<string, unknown> = {
+    name: 'autoloaded-agent',
+    version: '1.0.0',
+    description: 'Autoloaded agent',
+    spec: { timeout: 300 },
+    source: 'autoload:my-repo',
+    is_disabled: false,
+    modified_spec: null,
+    active_count: 0,
+    total_executions: 0,
+    total_tokens_used: 0,
+    last_execution_at: null,
+  }
 
-  it('should group agents by repository name', async () => {
-    const pool = mockPool([{ rows: repoAgentRows }])
-    const ctx = makeCtx(pool)
-
-    const result = await Query.repoAgentGroups(null, null, ctx)
-
-    expect(result).toHaveLength(2)
-    expect(result[0].repoName).toBe('app1')
-    expect(result[0].agents).toHaveLength(2)
-    expect(result[1].repoName).toBe('app2')
-    expect(result[1].agents).toHaveLength(1)
+  it('should map autoload:<repo> source to AUTOLOADED with sourceRepo', () => {
+    const result = mapAgentDefinition(baseRow)
+    expect(result.source).toBe('AUTOLOADED')
+    expect(result.sourceRepo).toBe('my-repo')
   })
 
-  it('should return empty array when no repo agents exist', async () => {
-    const pool = mockPool([{ rows: [] }])
-    const ctx = makeCtx(pool)
-
-    const result = await Query.repoAgentGroups(null, null, ctx)
-    expect(result).toHaveLength(0)
+  it('should map agent_group to SYSTEM when value is system', () => {
+    const result = mapAgentDefinition({ ...baseRow, agent_group: 'system' })
+    expect(result.group).toBe('SYSTEM')
   })
 
-  it('should query with correct SQL filtering for repo sources', async () => {
-    const pool = mockPool([{ rows: [] }])
-    const ctx = makeCtx(pool)
-
-    await Query.repoAgentGroups(null, null, ctx)
-
-    const sql = pool.query.mock.calls[0][0] as string
-    expect(sql).toContain("ad.source LIKE 'repo:%'")
-    expect(sql).toContain('ad.is_active = true')
+  it('should map agent_group to PIPELINE when value is pipeline', () => {
+    const result = mapAgentDefinition({ ...baseRow, agent_group: 'pipeline' })
+    expect(result.group).toBe('PIPELINE')
   })
 
-  it('should correctly map agent definitions within groups', async () => {
-    const pool = mockPool([{ rows: [repoAgentRows[2]] }])
-    const ctx = makeCtx(pool)
-
-    const result = await Query.repoAgentGroups(null, null, ctx)
-
-    expect(result[0].agents[0].name).toBe('agent-c')
-    expect(result[0].agents[0].source).toBe('REPOSITORY')
-    expect(result[0].agents[0].sourceRepo).toBe('app2')
-    expect(result[0].agents[0].isDisabled).toBe(true)
+  it('should default agent_group to PIPELINE when not specified', () => {
+    const result = mapAgentDefinition({ ...baseRow, agent_group: undefined })
+    expect(result.group).toBe('PIPELINE')
   })
+})
 
-  it('should handle single repo with multiple agents', async () => {
-    const pool = mockPool([{ rows: [repoAgentRows[0], repoAgentRows[1]] }])
-    const ctx = makeCtx(pool)
+// ── Verify repoAgentGroups has been removed ──────────────────────────────────
 
-    const result = await Query.repoAgentGroups(null, null, ctx)
-
-    expect(result).toHaveLength(1)
-    expect(result[0].repoName).toBe('app1')
-    expect(result[0].agents).toHaveLength(2)
-    expect(result[0].agents[0].name).toBe('agent-a')
-    expect(result[0].agents[1].name).toBe('agent-b')
+describe('repoAgentGroups removal', () => {
+  it('should not have repoAgentGroups on Query (removed with repo_agent_scans)', () => {
+    expect((Query as Record<string, unknown>)['repoAgentGroups']).toBeUndefined()
   })
 })
