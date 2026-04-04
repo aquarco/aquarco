@@ -108,6 +108,7 @@ type Task {
   prNumber: Int
   branchName: String
   totalCostUsd: Float
+  totalTokens: Int
   stages: [Stage!]!
   context: [ContextEntry!]!
 }

@@ -713,6 +713,7 @@ export default function TaskDetailPage() {
                     ? 'EXECUTING' : stage.status
                   const isLive = effectiveStatus === 'EXECUTING'
                   const stageCost = stage.costUsd
+                  const stageTotalTokens = (stage.tokensInput ?? 0) + (stage.tokensOutput ?? 0) + (stage.cacheReadTokens ?? 0) + (stage.cacheWriteTokens ?? 0)
 
                   const output = stage.structuredOutput as Record<string, unknown> | null
                   const findings = output?.findings as Array<{
@@ -744,6 +745,11 @@ export default function TaskDetailPage() {
                             {stageCost != null && stageCost > 0 && (
                               <Typography variant="caption" fontWeight={600} color="warning.main">
                                 {isLive ? '~' : ''}{formatCost(stageCost)}
+                              </Typography>
+                            )}
+                            {stageTotalTokens > 0 && (
+                              <Typography variant="caption" color="text.secondary" sx={monoStyle}>
+                                {formatTokens(stageTotalTokens)}
                               </Typography>
                             )}
                             <StageDuration

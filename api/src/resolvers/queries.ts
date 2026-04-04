@@ -233,7 +233,10 @@ export const Query = {
         "SELECT COUNT(*) AS count FROM agent_instances WHERE active_count > 0"
       ),
       ctx.pool.query<{ total: string }>(`
-        SELECT COALESCE(SUM(tokens_input + tokens_output), 0) AS total
+        SELECT COALESCE(SUM(
+          COALESCE(tokens_input, 0) + COALESCE(tokens_output, 0) +
+          COALESCE(cache_read_tokens, 0) + COALESCE(cache_write_tokens, 0)
+        ), 0) AS total
         FROM stages
         WHERE started_at >= CURRENT_DATE
       `),

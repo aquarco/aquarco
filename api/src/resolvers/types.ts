@@ -54,6 +54,22 @@ export const Task = {
     return val > 0 ? val : null
   },
 
+  async totalTokens(
+    parent: { id: string },
+    _: unknown,
+    ctx: Context
+  ): Promise<number | null> {
+    const result = await ctx.pool.query<{ total: string }>(
+      `SELECT COALESCE(SUM(
+        COALESCE(tokens_input, 0) + COALESCE(tokens_output, 0) +
+        COALESCE(cache_read_tokens, 0) + COALESCE(cache_write_tokens, 0)
+      ), 0) AS total FROM stages WHERE task_id = $1`,
+      [parent.id]
+    )
+    const val = parseInt(result.rows[0].total, 10)
+    return val > 0 ? val : null
+  },
+
   async stages(
     parent: { id: string },
     _: unknown,

@@ -546,6 +546,7 @@ export type Task = {
   status: TaskStatus;
   title: Scalars['String']['output'];
   totalCostUsd?: Maybe<Scalars['Float']['output']>;
+  totalTokens?: Maybe<Scalars['Int']['output']>;
   updatedAt: Scalars['DateTime']['output'];
 };
 
@@ -1079,6 +1080,7 @@ export type TaskResolvers<ContextType = Context, ParentType extends ResolversPar
   status?: Resolver<ResolversTypes['TaskStatus'], ParentType, ContextType>;
   title?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   totalCostUsd?: Resolver<Maybe<ResolversTypes['Float']>, ParentType, ContextType>;
+  totalTokens?: Resolver<Maybe<ResolversTypes['Int']>, ParentType, ContextType>;
   updatedAt?: Resolver<ResolversTypes['DateTime'], ParentType, ContextType>;
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
