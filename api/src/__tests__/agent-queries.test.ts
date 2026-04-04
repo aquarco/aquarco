@@ -31,6 +31,7 @@ function makeCtx(pool: { query: jest.Mock }): Context {
       stagesByTaskLoader: { load: jest.fn() } as unknown as Context['loaders']['stagesByTaskLoader'],
       contextByTaskLoader: { load: jest.fn() } as unknown as Context['loaders']['contextByTaskLoader'],
     },
+    req: { headers: {} } as unknown as Context['req'],
   }
 }
 

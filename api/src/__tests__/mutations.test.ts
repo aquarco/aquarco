@@ -32,6 +32,7 @@ function makeCtx(pool: { query: jest.Mock }): Context {
       stagesByTaskLoader: { load: jest.fn() } as unknown as Context['loaders']['stagesByTaskLoader'],
       contextByTaskLoader: { load: jest.fn() } as unknown as Context['loaders']['contextByTaskLoader'],
     },
+    req: { headers: {} } as unknown as Context['req'],
   }
 }
 
@@ -326,6 +327,67 @@ describe('Mutation.cancelTask', () => {
 
     expect(result.task).toBeNull()
     expect(result.errors[0].field).toBe('id')
+  })
+
+  it('should exclude terminal statuses in the SQL WHERE clause', async () => {
+    const pool = mockPool([{ rows: [baseTaskRow] }])
+    const ctx = makeCtx(pool)
+
+    await Mutation.cancelTask(null, { id: 'task-1' }, ctx)
+
+    const sql = pool.query.mock.calls[0][0] as string
+    expect(sql).toContain("NOT IN ('completed', 'failed', 'timeout', 'closed')")
+  })
+
+  it('should refuse to cancel a completed task', async () => {
+    const pool = mockPool([
+      { rows: [] },                            // UPDATE — no match (terminal status guard)
+      { rows: [{ status: 'completed' }] },     // exists check
+    ])
+    const ctx = makeCtx(pool)
+
+    const result = await Mutation.cancelTask(null, { id: 'task-1' }, ctx)
+
+    expect(result.task).toBeNull()
+    expect(result.errors[0].message).toContain('terminal status')
+    expect(result.errors[0].message).toContain('completed')
+  })
+
+  it('should refuse to cancel a failed task', async () => {
+    const pool = mockPool([
+      { rows: [] },                         // UPDATE — no match
+      { rows: [{ status: 'failed' }] },     // exists check
+    ])
+    const ctx = makeCtx(pool)
+
+    const result = await Mutation.cancelTask(null, { id: 'task-1' }, ctx)
+
+    expect(result.task).toBeNull()
+    expect(result.errors[0].message).toContain('terminal status')
+  })
+
+  it('should refuse to cancel a closed task', async () => {
+    const pool = mockPool([
+      { rows: [] },                         // UPDATE — no match
+      { rows: [{ status: 'closed' }] },     // exists check
+    ])
+    const ctx = makeCtx(pool)
+
+    const result = await Mutation.cancelTask(null, { id: 'task-1' }, ctx)
+
+    expect(result.task).toBeNull()
+    expect(result.errors[0].message).toContain('terminal status')
+  })
+
+  it('should return error payload when UPDATE throws', async () => {
+    const pool = mockPool([{ rows: [] }])
+    pool.query.mockRejectedValueOnce(new Error('db connection lost'))
+    const ctx = makeCtx(pool)
+
+    const result = await Mutation.cancelTask(null, { id: 'task-1' }, ctx)
+
+    expect(result.task).toBeNull()
+    expect(result.errors[0].message).toContain('db connection lost')
   })
 })
 
