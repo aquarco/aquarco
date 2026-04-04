@@ -297,6 +297,23 @@ async def test_reload_config_success(sample_config: Any, sample_config_path: Any
 
 
 @pytest.mark.asyncio
+async def test_reload_config_reloads_registry(sample_config: Any, sample_config_path: Any) -> None:
+    """_reload_config reloads the in-memory agent registry when present."""
+    supervisor = Supervisor(sample_config, {})
+    supervisor._config_file = str(sample_config_path)
+
+    mock_registry = AsyncMock()
+    mock_registry._agents = {"review-agent": {}}
+    supervisor._registry = mock_registry
+
+    with patch("aquarco_supervisor.main.load_config", return_value=sample_config), \
+         patch("aquarco_supervisor.main.load_secrets", return_value={}):
+        await supervisor._reload_config()
+
+    mock_registry.load.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_reload_config_failure_keeps_old(sample_config: Any) -> None:
     """If reload fails, old config is preserved."""
     supervisor = Supervisor(sample_config, {"old": "secret"})
