@@ -311,11 +311,19 @@ export const Mutation = {
              completed_at = NOW(),
              updated_at = NOW()
          WHERE id = $1
+           AND status NOT IN ('completed', 'failed', 'timeout', 'closed')
          RETURNING *`,
         [args.id]
       )
       if (result.rows.length === 0) {
-        return errorPayload('id', `Task "${args.id}" not found`)
+        const exists = await ctx.pool.query(
+          'SELECT status FROM tasks WHERE id = $1',
+          [args.id]
+        )
+        if (exists.rows.length === 0) {
+          return errorPayload('id', `Task "${args.id}" not found`)
+        }
+        return errorPayload('id', `Task "${args.id}" is already in terminal status "${exists.rows[0].status}"`)
       }
       return taskPayload(result.rows[0])
     } catch (err) {

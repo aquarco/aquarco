@@ -21,10 +21,16 @@ class GraphQLError(Exception):
 class GraphQLClient:
     """Thin synchronous wrapper around the Aquarco GraphQL API."""
 
-    def __init__(self, url: str | None = None, timeout: float | None = None) -> None:
+    def __init__(
+        self,
+        url: str | None = None,
+        timeout: float | None = None,
+        api_key: str | None = None,
+    ) -> None:
         _cfg = get_config()
         self.url = url or _cfg.api_url
         self.timeout = timeout or _cfg.http_timeout
+        self.api_key = api_key if api_key is not None else _cfg.api_key
 
     def execute(
         self, query: str, variables: dict[str, Any] | None = None
@@ -40,11 +46,15 @@ class GraphQLClient:
         if variables:
             payload["variables"] = variables
 
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+
         resp = httpx.post(
             self.url,
             json=payload,
             timeout=self.timeout,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
         )
         resp.raise_for_status()
 

@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import { IncomingMessage } from 'node:http'
 import { Pool } from 'pg'
 import { createLoaders, Loaders } from './loaders.js'
@@ -17,7 +18,11 @@ export function requireInternalAuth(ctx: Context): void {
   const expected = process.env.AQUARCO_INTERNAL_API_KEY
   if (!expected) return // no key configured — dev/internal mode
   const provided = ctx.req.headers['x-api-key']
-  if (provided !== expected) {
+  if (
+    typeof provided !== 'string' ||
+    provided.length !== expected.length ||
+    !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))
+  ) {
     throw new Error('Unauthorized: missing or invalid X-API-Key header')
   }
 }
