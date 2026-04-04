@@ -473,6 +473,9 @@ class Supervisor:
             self._secrets = load_secrets(self._config)
             self._apply_github_env()
             await self._sync_definitions_to_db()
+            if self._registry:
+                await self._registry.load()
+                log.info("agent_registry_reloaded", agent_count=len(self._registry._agents))
             log.info("config_reloaded")
         except Exception:
             log.exception("config_reload_failed")
