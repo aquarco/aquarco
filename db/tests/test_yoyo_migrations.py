@@ -58,7 +58,8 @@ EXPECTED_MIGRATIONS = [
     "034_checkpoint_stage_fk",
     "035_simplify_tasks",
     "036_supervisor_state",
-    "037_drop_repo_agent_scans",
+    "037_add_max_turns_stage_status",
+    "038_drop_repo_agent_scans",
 ]
 
 # Build expected dependency map: migration_name -> depends_on_name

@@ -1,5 +1,5 @@
--- 036: Create supervisor_state key/value table for drain mode
 -- depends: 035_simplify_tasks
+-- 036: Create supervisor_state key/value table for drain mode
 
 CREATE TABLE IF NOT EXISTS supervisor_state (
     key   TEXT PRIMARY KEY,

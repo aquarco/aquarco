@@ -1,4 +1,4 @@
--- Rollback migration 036: Recreate repo_agent_scans table
+-- Rollback migration 038: Recreate repo_agent_scans table
 SET search_path TO aquarco, public;
 
 CREATE TABLE IF NOT EXISTS repo_agent_scans (
