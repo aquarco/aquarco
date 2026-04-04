@@ -20,7 +20,7 @@ from ..config_overlay import (
 )
 from .conditions import ConditionResult, evaluate_ai_condition, evaluate_conditions
 from ..database import Database
-from ..exceptions import NoAvailableAgentError, PipelineError, RetryableError, StageError, _cooldown_for_error
+from ..exceptions import NoAvailableAgentError, PipelineError, RateLimitError, RetryableError, StageError, _cooldown_for_error
 from ..logging import get_logger
 from ..models import Complexity, PipelineConfig, TaskStatus
 from ..task_queue import TaskQueue
@@ -1179,6 +1179,30 @@ class PipelineExecutor:
 
         output["_agent_name"] = agent_name
         output["_iterations"] = iteration
+
+        # Detect rate-limit delivered as is_error=True inside a "success" result.
+        # Claude CLI can exit 0 but embed a rate_limit_event in the NDJSON output.
+        # Without raising here the executor loop would continue and mark every
+        # subsequent stage rate_limited before the task is ever postponed.
+        if output.get("_is_error"):
+            raw = claude_output.raw or ""
+            resets_at: str | None = None
+            for _line in raw.splitlines():
+                _line = _line.strip()
+                if not _line:
+                    continue
+                try:
+                    _msg = json.loads(_line)
+                    if isinstance(_msg, dict) and _msg.get("type") == "rate_limit_event":
+                        resets_at = (_msg.get("rate_limit_info") or {}).get("resetsAt")
+                        raise RateLimitError(
+                            f"Claude API rate limited (rate_limit_event); resetsAt={resets_at} "
+                            f"(task={task_id}, stage={stage_num})",
+                            session_id=output.get("_session_id"),
+                        )
+                except json.JSONDecodeError:
+                    continue
+
         # Carry raw NDJSON log so store_stage_output persists it to raw_output column
         output["_raw_output"] = claude_output.raw
 
