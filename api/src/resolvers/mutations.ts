@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { Context, requireInternalAuth } from '../context.js'
-import { mapRepository, mapStage, mapAgentDefinition, mapRepoAgentScan, fetchAgentWithOverrides, getDrainStatus } from './queries.js'
+import { mapRepository, mapStage, mapAgentDefinition, fetchAgentWithOverrides, getDrainStatus } from './queries.js'
 import { mapTask } from './mappers.js'
 
 // GraphQL enum values are UPPER_CASE; DB stores lower_case
@@ -52,10 +52,6 @@ function validateSpec(spec: unknown): string | null {
 
 function prErrorPayload(message: string) {
   return { prUrl: null, errors: [{ field: null, message }] }
-}
-
-function scanErrorPayload(field: string | null, message: string) {
-  return { scan: null, errors: [{ field, message }] }
 }
 
 export const Mutation = {
@@ -521,79 +517,6 @@ export const Mutation = {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to unblock task'
       return errorPayload(null, message)
-    }
-  },
-
-  // --- Agent scan mutations ---
-
-  async reloadRepoAgents(
-    _: unknown,
-    args: { repoName: string },
-    ctx: Context
-  ) {
-    try {
-      // Verify repository exists and is READY
-      const repoResult = await ctx.pool.query<Record<string, unknown>>(
-        'SELECT name, clone_status, clone_dir FROM repositories WHERE name = $1',
-        [args.repoName]
-      )
-      if (repoResult.rows.length === 0) {
-        return scanErrorPayload('repoName', `Repository "${args.repoName}" not found`)
-      }
-      const repo = repoResult.rows[0]
-      if ((repo.clone_status as string) !== 'ready') {
-        return scanErrorPayload('repoName', `Repository "${args.repoName}" is not ready (status: ${repo.clone_status})`)
-      }
-
-      // Check if scan is already in progress
-      const inProgress = await ctx.pool.query<Record<string, unknown>>(
-        `SELECT id FROM repo_agent_scans
-         WHERE repo_name = $1
-           AND status IN ('pending', 'scanning', 'analyzing', 'writing')
-         LIMIT 1`,
-        [args.repoName]
-      )
-      if (inProgress.rows.length > 0) {
-        return scanErrorPayload('repoName', `A scan is already in progress for "${args.repoName}"`)
-      }
-
-      // Rate limiting: check if a scan was completed within last 5 minutes
-      const recentScan = await ctx.pool.query<Record<string, unknown>>(
-        `SELECT id FROM repo_agent_scans
-         WHERE repo_name = $1
-           AND created_at > NOW() - INTERVAL '5 minutes'
-         LIMIT 1`,
-        [args.repoName]
-      )
-      if (recentScan.rows.length > 0) {
-        return scanErrorPayload('repoName', `Rate limited: please wait 5 minutes between scans for "${args.repoName}"`)
-      }
-
-      // Create a pending scan record
-      const scanResult = await ctx.pool.query<Record<string, unknown>>(
-        `INSERT INTO repo_agent_scans (repo_name, status, created_at)
-         VALUES ($1, 'pending', NOW())
-         RETURNING *`,
-        [args.repoName]
-      )
-
-      // Write IPC command file to trigger supervisor to process the scan
-      const fs = await import('node:fs/promises')
-      const path = await import('node:path')
-      const ipcDir = process.env.IPC_DIR ?? '/claude-ipc'
-      await fs.mkdir(ipcDir, { recursive: true })
-      const cmdFile = path.join(ipcDir, `agent-scan-${args.repoName}-${Date.now()}.json`)
-      await fs.writeFile(cmdFile, JSON.stringify({
-        command: 'agent-scan',
-        repoName: args.repoName,
-        scanId: scanResult.rows[0].id,
-        cloneDir: repo.clone_dir,
-      }))
-
-      return { scan: mapRepoAgentScan(scanResult.rows[0]), errors: [] }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to start agent scan'
-      return scanErrorPayload(null, message)
     }
   },
 

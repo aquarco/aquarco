@@ -114,56 +114,6 @@ export const Query = {
     return result.rows.map(mapAgentDefinition)
   },
 
-  async repoAgentGroups(_: unknown, __: unknown, ctx: Context) {
-    const result = await ctx.pool.query<Record<string, unknown>>(
-      `SELECT
-         ad.name, ad.version, ad.description, ad.spec, ad.source,
-         COALESCE(ad.agent_group, 'pipeline') AS agent_group,
-         COALESCE(ao.is_disabled, false) AS is_disabled,
-         ao.modified_spec,
-         COALESCE(ai.active_count, 0) AS active_count,
-         COALESCE(ai.total_executions, 0) AS total_executions,
-         COALESCE(ai.total_tokens_used, 0) AS total_tokens_used,
-         ai.last_execution_at
-       FROM agent_definitions ad
-       LEFT JOIN agent_overrides ao
-         ON ao.agent_name = ad.name AND ao.scope = ad.source
-       LEFT JOIN agent_instances ai
-         ON ai.agent_name = ad.name
-       WHERE ad.is_active = true
-         AND (ad.source LIKE 'repo:%' OR ad.source LIKE 'autoload:%')
-       ORDER BY ad.source, ad.name ASC`
-    )
-
-    // Group by repository (handles both repo: and autoload: prefixes)
-    const groupMap = new Map<string, Array<ReturnType<typeof mapAgentDefinition>>>()
-    for (const row of result.rows) {
-      const source = row.source as string
-      const repoName = source.replace(/^(repo|autoload):/, '')
-      if (!groupMap.has(repoName)) {
-        groupMap.set(repoName, [])
-      }
-      groupMap.get(repoName)!.push(mapAgentDefinition(row))
-    }
-
-    return Array.from(groupMap.entries()).map(([repoName, agents]) => ({
-      repoName,
-      agents,
-    }))
-  },
-
-  async repoAgentScan(_: unknown, args: { repoName: string }, ctx: Context) {
-    const result = await ctx.pool.query<Record<string, unknown>>(
-      `SELECT * FROM repo_agent_scans
-       WHERE repo_name = $1
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [args.repoName]
-    )
-    if (result.rows.length === 0) return null
-    return mapRepoAgentScan(result.rows[0])
-  },
-
   async pipelineStatus(_: unknown, args: { taskId: string }, ctx: Context) {
     const taskResult = await ctx.pool.query<Record<string, unknown>>(
       'SELECT * FROM tasks WHERE id = $1',
@@ -393,20 +343,6 @@ export function mapRepository(row: Record<string, unknown>) {
     deployPublicKey: row.deploy_public_key ?? null,
     // taskCount resolved by Repository field resolver
     _name: row.name,
-  }
-}
-
-export function mapRepoAgentScan(row: Record<string, unknown>) {
-  return {
-    id: row.id,
-    repoName: row.repo_name,
-    status: (row.status as string).toUpperCase(),
-    agentsFound: row.agents_found ?? 0,
-    agentsCreated: row.agents_created ?? 0,
-    errorMessage: row.error_message ?? null,
-    startedAt: row.started_at ?? null,
-    completedAt: row.completed_at ?? null,
-    createdAt: row.created_at,
   }
 }
 

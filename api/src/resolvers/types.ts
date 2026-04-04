@@ -1,6 +1,6 @@
 import { Context } from '../context.js'
 import { RepositoryRow, StageRow, ContextRow } from '../loaders.js'
-import { mapStage, mapRepoAgentScan } from './queries.js'
+import { mapStage } from './queries.js'
 
 // ---- Scalar resolvers ----
 
@@ -115,31 +115,6 @@ export const Repository = {
        WHERE source = $1 AND is_active = true`,
       [`autoload:${parent.name}`]
     )
-    if (parseInt(result.rows[0].count, 10) > 0) return true
-
-    // Check if a successful scan found agents (even if definitions were later removed)
-    const scanResult = await ctx.pool.query<{ agents_found: number }>(
-      `SELECT agents_found FROM repo_agent_scans
-       WHERE repo_name = $1 AND status = 'completed' AND agents_found > 0
-       ORDER BY created_at DESC LIMIT 1`,
-      [parent.name]
-    )
-    return scanResult.rows.length > 0
-  },
-
-  async lastAgentScan(
-    parent: { name: string } | RepositoryRow,
-    _: unknown,
-    ctx: Context
-  ) {
-    const result = await ctx.pool.query<Record<string, unknown>>(
-      `SELECT * FROM repo_agent_scans
-       WHERE repo_name = $1
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [parent.name]
-    )
-    if (result.rows.length === 0) return null
-    return mapRepoAgentScan(result.rows[0])
+    return parseInt(result.rows[0].count, 10) > 0
   },
 }

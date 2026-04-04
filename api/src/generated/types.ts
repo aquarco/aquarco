@@ -134,6 +134,13 @@ export type DashboardStats = {
   totalTokensToday: Scalars['Int']['output'];
 };
 
+export type DrainStatus = {
+  __typename?: 'DrainStatus';
+  activeAgents: Scalars['Int']['output'];
+  activeTasks: Scalars['Int']['output'];
+  enabled: Scalars['Boolean']['output'];
+};
+
 export type Error = {
   __typename?: 'Error';
   field?: Maybe<Scalars['String']['output']>;
@@ -192,6 +199,7 @@ export type Mutation = {
   retryTask: TaskPayload;
   setAgentDisabled: AgentDefinitionPayload;
   setConfigRepo: RepositoryPayload;
+  setDrainMode: DrainStatus;
   unblockTask: TaskPayload;
   updateTaskStatus: TaskPayload;
 };
@@ -278,6 +286,11 @@ export type MutationSetConfigRepoArgs = {
 };
 
 
+export type MutationSetDrainModeArgs = {
+  enabled: Scalars['Boolean']['input'];
+};
+
+
 export type MutationUnblockTaskArgs = {
   id: Scalars['ID']['input'];
   resolution: Scalars['String']['input'];
@@ -335,6 +348,7 @@ export type Query = {
   agentInstances: Array<AgentInstance>;
   claudeAuthStatus: ClaudeAuthStatus;
   dashboardStats: DashboardStats;
+  drainStatus: DrainStatus;
   githubAuthStatus: GithubAuthStatus;
   githubBranches: Array<Scalars['String']['output']>;
   githubRepositories: Array<GithubRepo>;
@@ -647,6 +661,7 @@ export type ResolversTypes = ResolversObject<{
   CreateTaskInput: CreateTaskInput;
   DashboardStats: ResolverTypeWrapper<DashboardStats>;
   DateTime: ResolverTypeWrapper<Scalars['DateTime']['output']>;
+  DrainStatus: ResolverTypeWrapper<DrainStatus>;
   Error: ResolverTypeWrapper<Error>;
   Float: ResolverTypeWrapper<Scalars['Float']['output']>;
   GithubAuthStatus: ResolverTypeWrapper<GithubAuthStatus>;
@@ -695,6 +710,7 @@ export type ResolversParentTypes = ResolversObject<{
   CreateTaskInput: CreateTaskInput;
   DashboardStats: DashboardStats;
   DateTime: Scalars['DateTime']['output'];
+  DrainStatus: DrainStatus;
   Error: Error;
   Float: Scalars['Float']['output'];
   GithubAuthStatus: GithubAuthStatus;
@@ -818,6 +834,13 @@ export interface DateTimeScalarConfig extends GraphQLScalarTypeConfig<ResolversT
   name: 'DateTime';
 }
 
+export type DrainStatusResolvers<ContextType = Context, ParentType extends ResolversParentTypes['DrainStatus'] = ResolversParentTypes['DrainStatus']> = ResolversObject<{
+  activeAgents?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  activeTasks?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  enabled?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
 export type ErrorResolvers<ContextType = Context, ParentType extends ResolversParentTypes['Error'] = ResolversParentTypes['Error']> = ResolversObject<{
   field?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   message?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
@@ -879,6 +902,7 @@ export type MutationResolvers<ContextType = Context, ParentType extends Resolver
   retryTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationRetryTaskArgs, 'id'>>;
   setAgentDisabled?: Resolver<ResolversTypes['AgentDefinitionPayload'], ParentType, ContextType, RequireFields<MutationSetAgentDisabledArgs, 'disabled' | 'name' | 'scope'>>;
   setConfigRepo?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationSetConfigRepoArgs, 'isConfigRepo' | 'name'>>;
+  setDrainMode?: Resolver<ResolversTypes['DrainStatus'], ParentType, ContextType, RequireFields<MutationSetDrainModeArgs, 'enabled'>>;
   unblockTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationUnblockTaskArgs, 'id' | 'resolution'>>;
   updateTaskStatus?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationUpdateTaskStatusArgs, 'id' | 'status'>>;
 }>;
@@ -928,6 +952,7 @@ export type QueryResolvers<ContextType = Context, ParentType extends ResolversPa
   agentInstances?: Resolver<Array<ResolversTypes['AgentInstance']>, ParentType, ContextType>;
   claudeAuthStatus?: Resolver<ResolversTypes['ClaudeAuthStatus'], ParentType, ContextType>;
   dashboardStats?: Resolver<ResolversTypes['DashboardStats'], ParentType, ContextType>;
+  drainStatus?: Resolver<ResolversTypes['DrainStatus'], ParentType, ContextType>;
   githubAuthStatus?: Resolver<ResolversTypes['GithubAuthStatus'], ParentType, ContextType>;
   githubBranches?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType, RequireFields<QueryGithubBranchesArgs, 'owner' | 'repo'>>;
   githubRepositories?: Resolver<Array<ResolversTypes['GithubRepo']>, ParentType, ContextType>;
@@ -1084,6 +1109,7 @@ export type Resolvers<ContextType = Context> = ResolversObject<{
   CreatePRPayload?: CreatePrPayloadResolvers<ContextType>;
   DashboardStats?: DashboardStatsResolvers<ContextType>;
   DateTime?: GraphQLScalarType;
+  DrainStatus?: DrainStatusResolvers<ContextType>;
   Error?: ErrorResolvers<ContextType>;
   GithubAuthStatus?: GithubAuthStatusResolvers<ContextType>;
   GithubDeviceCode?: GithubDeviceCodeResolvers<ContextType>;

@@ -4,8 +4,6 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useMutation } from '@apollo/client'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
-import Tab from '@mui/material/Tab'
-import Tabs from '@mui/material/Tabs'
 import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
 import Dialog from '@mui/material/Dialog'
@@ -26,28 +24,12 @@ import {
   CLAUDE_LOGOUT,
 } from '@/lib/graphql/queries'
 import GlobalAgentsTab from '@/components/agents/GlobalAgentsTab'
-import RepoAgentsTab from '@/components/agents/RepoAgentsTab'
-
-interface TabPanelProps {
-  children?: React.ReactNode
-  index: number
-  value: number
-}
-
-function TabPanel({ children, value, index }: TabPanelProps) {
-  return (
-    <Box role="tabpanel" hidden={value !== index} sx={{ pt: 2 }}>
-      {value === index && children}
-    </Box>
-  )
-}
 
 type LoginStep = 'idle' | 'starting' | 'authorize' | 'paste-code' | 'submitting' | 'done'
 
 export default function AgentsPage() {
   const { data: authData, loading: authLoading, refetch: refetchAuth } = useQuery(CLAUDE_AUTH_STATUS)
 
-  const [tabIndex, setTabIndex] = useState(0)
   const [loginDialogOpen, setLoginDialogOpen] = useState(false)
   const [loginStep, setLoginStep] = useState<LoginStep>('idle')
   const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null)
@@ -200,22 +182,9 @@ export default function AgentsPage() {
         </Stack>
       </Stack>
 
-      <Tabs
-        value={tabIndex}
-        onChange={(_, newValue) => setTabIndex(newValue)}
-        sx={{ borderBottom: 1, borderColor: 'divider' }}
-      >
-        <Tab label="Global Agents" data-testid="tab-global-agents" />
-        <Tab label="Repository Agents" data-testid="tab-repo-agents" />
-      </Tabs>
-
-      <TabPanel value={tabIndex} index={0}>
+      <Box sx={{ pt: 2 }}>
         <GlobalAgentsTab />
-      </TabPanel>
-
-      <TabPanel value={tabIndex} index={1}>
-        <RepoAgentsTab />
-      </TabPanel>
+      </Box>
 
       {/* Claude Login dialog */}
       <Dialog open={loginDialogOpen} onClose={handleLoginDialogClose} maxWidth="sm" fullWidth>
