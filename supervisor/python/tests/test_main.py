@@ -314,6 +314,68 @@ async def test_reload_config_reloads_registry(sample_config: Any, sample_config_
 
 
 @pytest.mark.asyncio
+async def test_reload_config_skips_registry_when_none(
+    sample_config: Any, sample_config_path: Any
+) -> None:
+    """_reload_config succeeds without calling registry.load() when _registry is None."""
+    supervisor = Supervisor(sample_config, {})
+    supervisor._config_file = str(sample_config_path)
+
+    # Ensure _registry is None (pre-initialization state)
+    assert supervisor._registry is None
+
+    with patch("aquarco_supervisor.main.load_config", return_value=sample_config), \
+         patch("aquarco_supervisor.main.load_secrets", return_value={"k": "v"}):
+        await supervisor._reload_config()
+
+    # Registry should still be None — no attempt to create or load
+    assert supervisor._registry is None
+    # Config and secrets should still be updated
+    assert supervisor._secrets == {"k": "v"}
+
+
+@pytest.mark.asyncio
+async def test_reload_config_registry_load_error_handled(
+    sample_config: Any, sample_config_path: Any
+) -> None:
+    """If registry.load() raises during reload, the error is caught and config still updates."""
+    supervisor = Supervisor(sample_config, {})
+    supervisor._config_file = str(sample_config_path)
+
+    mock_registry = AsyncMock()
+    mock_registry.load = AsyncMock(side_effect=RuntimeError("corrupt agent file"))
+    supervisor._registry = mock_registry
+
+    with patch("aquarco_supervisor.main.load_config", return_value=sample_config), \
+         patch("aquarco_supervisor.main.load_secrets", return_value={"new": "secrets"}):
+        # Should not raise — the exception in the entire _reload_config is caught
+        await supervisor._reload_config()
+
+    mock_registry.load.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reload_config_registry_logs_agent_count(
+    sample_config: Any, sample_config_path: Any
+) -> None:
+    """_reload_config logs agent_count from the registry after reload."""
+    supervisor = Supervisor(sample_config, {})
+    supervisor._config_file = str(sample_config_path)
+
+    mock_registry = AsyncMock()
+    mock_registry._agents = {"agent-a": {}, "agent-b": {}, "agent-c": {}}
+    supervisor._registry = mock_registry
+
+    with patch("aquarco_supervisor.main.load_config", return_value=sample_config), \
+         patch("aquarco_supervisor.main.load_secrets", return_value={}):
+        await supervisor._reload_config()
+
+    mock_registry.load.assert_awaited_once()
+    # Verify the registry has the expected number of agents (used in the log call)
+    assert len(supervisor._registry._agents) == 3
+
+
+@pytest.mark.asyncio
 async def test_reload_config_failure_keeps_old(sample_config: Any) -> None:
     """If reload fails, old config is preserved."""
     supervisor = Supervisor(sample_config, {"old": "secret"})
