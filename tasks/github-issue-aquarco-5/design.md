@@ -284,7 +284,7 @@ Sub-app:
 aquarco watch add <url> [--name NAME] [--branch BRANCH] [--pollers github-tasks,github-source]
 ```
 
-1. Parse repo URL to extract default name (e.g., `borissuska/myapp` -> `myapp`)
+1. Parse repo URL to extract default name (e.g., `aquarco/myapp` -> `myapp`)
 2. Call `registerRepository` mutation with `{name, url, branch, pollers}`
 3. Poll `repository(name)` query until `cloneStatus` is `READY` or `ERROR` (with spinner)
 4. Print result

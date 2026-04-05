@@ -8,7 +8,7 @@ Validates:
 - Vagrantfile port forwarding configuration
 - Monitoring stack subpath configuration
 
-Issue: https://github.com/borissuska/aquarco/issues/2
+Issue: https://github.com/aquarco/aquarco/issues/2
 """
 
 import os

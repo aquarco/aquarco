@@ -1,6 +1,6 @@
 # Design: Redesign Agents Page
 
-**Task:** [GitHub Issue #1](https://github.com/borissuska/aquarco/issues/1)
+**Task:** [GitHub Issue #1](https://github.com/aquarco/aquarco/issues/1)
 **Date:** 2026-03-25
 **Status:** Design
 

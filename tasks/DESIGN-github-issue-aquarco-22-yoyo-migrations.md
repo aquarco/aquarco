@@ -1,7 +1,7 @@
 # Design: Convert to Yoyo Migrations
 
 **Task:** github-issue-aquarco-22
-**Issue:** https://github.com/borissuska/aquarco/issues/22
+**Issue:** https://github.com/aquarco/aquarco/issues/22
 **Date:** 2026-03-25
 
 ## Summary

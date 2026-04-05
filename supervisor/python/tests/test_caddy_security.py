@@ -7,7 +7,7 @@ Validates findings from the review stage:
 - No secrets in config files
 - Network isolation patterns
 
-Issue: https://github.com/borissuska/aquarco/issues/2
+Issue: https://github.com/aquarco/aquarco/issues/2
 """
 
 import re
