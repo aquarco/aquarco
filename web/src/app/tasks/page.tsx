@@ -27,7 +27,7 @@ import { StatusChip } from '@/components/ui/StatusChip'
 import { CreateTaskDialog } from '@/components/tasks/CreateTaskDialog'
 import { monoStyle } from '@/lib/theme'
 import { formatDate, formatElapsed } from '@/lib/format'
-import { formatCost } from '@/lib/spending'
+import { formatCost, formatTokens } from '@/lib/spending'
 
 const TASK_STATUSES = ['PENDING', 'QUEUED', 'PLANNING', 'EXECUTING', 'COMPLETED', 'FAILED', 'TIMEOUT', 'BLOCKED']
 
@@ -40,6 +40,7 @@ interface Task {
   updatedAt: string
   pipeline?: string | null
   totalCostUsd?: number | null
+  totalTokens?: number | null
   completedAt?: string | null
 }
 
@@ -179,6 +180,11 @@ export default function TasksPage() {
                       <Typography variant="body2" color="warning.main" sx={{ ...monoStyle, fontSize: '0.8rem' }}>
                         {formatCost(task.totalCostUsd)}
                       </Typography>
+                      {task.totalTokens != null && task.totalTokens > 0 && (
+                        <Typography variant="caption" color="text.secondary" sx={{ ...monoStyle, fontSize: '0.7rem', display: 'block' }}>
+                          {formatTokens(task.totalTokens)}
+                        </Typography>
+                      )}
                     </TableCell>
                     <TableCell title={formatDate(task.updatedAt)}>
                       {['COMPLETED', 'FAILED', 'TIMEOUT', 'CLOSED'].includes(task.status?.toUpperCase())

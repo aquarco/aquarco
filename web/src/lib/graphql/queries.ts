@@ -52,6 +52,7 @@ export const GET_TASKS = gql`
         updatedAt
         pipeline
         totalCostUsd
+        totalTokens
       }
       totalCount
     }

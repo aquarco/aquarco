@@ -430,6 +430,8 @@ describe('Query.dashboardStats', () => {
       { rows: [{ count: '2' }] },
       // tokens
       { rows: [{ total: '15000' }] },
+      // cost
+      { rows: [{ total: '4.50' }] },
     ])
     const ctx = makeCtx(pool)
 
@@ -443,6 +445,7 @@ describe('Query.dashboardStats', () => {
     expect(result.blockedTasks).toBe(0)
     expect(result.activeAgents).toBe(2)
     expect(result.totalTokensToday).toBe(15000)
+    expect(result.totalCostToday).toBe(4.5)
   })
 
   it('should return pipeline counts in tasksByPipeline', async () => {
@@ -451,6 +454,7 @@ describe('Query.dashboardStats', () => {
       { rows: [{ pipeline: 'feature-pipeline', count: '2' }] },
       { rows: [] },
       { rows: [{ count: '0' }] },
+      { rows: [{ total: '0' }] },
       { rows: [{ total: '0' }] },
     ])
     const ctx = makeCtx(pool)

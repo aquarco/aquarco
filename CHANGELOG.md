@@ -1,5 +1,18 @@
 # Changelog
 
+## [2026-04-04] — Show token counts alongside costs (#82)
+
+### Added
+- **Total tokens display in Dashboard** — new "Tokens Today" stat card showing sum of all input, output, cache read, and cache write tokens from today's tasks
+- **Token count in task list** — each row now displays per-task total token count alongside the cost
+- **Per-stage token totals** — stage accordion headers now show the sum of all token columns for that stage next to the stage cost
+- **`Task.totalTokens` GraphQL field** — new resolver that sums `tokens_input + tokens_output + cache_read_tokens + cache_write_tokens` for a given task
+
+### Changed
+- **`dashboardStats` SQL query** — now includes `cache_read_tokens + cache_write_tokens` in `totalTokensToday` sum (previously only counted input + output)
+- **`formatTokens()` utility** (`web/src/lib/spending.ts`) — enhanced to handle null/undefined/zero values (returns "—" dash for empty)
+- **GraphQL schema** — `Task` type now includes `totalTokens: Int` field
+
 ## [2026-04-04] — Production build: fix image versioning and backup serialization (#4)
 
 ### Fixed

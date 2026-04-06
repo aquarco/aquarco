@@ -191,7 +191,6 @@ export type Mutation = {
   githubLogout: Scalars['Boolean']['output'];
   modifyAgent: AgentDefinitionPayload;
   registerRepository: RepositoryPayload;
-  reloadRepoAgents: RepoAgentScanPayload;
   removeRepository: RepositoryPayload;
   rerunTask: TaskPayload;
   resetAgentModification: AgentDefinitionPayload;
@@ -239,11 +238,6 @@ export type MutationModifyAgentArgs = {
 
 export type MutationRegisterRepositoryArgs = {
   input: RegisterRepositoryInput;
-};
-
-
-export type MutationReloadRepoAgentsArgs = {
-  repoName: Scalars['String']['input'];
 };
 
 
@@ -355,8 +349,6 @@ export type Query = {
   globalAgents: Array<AgentDefinition>;
   pipelineDefinitions: Array<PipelineDefinition>;
   pipelineStatus?: Maybe<PipelineStatus>;
-  repoAgentGroups: Array<RepoAgentGroup>;
-  repoAgentScan?: Maybe<RepoAgentScan>;
   repositories: Array<Repository>;
   repository?: Maybe<Repository>;
   task?: Maybe<Task>;
@@ -372,11 +364,6 @@ export type QueryGithubBranchesArgs = {
 
 export type QueryPipelineStatusArgs = {
   taskId: Scalars['ID']['input'];
-};
-
-
-export type QueryRepoAgentScanArgs = {
-  repoName: Scalars['String']['input'];
 };
 
 
@@ -406,40 +393,6 @@ export type RegisterRepositoryInput = {
   url: Scalars['String']['input'];
 };
 
-export type RepoAgentGroup = {
-  __typename?: 'RepoAgentGroup';
-  agents: Array<AgentDefinition>;
-  repoName: Scalars['String']['output'];
-};
-
-export type RepoAgentScan = {
-  __typename?: 'RepoAgentScan';
-  agentsCreated: Scalars['Int']['output'];
-  agentsFound: Scalars['Int']['output'];
-  completedAt?: Maybe<Scalars['DateTime']['output']>;
-  createdAt: Scalars['DateTime']['output'];
-  errorMessage?: Maybe<Scalars['String']['output']>;
-  id: Scalars['ID']['output'];
-  repoName: Scalars['String']['output'];
-  startedAt?: Maybe<Scalars['DateTime']['output']>;
-  status: RepoAgentScanStatus;
-};
-
-export type RepoAgentScanPayload = {
-  __typename?: 'RepoAgentScanPayload';
-  errors?: Maybe<Array<Error>>;
-  scan?: Maybe<RepoAgentScan>;
-};
-
-export enum RepoAgentScanStatus {
-  Analyzing = 'ANALYZING',
-  Completed = 'COMPLETED',
-  Failed = 'FAILED',
-  Pending = 'PENDING',
-  Scanning = 'SCANNING',
-  Writing = 'WRITING'
-}
-
 export type Repository = {
   __typename?: 'Repository';
   branch?: Maybe<Scalars['String']['output']>;
@@ -450,7 +403,6 @@ export type Repository = {
   hasClaudeAgents: Scalars['Boolean']['output'];
   headSha?: Maybe<Scalars['String']['output']>;
   isConfigRepo: Scalars['Boolean']['output'];
-  lastAgentScan?: Maybe<RepoAgentScan>;
   lastClonedAt?: Maybe<Scalars['DateTime']['output']>;
   lastPulledAt?: Maybe<Scalars['DateTime']['output']>;
   name: Scalars['String']['output'];
@@ -546,6 +498,7 @@ export type Task = {
   status: TaskStatus;
   title: Scalars['String']['output'];
   totalCostUsd?: Maybe<Scalars['Float']['output']>;
+  totalTokens?: Maybe<Scalars['Int']['output']>;
   updatedAt: Scalars['DateTime']['output'];
 };
 
@@ -679,10 +632,6 @@ export type ResolversTypes = ResolversObject<{
   PipelineStatus: ResolverTypeWrapper<PipelineStatus>;
   Query: ResolverTypeWrapper<{}>;
   RegisterRepositoryInput: RegisterRepositoryInput;
-  RepoAgentGroup: ResolverTypeWrapper<RepoAgentGroup>;
-  RepoAgentScan: ResolverTypeWrapper<RepoAgentScan>;
-  RepoAgentScanPayload: ResolverTypeWrapper<RepoAgentScanPayload>;
-  RepoAgentScanStatus: RepoAgentScanStatus;
   Repository: ResolverTypeWrapper<Repository>;
   RepositoryCount: ResolverTypeWrapper<RepositoryCount>;
   RepositoryPayload: ResolverTypeWrapper<RepositoryPayload>;
@@ -728,9 +677,6 @@ export type ResolversParentTypes = ResolversObject<{
   PipelineStatus: PipelineStatus;
   Query: {};
   RegisterRepositoryInput: RegisterRepositoryInput;
-  RepoAgentGroup: RepoAgentGroup;
-  RepoAgentScan: RepoAgentScan;
-  RepoAgentScanPayload: RepoAgentScanPayload;
   Repository: Repository;
   RepositoryCount: RepositoryCount;
   RepositoryPayload: RepositoryPayload;
@@ -894,7 +840,6 @@ export type MutationResolvers<ContextType = Context, ParentType extends Resolver
   githubLogout?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   modifyAgent?: Resolver<ResolversTypes['AgentDefinitionPayload'], ParentType, ContextType, RequireFields<MutationModifyAgentArgs, 'name' | 'scope' | 'spec'>>;
   registerRepository?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationRegisterRepositoryArgs, 'input'>>;
-  reloadRepoAgents?: Resolver<ResolversTypes['RepoAgentScanPayload'], ParentType, ContextType, RequireFields<MutationReloadRepoAgentsArgs, 'repoName'>>;
   removeRepository?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationRemoveRepositoryArgs, 'name'>>;
   rerunTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationRerunTaskArgs, 'id'>>;
   resetAgentModification?: Resolver<ResolversTypes['AgentDefinitionPayload'], ParentType, ContextType, RequireFields<MutationResetAgentModificationArgs, 'name' | 'scope'>>;
@@ -959,37 +904,10 @@ export type QueryResolvers<ContextType = Context, ParentType extends ResolversPa
   globalAgents?: Resolver<Array<ResolversTypes['AgentDefinition']>, ParentType, ContextType>;
   pipelineDefinitions?: Resolver<Array<ResolversTypes['PipelineDefinition']>, ParentType, ContextType>;
   pipelineStatus?: Resolver<Maybe<ResolversTypes['PipelineStatus']>, ParentType, ContextType, RequireFields<QueryPipelineStatusArgs, 'taskId'>>;
-  repoAgentGroups?: Resolver<Array<ResolversTypes['RepoAgentGroup']>, ParentType, ContextType>;
-  repoAgentScan?: Resolver<Maybe<ResolversTypes['RepoAgentScan']>, ParentType, ContextType, RequireFields<QueryRepoAgentScanArgs, 'repoName'>>;
   repositories?: Resolver<Array<ResolversTypes['Repository']>, ParentType, ContextType>;
   repository?: Resolver<Maybe<ResolversTypes['Repository']>, ParentType, ContextType, RequireFields<QueryRepositoryArgs, 'name'>>;
   task?: Resolver<Maybe<ResolversTypes['Task']>, ParentType, ContextType, RequireFields<QueryTaskArgs, 'id'>>;
   tasks?: Resolver<ResolversTypes['TaskConnection'], ParentType, ContextType, Partial<QueryTasksArgs>>;
-}>;
-
-export type RepoAgentGroupResolvers<ContextType = Context, ParentType extends ResolversParentTypes['RepoAgentGroup'] = ResolversParentTypes['RepoAgentGroup']> = ResolversObject<{
-  agents?: Resolver<Array<ResolversTypes['AgentDefinition']>, ParentType, ContextType>;
-  repoName?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
-}>;
-
-export type RepoAgentScanResolvers<ContextType = Context, ParentType extends ResolversParentTypes['RepoAgentScan'] = ResolversParentTypes['RepoAgentScan']> = ResolversObject<{
-  agentsCreated?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
-  agentsFound?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
-  completedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
-  createdAt?: Resolver<ResolversTypes['DateTime'], ParentType, ContextType>;
-  errorMessage?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
-  id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
-  repoName?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-  startedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
-  status?: Resolver<ResolversTypes['RepoAgentScanStatus'], ParentType, ContextType>;
-  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
-}>;
-
-export type RepoAgentScanPayloadResolvers<ContextType = Context, ParentType extends ResolversParentTypes['RepoAgentScanPayload'] = ResolversParentTypes['RepoAgentScanPayload']> = ResolversObject<{
-  errors?: Resolver<Maybe<Array<ResolversTypes['Error']>>, ParentType, ContextType>;
-  scan?: Resolver<Maybe<ResolversTypes['RepoAgentScan']>, ParentType, ContextType>;
-  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
 
 export type RepositoryResolvers<ContextType = Context, ParentType extends ResolversParentTypes['Repository'] = ResolversParentTypes['Repository']> = ResolversObject<{
@@ -1001,7 +919,6 @@ export type RepositoryResolvers<ContextType = Context, ParentType extends Resolv
   hasClaudeAgents?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   headSha?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   isConfigRepo?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
-  lastAgentScan?: Resolver<Maybe<ResolversTypes['RepoAgentScan']>, ParentType, ContextType>;
   lastClonedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   lastPulledAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   name?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
@@ -1079,6 +996,7 @@ export type TaskResolvers<ContextType = Context, ParentType extends ResolversPar
   status?: Resolver<ResolversTypes['TaskStatus'], ParentType, ContextType>;
   title?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   totalCostUsd?: Resolver<Maybe<ResolversTypes['Float']>, ParentType, ContextType>;
+  totalTokens?: Resolver<Maybe<ResolversTypes['Int']>, ParentType, ContextType>;
   updatedAt?: Resolver<ResolversTypes['DateTime'], ParentType, ContextType>;
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
@@ -1123,9 +1041,6 @@ export type Resolvers<ContextType = Context> = ResolversObject<{
   PipelineStageDefinition?: PipelineStageDefinitionResolvers<ContextType>;
   PipelineStatus?: PipelineStatusResolvers<ContextType>;
   Query?: QueryResolvers<ContextType>;
-  RepoAgentGroup?: RepoAgentGroupResolvers<ContextType>;
-  RepoAgentScan?: RepoAgentScanResolvers<ContextType>;
-  RepoAgentScanPayload?: RepoAgentScanPayloadResolvers<ContextType>;
   Repository?: RepositoryResolvers<ContextType>;
   RepositoryCount?: RepositoryCountResolvers<ContextType>;
   RepositoryPayload?: RepositoryPayloadResolvers<ContextType>;
