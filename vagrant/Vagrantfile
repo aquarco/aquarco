@@ -9,8 +9,8 @@ Vagrant.configure("2") do |config|
   # VirtualBox provider settings
   config.vm.provider "virtualbox" do |vb|
     vb.name = "aquarco"
-    vb.memory = 12288  # 12 GB (recommended)
-    vb.cpus = 6
+    vb.memory = 4096
+    vb.cpus = 2
     vb.gui = false
 
     # Performance settings (VirtualBox 7.2+ CLI flag names)
