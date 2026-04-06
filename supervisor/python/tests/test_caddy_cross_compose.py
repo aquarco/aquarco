@@ -4,7 +4,7 @@ Cross-compose consistency tests for Caddy routing.
 Validates that the Caddyfile routing targets are consistent with
 the Docker Compose service definitions across all compose files.
 
-Issue: https://github.com/borissuska/aquarco/issues/2
+Issue: https://github.com/aquarco/aquarco/issues/2
 """
 
 import re

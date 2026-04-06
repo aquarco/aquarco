@@ -5,7 +5,7 @@
  * - Browser clients use relative /api/graphql (routed through Caddy proxy)
  * - SSR clients use direct http://api:4000/graphql (container-to-container)
  *
- * Issue: https://github.com/borissuska/aquarco/issues/2
+ * Issue: https://github.com/aquarco/aquarco/issues/2
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'

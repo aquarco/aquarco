@@ -1,7 +1,7 @@
 # Design: Unified Reverse Proxy Routing Layer (Phase 1)
 
 **Task:** github-issue-aquarco-2
-**Issue:** https://github.com/borissuska/aquarco/issues/2
+**Issue:** https://github.com/aquarco/aquarco/issues/2
 **Date:** 2026-03-31
 
 ## Summary

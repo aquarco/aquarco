@@ -1,6 +1,6 @@
 # Design: Separate System Agents from Pipeline Agents
 
-**Issue:** [#30 — Separate System Agents from Pipeline Agents](https://github.com/borissuska/aquarco/issues/30)
+**Issue:** [#30 — Separate System Agents from Pipeline Agents](https://github.com/aquarco/aquarco/issues/30)
 **Date:** 2026-03-26
 **Status:** Ready for Implementation
 

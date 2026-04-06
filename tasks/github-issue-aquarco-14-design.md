@@ -1,7 +1,7 @@
 # Design: Autoload .claude agents from repositories
 
 **Task:** github-issue-aquarco-14
-**Issue:** https://github.com/borissuska/aquarco/issues/14
+**Issue:** https://github.com/aquarco/aquarco/issues/14
 **Date:** 2026-03-25
 
 ## 1. Overview

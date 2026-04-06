@@ -293,6 +293,11 @@ fi
 
 # ─── 12b. System Docker Compose stack (auto-start on boot) ──────────────────
 
+log "Writing /etc/aquarco/env (build environment marker)..."
+if [[ ! -f /etc/aquarco/env ]]; then
+  echo "development" > /etc/aquarco/env
+fi
+
 log "Installing aquarco-stack systemd service..."
 cat > /etc/systemd/system/aquarco-stack.service <<'STACKUNIT'
 [Unit]
@@ -306,7 +311,14 @@ RemainAfterExit=yes
 User=agent
 Group=agent
 WorkingDirectory=/home/agent/aquarco/docker
-ExecStart=/usr/bin/docker compose up -d
+ExecStart=/bin/bash -c '\
+  AQUARCO_ENV=$(cat /etc/aquarco/env 2>/dev/null || echo development); \
+  if [ "$AQUARCO_ENV" = "production" ]; then \
+    set -a; . /home/agent/aquarco/docker/versions.env; set +a; \
+    exec /usr/bin/docker compose -f compose.yml -f compose.prod.yml up -d; \
+  else \
+    exec /usr/bin/docker compose up -d; \
+  fi'
 ExecStop=/usr/bin/docker compose down
 TimeoutStartSec=120
 

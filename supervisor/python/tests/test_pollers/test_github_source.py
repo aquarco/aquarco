@@ -285,7 +285,7 @@ async def test_poll_commits_skips_pipeline_branch_subjects(
     # Two commits: one normal, one with aquarco/ in the subject (pipeline merge)
     commit_lines = (
         f"{_SHA_A}\tAdd feature\tDev\t2024-06-01T00:00:00+00:00\n"
-        f"{_SHA_B}\tMerge pull request from borissuska/aquarco/github-commit-aquarco-bc1db35/review\tDev\t2024-06-01T00:00:00+00:00"
+        f"{_SHA_B}\tMerge pull request from aquarco/aquarco/github-commit-aquarco-bc1db35/review\tDev\t2024-06-01T00:00:00+00:00"
     )
 
     async def mock_run_git(clone_dir: str, *args: str, **_: Any) -> str:

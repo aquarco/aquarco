@@ -13,6 +13,16 @@
 - **`formatTokens()` utility** (`web/src/lib/spending.ts`) — enhanced to handle null/undefined/zero values (returns "—" dash for empty)
 - **GraphQL schema** — `Task` type now includes `totalTokens: Int` field
 
+## [2026-04-04] — Production build: fix image versioning and backup serialization (#4)
+
+### Fixed
+- **`docker/compose.prod.yml`** — added explicit `AQUARCO_POSTGRES_VERSION` and `AQUARCO_CADDY_VERSION` variable overrides to `postgres` and `caddy` services, ensuring `versions.env` is the single source of truth for all pinned Docker image versions in production deployments
+- **`vagrant/scripts/backup-credentials.sh`** — fixed manifest.json serialization: empty credential arrays (`found` and `missing`) now correctly emit `[]` instead of `[""]` via new `_json_array()` helper function
+- **`cli/tests/test_commands/test_update.py`** — added `TestBackupRollbackIntegration` test class with 3 integration tests verifying rollback behavior: (1) rollback invoked when backup exists and update step fails, (2) rollback NOT invoked when no backup, (3) rollback invoked on provision failure with backup present
+
+### Test Coverage
+- All 217 CLI tests pass including 26 new rollback-related tests
+
 ## [2026-04-04] — Remove repository specific agents (#79)
 
 ### Removed
