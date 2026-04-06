@@ -668,3 +668,277 @@ class TestStepsContent:
         migration_idx = next(i for i, n in enumerate(step_names) if "migration" in n.lower())
         restart_idx = next(i for i, n in enumerate(step_names) if "restart docker" in n.lower())
         assert migration_idx < restart_idx
+
+
+class TestImplementationFixes:
+    """Tests for the review-fix implementation changes.
+
+    Validates that the implementation agent correctly addressed the review
+    findings: --build flag removal, --with-new-pkgs addition, and production
+    compose changes.
+    """
+
+    def test_docker_restart_step_does_not_include_build_flag(self):
+        """Restart Docker step must NOT include --build (no-op in prod, misleading)."""
+        from aquarco_cli.commands.update import STEPS
+        restart_steps = [(n, c) for n, c in STEPS if "restart docker" in n.lower()]
+        assert len(restart_steps) == 1, "Expected exactly one 'Restart Docker services' step"
+        _, cmd = restart_steps[0]
+        assert "--build" not in cmd, (
+            f"The --build flag should have been removed from the docker compose up step. "
+            f"Got: {cmd}"
+        )
+
+    def test_docker_restart_step_uses_compose_up(self):
+        """Restart Docker step must use 'docker compose up -d'."""
+        from aquarco_cli.commands.update import STEPS
+        restart_steps = [(n, c) for n, c in STEPS if "restart docker" in n.lower()]
+        _, cmd = restart_steps[0]
+        assert "docker compose up -d" in cmd
+
+    def test_os_update_uses_with_new_pkgs(self):
+        """OS update step must use --with-new-pkgs for safer upgrades."""
+        from aquarco_cli.commands.update import STEPS
+        os_step = STEPS[0]
+        _, cmd = os_step
+        assert "--with-new-pkgs" in cmd, (
+            f"The apt-get upgrade step should use --with-new-pkgs. Got: {cmd}"
+        )
+
+    def test_os_update_uses_noninteractive(self):
+        """OS update step must set DEBIAN_FRONTEND=noninteractive."""
+        from aquarco_cli.commands.update import STEPS
+        _, cmd = STEPS[0]
+        assert "DEBIAN_FRONTEND=noninteractive" in cmd
+
+    def test_steps_count_is_eight(self):
+        """STEPS list must contain exactly 8 steps."""
+        from aquarco_cli.commands.update import STEPS
+        assert len(STEPS) == 8, f"Expected 8 steps, got {len(STEPS)}: {[n for n, _ in STEPS]}"
+
+
+class TestDrainIdleClearFailure:
+    """Tests for edge cases in drain-idle auto-proceed path."""
+
+    @patch("aquarco_cli.commands.update._query_drain_status")
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_drain_idle_clear_failure_still_proceeds(self, mock_cls, mock_health, mock_drain):
+        """When drain is idle but clearing drain flag fails, update should still proceed."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_drain.return_value = {"enabled": True, "activeAgents": 0, "activeTasks": 0}
+
+        with patch("aquarco_cli.commands.update.GraphQLClient") as mock_gql_cls:
+            mock_client = mock_gql_cls.return_value
+            mock_client.execute.side_effect = Exception("API unreachable")
+            result = runner.invoke(app, ["update"])
+
+        # Should still succeed — the warning is logged but update proceeds
+        assert result.exit_code == 0
+        assert "successfully" in result.output.lower()
+
+    @patch("aquarco_cli.commands.update.Prompt.ask", return_value="now")
+    @patch("aquarco_cli.commands.update._query_drain_status")
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_force_now_clear_failure_still_proceeds(self, mock_cls, mock_health, mock_drain, mock_prompt):
+        """When force-now and clearing drain fails, update should still proceed."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_drain.return_value = {"enabled": True, "activeAgents": 1, "activeTasks": 2}
+
+        with patch("aquarco_cli.commands.update.GraphQLClient") as mock_gql_cls:
+            mock_client = mock_gql_cls.return_value
+            mock_client.execute.side_effect = Exception("API timeout")
+            result = runner.invoke(app, ["update"])
+
+        assert result.exit_code == 0
+
+
+class TestCombinedFlags:
+    """Tests for combined CLI flag behavior."""
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_dry_run_with_skip_migrations(self, mock_cls):
+        """--dry-run with --skip-migrations should not list the migration step."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        result = runner.invoke(app, ["update", "--dry-run", "--skip-migrations"])
+        assert result.exit_code == 0
+        assert "dry run" in result.output.lower()
+        assert "migration" not in result.output.lower()
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_dry_run_with_skip_provision(self, mock_cls):
+        """--dry-run with --skip-provision should not list the provision step."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        result = runner.invoke(app, ["update", "--dry-run", "--skip-provision"])
+        assert result.exit_code == 0
+        # Should not include "Re-provision VM" in dry run output
+        assert "re-provision" not in result.output.lower()
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_dry_run_with_all_skips(self, mock_cls):
+        """--dry-run with both skip flags omits migrations and provision."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        result = runner.invoke(app, ["update", "--dry-run", "--skip-migrations", "--skip-provision"])
+        assert result.exit_code == 0
+        assert "migration" not in result.output.lower()
+        assert "re-provision" not in result.output.lower()
+
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_skip_migrations_and_provision(self, mock_cls, mock_health, mock_drain):
+        """Both --skip-migrations and --skip-provision together."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        result = runner.invoke(app, ["update", "--skip-migrations", "--skip-provision"])
+        assert result.exit_code == 0
+        mock_vagrant.provision.assert_not_called()
+        for call in mock_vagrant.ssh.call_args_list:
+            cmd = call[0][0] if call[0] else call[1].get("command", "")
+            assert "migrations" not in cmd
+
+
+class TestBackupCredentialsEdgeCases:
+    """Additional edge cases for _backup_credentials."""
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_backup_strips_trailing_whitespace(self, mock_cls):
+        """_backup_credentials must strip trailing whitespace from the backup dir."""
+        from aquarco_cli.commands.update import _backup_credentials
+
+        mock_vagrant = MagicMock()
+        mock_result = MagicMock()
+        mock_result.stdout = "/var/lib/aquarco/backups/20260404T180000  \n  \n"
+        mock_vagrant.ssh.return_value = mock_result
+        result = _backup_credentials(mock_vagrant)
+        assert result == "/var/lib/aquarco/backups/20260404T180000"
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_backup_with_multiline_log_output(self, mock_cls):
+        """_backup_credentials extracts backup dir from multiline output with logs."""
+        from aquarco_cli.commands.update import _backup_credentials
+
+        mock_vagrant = MagicMock()
+        mock_result = MagicMock()
+        mock_result.stdout = (
+            "[backup] Starting credential backup...\n"
+            "[backup] Found gh_token\n"
+            "[backup] Found claude_api_key\n"
+            "/var/lib/aquarco/backups/20260404T190000\n"
+        )
+        mock_vagrant.ssh.return_value = mock_result
+        result = _backup_credentials(mock_vagrant)
+        assert result == "/var/lib/aquarco/backups/20260404T190000"
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_backup_subprocess_error_returns_none(self, mock_cls):
+        """_backup_credentials returns None on subprocess.CalledProcessError."""
+        import subprocess
+        from aquarco_cli.commands.update import _backup_credentials
+
+        mock_vagrant = MagicMock()
+        mock_vagrant.ssh.side_effect = subprocess.CalledProcessError(1, "bash")
+        result = _backup_credentials(mock_vagrant)
+        assert result is None
+
+
+class TestRunUpdateStepsEdgeCases:
+    """Edge cases for _run_update_steps."""
+
+    @patch("aquarco_cli.commands.update._run_rollback")
+    @patch("aquarco_cli.commands.update._backup_credentials", return_value="/var/lib/aquarco/backups/test")
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_rollback_called_with_correct_backup_dir(
+        self, mock_cls, mock_health, mock_drain, mock_backup, mock_rollback
+    ):
+        """Rollback must receive the exact backup dir returned by _backup_credentials."""
+        from aquarco_cli.vagrant import VagrantError
+
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_vagrant.ssh.side_effect = VagrantError("fail")
+
+        runner.invoke(app, ["update"])
+        mock_rollback.assert_called_once_with(mock_vagrant, "/var/lib/aquarco/backups/test")
+
+    @patch("aquarco_cli.commands.update._run_rollback")
+    @patch("aquarco_cli.commands.update._backup_credentials", return_value="/var/lib/aquarco/backups/test")
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_first_step_failure_skips_remaining_steps(
+        self, mock_cls, mock_health, mock_drain, mock_backup, mock_rollback
+    ):
+        """When the first SSH step fails, no subsequent steps should be executed."""
+        from aquarco_cli.vagrant import VagrantError
+
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_vagrant.ssh.side_effect = VagrantError("first step failed")
+
+        runner.invoke(app, ["update"])
+        # Only the first SSH call should have been made
+        assert mock_vagrant.ssh.call_count == 1
+
+    @patch("aquarco_cli.commands.update._backup_credentials", return_value=None)
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_all_steps_executed_on_success(self, mock_cls, mock_health, mock_drain, mock_backup):
+        """On success, all STEPS should be executed via SSH."""
+        from aquarco_cli.commands.update import STEPS
+
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+
+        runner.invoke(app, ["update"])
+        assert mock_vagrant.ssh.call_count == len(STEPS)
+
+    @patch("aquarco_cli.commands.update._backup_credentials", return_value=None)
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_provision_called_after_all_steps(self, mock_cls, mock_health, mock_drain, mock_backup):
+        """vagrant.provision() must be called after all SSH steps succeed."""
+        from aquarco_cli.commands.update import STEPS
+
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+
+        runner.invoke(app, ["update"])
+        mock_vagrant.ssh.assert_called()
+        mock_vagrant.provision.assert_called_once()
+
+
+class TestProductionGuardEdgeCases:
+    """Additional production guard tests."""
+
+    @patch("aquarco_cli.commands.update.BUILD_TYPE", "production")
+    def test_production_guard_ignores_all_flags(self):
+        """Production guard must block even with --dry-run, --skip-* flags."""
+        result = runner.invoke(app, ["update", "--dry-run"])
+        assert result.exit_code == 1
+        assert "not available" in result.output.lower()
+
+    @patch("aquarco_cli.commands.update.BUILD_TYPE", "production")
+    def test_production_guard_message_includes_brew_upgrade(self):
+        """Production guard message must mention 'brew upgrade aquarco'."""
+        result = runner.invoke(app, ["update"])
+        assert "brew upgrade" in result.output.lower()
+
+    @patch("aquarco_cli.commands.update.BUILD_TYPE", "development")
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_development_build_does_not_show_homebrew_message(self, mock_cls):
+        """Development builds must not show the Homebrew upgrade message."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = False
+        result = runner.invoke(app, ["update"])
+        assert "brew upgrade" not in result.output.lower()

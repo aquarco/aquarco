@@ -49,6 +49,9 @@ if [[ -f /etc/aquarco/env ]]; then
   AQUARCO_ENV="$(cat /etc/aquarco/env)"
 fi
 
+# NOTE: Docker commands use sudo because the agent user is not in the docker
+# group. The backup-credentials.sh script runs as the agent user (no sudo)
+# which is intentional — credential files are owned by the agent user.
 COMPOSE_CMD=(sudo docker compose -f compose.yml)
 if [[ "${AQUARCO_ENV}" == "production" ]]; then
   COMPOSE_CMD+=(-f compose.prod.yml --env-file versions.env)
@@ -89,9 +92,14 @@ echo "[rollback] Waiting up to ${HEALTH_TIMEOUT}s for services to become healthy
 
 elapsed=0
 while (( elapsed < HEALTH_TIMEOUT )); do
-  # Count unhealthy/starting containers
+  # Count containers that are either not running or have a failing health check.
+  # Containers without a HEALTHCHECK directive have Health="" or null and are
+  # accepted as long as their State is "running".
   unhealthy="$("${COMPOSE_CMD[@]}" ps --format json 2>/dev/null \
-    | jq -r 'select(.Health != null and .Health != "healthy" and .Health != "") | .Name' \
+    | jq -r 'select(
+        .State != "running"
+        or (.Health != null and .Health != "" and .Health != "healthy")
+      ) | .Name' \
     | wc -l)"
 
   if (( unhealthy == 0 )); then

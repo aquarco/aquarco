@@ -28,7 +28,10 @@ services:
       - ${REPOS_BASE:-/home/agent/repos}:/repos
       - /var/lib/aquarco/claude-ipc:/claude-ipc
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://aquarco:aquarco@postgres:5432/aquarco}
+      # DATABASE_URL must be set via .env or env-file — no default to avoid
+      # shipping weak credentials in production. The compose stack will fail
+      # to start if this is unset, which is the desired behavior.
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in production}
       NODE_ENV: production
       PORT: ${PORT:-4000}
       REPOS_BASE: ${REPOS_BASE:-/home/agent/repos}
