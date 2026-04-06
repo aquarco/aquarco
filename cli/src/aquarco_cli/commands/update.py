@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 
 import httpx
 import typer
 from rich.prompt import Prompt
 
+from aquarco_cli._build import BUILD_TYPE
 from aquarco_cli.console import console, handle_api_error, print_error, print_info, print_success, print_warning
 from aquarco_cli.health import print_health_table
 from aquarco_cli.graphql_client import (
@@ -20,6 +22,7 @@ from aquarco_cli.vagrant import VagrantError, VagrantHelper
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
 STEPS = [
+    ("Update OS packages", "sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq"),
     ("Pull latest Docker images", "cd /home/agent/aquarco/docker && sudo docker compose pull"),
     ("Run database migrations", "cd /home/agent/aquarco/docker && sudo docker compose run --rm migrations"),
     ("Restart Docker services", "cd /home/agent/aquarco/docker && sudo docker compose up -d --build"),
@@ -30,19 +33,58 @@ STEPS = [
 ]
 
 
+def _backup_credentials(vagrant: VagrantHelper) -> str | None:
+    """Run backup-credentials.sh inside the VM and return the backup dir path.
+
+    Returns ``None`` if the backup script fails (e.g. no credentials found).
+    """
+    try:
+        result = vagrant.ssh(
+            "bash /home/agent/aquarco/vagrant/scripts/backup-credentials.sh",
+            stream=False,
+        )
+        # The script prints the backup dir on the last line of stdout
+        backup_dir = result.stdout.strip().splitlines()[-1].strip()
+        print_success(f"Credentials backed up to {backup_dir}")
+        return backup_dir
+    except (VagrantError, subprocess.CalledProcessError, OSError, IndexError) as exc:
+        print_warning(f"Credential backup failed: {exc}. Continuing without backup.")
+        return None
+
+
+def _run_rollback(vagrant: VagrantHelper, backup_dir: str) -> None:
+    """Invoke the rollback script inside the VM."""
+    print_warning("Rolling back update...")
+    try:
+        vagrant.ssh(
+            f"bash /home/agent/aquarco/vagrant/scripts/rollback.sh --backup-dir {shlex.quote(backup_dir)}",
+            stream=True,
+        )
+        print_info("Rollback completed.")
+    except (VagrantError, subprocess.CalledProcessError, OSError) as exc:
+        print_error(f"Rollback failed: {exc}")
+
+
 def _run_update_steps(
     vagrant: VagrantHelper,
     steps: list[tuple[str, str]],
     skip_provision: bool,
+    backup_dir: str | None = None,
 ) -> None:
-    """Execute SSH update steps, re-provision, and run health checks."""
+    """Execute SSH update steps, re-provision, and run health checks.
+
+    On any step failure the update is aborted immediately (hard-fail).
+    If a backup directory is available, rollback is invoked before exiting.
+    """
     for name, cmd in steps:
         print_info(f"{name}...")
         try:
             vagrant.ssh(cmd, stream=True)
         except (VagrantError, subprocess.CalledProcessError, OSError) as exc:
             print_error(f"Step failed: {name} — {exc}")
-            print_warning("Continuing with remaining steps...")
+            if backup_dir:
+                _run_rollback(vagrant, backup_dir)
+            raise typer.Exit(code=1) from exc
 
     # Re-provision
     if not skip_provision:
@@ -50,7 +92,10 @@ def _run_update_steps(
         try:
             vagrant.provision()
         except (VagrantError, subprocess.CalledProcessError, OSError) as exc:
-            print_warning(f"Provisioning failed: {exc}")
+            print_error(f"Provisioning failed: {exc}")
+            if backup_dir:
+                _run_rollback(vagrant, backup_dir)
+            raise typer.Exit(code=1) from exc
 
     # Health checks
     print_info("Checking stack health...")
@@ -83,6 +128,14 @@ def update(
     skip_provision: bool = typer.Option(False, "--skip-provision", help="Skip VM re-provisioning"),
 ) -> None:
     """Update the VM to the latest version including Docker images."""
+    # ── Production guard ─────────────────────────────────────────────────────
+    if BUILD_TYPE == "production":
+        print_error(
+            "aquarco update is not available for public Homebrew installs. "
+            "To update, reinstall via Homebrew: brew upgrade aquarco"
+        )
+        raise typer.Exit(code=1)
+
     vagrant = VagrantHelper()
 
     if not vagrant.is_running():
@@ -118,7 +171,8 @@ def update(
                     client.execute(MUTATION_SET_DRAIN_MODE, {"enabled": False})
                 except Exception as exc:
                     print_warning(f"Could not clear drain flag: {type(exc).__name__}: {exc}. Proceeding with update.")
-                _run_update_steps(vagrant, steps, skip_provision)
+                backup_dir = _backup_credentials(vagrant)
+                _run_update_steps(vagrant, steps, skip_provision, backup_dir=backup_dir)
                 return
 
             # Work still in progress during drain
@@ -140,7 +194,8 @@ def update(
                     client.execute(MUTATION_SET_DRAIN_MODE, {"enabled": False})
                 except Exception as exc:
                     print_warning(f"Could not clear drain flag ({type(exc).__name__}: {exc}) — proceeding with restart anyway.")
-                _run_update_steps(vagrant, steps, skip_provision)
+                backup_dir = _backup_credentials(vagrant)
+                _run_update_steps(vagrant, steps, skip_provision, backup_dir=backup_dir)
                 return
             else:  # cancel
                 print_info("Cancelling planned update. Resuming normal operation.")
@@ -177,4 +232,5 @@ def update(
                 return
             # choice == "yes" → fall through to immediate update
 
-    _run_update_steps(vagrant, steps, skip_provision)
+    backup_dir = _backup_credentials(vagrant)
+    _run_update_steps(vagrant, steps, skip_provision, backup_dir=backup_dir)

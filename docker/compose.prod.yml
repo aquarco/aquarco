@@ -1,0 +1,53 @@
+# compose.prod.yml — production overlay for Aquarco Docker Compose stack
+#
+# Usage:  docker compose -f compose.yml -f compose.prod.yml up -d
+#
+# Requires versions.env to be sourced (or passed via --env-file).
+# Replaces build contexts with pre-built images, disables dev-only services,
+# switches to production commands, and removes source volume mounts.
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:${AQUARCO_POSTGRES_VERSION}
+
+  # ── Database Migrations ──────────────────────────────────────────────────────
+  migrations:
+    build: !reset null
+    image: ${AQUARCO_REGISTRY}/migrations:${AQUARCO_MIGRATIONS_VERSION}
+    volumes: !reset []
+
+  # ── GraphQL API ──────────────────────────────────────────────────────────────
+  api:
+    build: !reset null
+    image: ${AQUARCO_REGISTRY}/api:${AQUARCO_API_VERSION}
+    command: ["node", "dist/server.js"]
+    volumes: !reset
+      - ${AGENT_SSH_DIR:-/home/agent/.ssh}:/agent-ssh
+      - ${REPOS_BASE:-/home/agent/repos}:/repos
+      - /var/lib/aquarco/claude-ipc:/claude-ipc
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://aquarco:aquarco@postgres:5432/aquarco}
+      NODE_ENV: production
+      PORT: ${PORT:-4000}
+      REPOS_BASE: ${REPOS_BASE:-/home/agent/repos}
+
+  # ── Web UI (Next.js) ────────────────────────────────────────────────────────
+  web:
+    build: !reset null
+    image: ${AQUARCO_REGISTRY}/web:${AQUARCO_WEB_VERSION}
+    command: ["npm", "run", "start"]
+    volumes: !reset []
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/graphql}
+      NODE_ENV: production
+
+  # ── Caddy Reverse Proxy ─────────────────────────────────────────────────────
+  caddy:
+    image: caddy:${AQUARCO_CADDY_VERSION}
+
+  # ── Adminer — dev only ─────────────────────────────────────────────────────
+  adminer:
+    profiles:
+      - dev
