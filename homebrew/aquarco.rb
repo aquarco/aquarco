@@ -12,6 +12,8 @@ class Aquarco < Formula
   desc "CLI for managing Aquarco autonomous agent VMs"
   homepage "https://github.com/borissuska/aquarco"
   url "https://github.com/borissuska/aquarco/archive/refs/tags/v0.1.0.tar.gz"
+  # SHA256 is stamped automatically by the release CI job (see .github/workflows/release.yml).
+  # To compute manually: curl -sL <url> | shasum -a 256
   sha256 "PLACEHOLDER_SHA256"
   license "MIT"
 

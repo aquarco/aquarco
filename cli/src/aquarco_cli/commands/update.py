@@ -22,10 +22,10 @@ from aquarco_cli.vagrant import VagrantError, VagrantHelper
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
 STEPS = [
-    ("Update OS packages", "sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq"),
+    ("Update OS packages", "sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --with-new-pkgs"),
     ("Pull latest Docker images", "cd /home/agent/aquarco/docker && sudo docker compose pull"),
     ("Run database migrations", "cd /home/agent/aquarco/docker && sudo docker compose run --rm migrations"),
-    ("Restart Docker services", "cd /home/agent/aquarco/docker && sudo docker compose up -d --build"),
+    ("Restart Docker services", "cd /home/agent/aquarco/docker && sudo docker compose up -d"),
     ("Fix venv permissions", "sudo chown -R agent:agent /home/agent/.venv && sudo chmod -R u+w /home/agent/.venv"),
     ("Upgrade supervisor package", "sudo -u agent /home/agent/.venv/bin/pip install -e /home/agent/aquarco/supervisor/python/"),
     ("Lock venv", "sudo chmod -R a-w /home/agent/.venv/lib/"),

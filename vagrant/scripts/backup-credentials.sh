@@ -67,10 +67,10 @@ chmod 600 "${BACKUP_DIR}/manifest.json"
 backup_count="$(find "${BACKUP_ROOT}" -mindepth 1 -maxdepth 1 -type d | wc -l)"
 if (( backup_count > MAX_BACKUPS )); then
   # Remove oldest first (sorted by name = timestamp)
-  find "${BACKUP_ROOT}" -mindepth 1 -maxdepth 1 -type d \
-    | sort \
-    | head -n "$(( backup_count - MAX_BACKUPS ))" \
-    | xargs rm -rf
+  find "${BACKUP_ROOT}" -mindepth 1 -maxdepth 1 -type d -print0 \
+    | sort -z \
+    | head -z -n "$(( backup_count - MAX_BACKUPS ))" \
+    | xargs -0 rm -rf
 fi
 
 # ── Exit status ─────────────────────────────────────────────────────────────
