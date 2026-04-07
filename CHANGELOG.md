@@ -1,5 +1,32 @@
 # Changelog
 
+## [2026-04-07] — Improve stage output rendering (#95)
+
+### Added
+- **Live output JSON parser** — `parseLiveOutput()` function extracts relevant fields from NDJSON stream-json output instead of displaying raw output
+- **Supported live output fields**:
+  - Top-level: `stdout`, `output`
+  - Message content: `message.content[].thinking`, `message.content[].text`, `message.content[].content`
+  - Message input: `message.content[].input.description`, `message.content[].input.file_path`
+  - Tool results: `tool_use_result.stdout`, `tool_use_result.stderr`, `tool_use_result.content`, `tool_use_result.file.filePath`
+- **Structured output display** — `StructuredOutputDisplay` React component renders agent structured output as Markdown-like format:
+  - Field names (snake_case, camelCase) converted to Title Case section headings
+  - String values rendered as heading + body text
+  - Arrays rendered as ordered lists
+  - "Findings" arrays (objects with `severity` and `message`) get special handling with numbered items, severity chips (color-coded: error/critical=red, warning=yellow), and file:line references
+  - Numbers and booleans rendered as plain text
+  - Other objects rendered as JSON code blocks
+  - Fields prefixed with `_` are hidden from display
+- **45 new tests** (`web/src/app/tasks/[id]/__tests__/stage-output-display.test.ts`) with 95% coverage for output parsing and display logic
+
+### Changed
+- **`Stage` GraphQL type** — removed `rawOutput` field; clients now use filtered and parsed `liveOutput` only
+- **Task detail page** (`web/src/app/tasks/[id]/page.tsx`) — stage output now displays parsed live output and rendered structured output instead of raw output
+- **`GET_TASK` GraphQL query** — removed `rawOutput` from stage selection
+
+### Security
+- Raw output (containing potentially sensitive tokens, logs, file paths) is no longer exposed to the UI; only structured and parsed output is displayed
+
 ## [2026-04-04] — Show token counts alongside costs (#82)
 
 ### Added
