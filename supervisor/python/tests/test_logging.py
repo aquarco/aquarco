@@ -42,19 +42,19 @@ def test_setup_logging_permission_error_falls_back_to_stderr(tmp_path: Path) -> 
     log_file.touch()
     log_file.chmod(0o000)  # make unwritable
 
-    # Should not raise
-    setup_logging(level="info", log_file=str(log_file))
-    root = logging.getLogger()
+    try:
+        # Should not raise
+        setup_logging(level="info", log_file=str(log_file))
+        root = logging.getLogger()
 
-    # stderr handler should still be present (use strict type check —
-    # FileHandler is a subclass of StreamHandler, so isinstance would
-    # always match)
-    assert any(type(h) is logging.StreamHandler for h in root.handlers)
-    # file handler should NOT be present (it failed)
-    assert not any(isinstance(h, logging.FileHandler) for h in root.handlers)
-
-    # Cleanup
-    log_file.chmod(0o644)
+        # stderr handler should still be present (use strict type check —
+        # FileHandler is a subclass of StreamHandler, so isinstance would
+        # always match)
+        assert any(type(h) is logging.StreamHandler for h in root.handlers)
+        # file handler should NOT be present (it failed)
+        assert not any(isinstance(h, logging.FileHandler) for h in root.handlers)
+    finally:
+        log_file.chmod(0o644)
 
 
 @_skip_if_root
@@ -66,19 +66,19 @@ def test_setup_logging_permission_error_logs_warning(tmp_path: Path, capfd) -> N
     log_file.touch()
     log_file.chmod(0o000)
 
-    setup_logging(level="info", log_file=str(log_file))
+    try:
+        setup_logging(level="info", log_file=str(log_file))
 
-    # Force a log message to verify logger works
-    logger = logging.getLogger("test_warning_check")
-    logger.warning("after-setup")
-    captured = capfd.readouterr()
-    # The warning about the log file should appear in stderr
-    assert "after-setup" in captured.err
-    # The PermissionError fallback warning should also have been emitted
-    assert "Could not open log file" in captured.err
-
-    # Cleanup
-    log_file.chmod(0o644)
+        # Force a log message to verify logger works
+        logger = logging.getLogger("test_warning_check")
+        logger.warning("after-setup")
+        captured = capfd.readouterr()
+        # The warning about the log file should appear in stderr
+        assert "after-setup" in captured.err
+        # The PermissionError fallback warning should also have been emitted
+        assert "Could not open log file" in captured.err
+    finally:
+        log_file.chmod(0o644)
 
 
 def test_get_logger() -> None:
