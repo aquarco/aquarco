@@ -5,7 +5,7 @@
  *   - Repository.hasClaudeAgents: simplified to check agent_definitions with autoload source only
  *   - Repository.taskCount: counts tasks for a repository
  *   - Task.totalCostUsd: sums stage costs for a task
- *   - mapRepository: new fields (isConfigRepo, deployPublicKey, errorMessage)
+ *   - mapRepository: new fields (deployPublicKey, errorMessage)
  */
 
 import { jest, describe, it, expect } from '@jest/globals'
@@ -176,16 +176,6 @@ describe('mapRepository new fields', () => {
     clone_status: 'ready',
     head_sha: null,
   }
-
-  it('should map isConfigRepo from is_config_repo', () => {
-    const result = mapRepository({ ...baseRow, is_config_repo: true })
-    expect(result.isConfigRepo).toBe(true)
-  })
-
-  it('should default isConfigRepo to false when missing', () => {
-    const result = mapRepository(baseRow)
-    expect(result.isConfigRepo).toBe(false)
-  })
 
   it('should map deployPublicKey from deploy_public_key', () => {
     const result = mapRepository({ ...baseRow, deploy_public_key: 'ssh-ed25519 AAAA...' })

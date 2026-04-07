@@ -59,20 +59,7 @@ export async function createBranchAndPR(
 ): Promise<string> {
   const token = await getGitHubToken()
 
-  // Determine the scope for override lookup
-  // If repoName matches a global config repo, scope = 'global'
-  // Otherwise scope = 'repo:<repoName>'
-  const repoCheck = await pool.query<Record<string, unknown>>(
-    'SELECT name, url, is_config_repo FROM repositories WHERE name = $1',
-    [repoName]
-  )
-  if (repoCheck.rows.length === 0) {
-    throw new Error(`Repository "${repoName}" not found`)
-  }
-
-  const repo = repoCheck.rows[0]
-  const isConfigRepo = repo.is_config_repo === true
-  const scope = isConfigRepo ? 'global' : `repo:${repoName}`
+  const scope = `repo:${repoName}`
 
   // Get all modified agents for this scope
   const modifiedResult = await pool.query<Record<string, unknown>>(

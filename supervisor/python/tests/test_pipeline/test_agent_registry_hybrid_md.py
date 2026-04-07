@@ -631,9 +631,9 @@ class TestRealConfigFiles:
         reg = AgentRegistry(mock_db, str(config_agents_dir))
         await reg.load(str(config_agents_dir.parent.parent / "schemas" / "nonexistent.json"))
 
-        # We should have at least 6 pipeline + 3 system agents
-        all_agents = reg.get_default_agents()
-        assert len(all_agents) >= 9, f"Expected >=9 agents, got {len(all_agents)}"
+        # We should have at least 6 pipeline + 2 system agents
+        all_agents = reg._agents
+        assert len(all_agents) >= 8, f"Expected >=8 agents, got {len(all_agents)}"
 
         # Verify system agents exist
         assert reg.get_system_agent_by_role("planner") is not None

@@ -55,8 +55,8 @@ async def test_execute_agent_returns_structured_with_agent_name_and_raw(
 
 
 @pytest.mark.asyncio
-async def test_execute_agent_with_scoped_view(sample_pipelines: Any) -> None:
-    """_execute_agent uses scoped_view when provided."""
+async def test_execute_agent_uses_registry(sample_pipelines: Any) -> None:
+    """_execute_agent uses the registry for config lookups."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(
         return_value={"clone_dir": "/repos/test", "branch": "main"}
@@ -64,13 +64,15 @@ async def test_execute_agent_with_scoped_view(sample_pipelines: Any) -> None:
     mock_tq = AsyncMock(spec=TaskQueue)
 
     mock_registry = MagicMock()
-    mock_scoped_view = MagicMock()
-    mock_scoped_view.get_agent_prompt_file = MagicMock(return_value="/custom/prompt.md")
-    mock_scoped_view.get_agent_timeout = MagicMock(return_value=60)
-    mock_scoped_view.get_allowed_tools = MagicMock(return_value=[])
-    mock_scoped_view.get_denied_tools = MagicMock(return_value=[])
-    mock_scoped_view.get_agent_environment = MagicMock(return_value={})
-    mock_scoped_view.get_agent_output_schema = MagicMock(return_value=None)
+    mock_registry.get_agent_prompt_file = MagicMock(return_value="/prompts/agent-1.md")
+    mock_registry.get_agent_timeout = MagicMock(return_value=30)
+    mock_registry.get_agent_max_turns = MagicMock(return_value=20)
+    mock_registry.get_agent_max_cost = MagicMock(return_value=5.0)
+    mock_registry.get_agent_model = MagicMock(return_value=None)
+    mock_registry.get_allowed_tools = MagicMock(return_value=[])
+    mock_registry.get_denied_tools = MagicMock(return_value=[])
+    mock_registry.get_agent_environment = MagicMock(return_value={})
+    mock_registry.get_agent_output_schema = MagicMock(return_value=None)
 
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
@@ -83,13 +85,11 @@ async def test_execute_agent_with_scoped_view(sample_pipelines: Any) -> None:
     ) as mock_execute, patch("aquarco_supervisor.pipeline.executor.Path"):
         output = await executor._execute_agent(
             "agent-1", "task-1", {}, 0,
-            scoped_view=mock_scoped_view,
         )
 
-    # Scoped view methods should be called, not registry
-    mock_scoped_view.get_agent_prompt_file.assert_called_once_with("agent-1")
-    mock_scoped_view.get_agent_timeout.assert_called_once_with("agent-1")
-    mock_registry.get_agent_prompt_file.assert_not_called()
+    # Registry methods should be called
+    mock_registry.get_agent_prompt_file.assert_called_once_with("agent-1")
+    mock_registry.get_agent_timeout.assert_called_once_with("agent-1")
 
 
 @pytest.mark.asyncio

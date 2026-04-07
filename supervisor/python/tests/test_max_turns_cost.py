@@ -1,7 +1,6 @@
 """Tests for configurable maxTurns/maxCost per agent and auto-resume on max_turns.
 
 Covers:
-- ScopedAgentView.get_agent_max_turns() and get_agent_max_cost()
 - AgentRegistry.get_agent_max_turns() and get_agent_max_cost()
 - PipelineExecutor auto-resume loop (cost guard, iteration guard, session_id missing)
 - Last successful output preservation across resume iterations
@@ -21,79 +20,9 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 
 from aquarco_supervisor.cli.claude import ClaudeOutput
-from aquarco_supervisor.config_overlay import ResolvedConfig, ScopedAgentView
 from aquarco_supervisor.database import Database
 from aquarco_supervisor.pipeline.executor import PipelineExecutor
 from aquarco_supervisor.task_queue import TaskQueue
-
-
-# ---------------------------------------------------------------------------
-# ScopedAgentView.get_agent_max_turns / get_agent_max_cost
-# ---------------------------------------------------------------------------
-
-
-class TestScopedAgentViewMaxTurnsCost:
-    """Test new ScopedAgentView accessors for maxTurns and maxCost."""
-
-    def _make_view(self, agents: dict[str, dict[str, Any]], tmp_path: Path) -> ScopedAgentView:
-        resolved = ResolvedConfig(agents=agents, pipelines=[])
-        return ScopedAgentView(resolved)
-
-    def test_get_agent_max_turns_explicit(self, tmp_path: Path) -> None:
-        """Returns the configured maxTurns from spec.resources."""
-        view = self._make_view(
-            {"agent": {"spec": {"resources": {"maxTurns": 50}}}}, tmp_path
-        )
-        assert view.get_agent_max_turns("agent") == 50
-        view.cleanup()
-
-    def test_get_agent_max_turns_default(self, tmp_path: Path) -> None:
-        """Returns default (30) when maxTurns is not set."""
-        view = self._make_view({"agent": {"spec": {}}}, tmp_path)
-        assert view.get_agent_max_turns("agent") == 30
-        view.cleanup()
-
-    def test_get_agent_max_turns_unknown_agent(self, tmp_path: Path) -> None:
-        """Unknown agent gets default maxTurns."""
-        view = self._make_view({}, tmp_path)
-        assert view.get_agent_max_turns("nonexistent") == 30
-        view.cleanup()
-
-    def test_get_agent_max_cost_explicit(self, tmp_path: Path) -> None:
-        """Returns the configured maxCost from spec.resources."""
-        view = self._make_view(
-            {"agent": {"spec": {"resources": {"maxCost": 10.0}}}}, tmp_path
-        )
-        assert view.get_agent_max_cost("agent") == 10.0
-        view.cleanup()
-
-    def test_get_agent_max_cost_default(self, tmp_path: Path) -> None:
-        """Returns default ($5.0) when maxCost is not set."""
-        view = self._make_view({"agent": {"spec": {}}}, tmp_path)
-        assert view.get_agent_max_cost("agent") == 5.0
-        view.cleanup()
-
-    def test_get_agent_max_cost_unknown_agent(self, tmp_path: Path) -> None:
-        """Unknown agent gets default maxCost."""
-        view = self._make_view({}, tmp_path)
-        assert view.get_agent_max_cost("nonexistent") == 5.0
-        view.cleanup()
-
-    def test_get_agent_max_turns_flat_spec(self, tmp_path: Path) -> None:
-        """Works when agent dict has resources at top level (no nested spec)."""
-        view = self._make_view(
-            {"agent": {"resources": {"maxTurns": 100}}}, tmp_path
-        )
-        assert view.get_agent_max_turns("agent") == 100
-        view.cleanup()
-
-    def test_get_agent_max_cost_flat_spec(self, tmp_path: Path) -> None:
-        """Works when agent dict has resources at top level (no nested spec)."""
-        view = self._make_view(
-            {"agent": {"resources": {"maxCost": 2.5}}}, tmp_path
-        )
-        assert view.get_agent_max_cost("agent") == 2.5
-        view.cleanup()
 
 
 # ---------------------------------------------------------------------------
@@ -401,21 +330,11 @@ class TestExecutorAutoResume:
         assert call_kwargs["max_turns"] == 50
 
     @pytest.mark.asyncio
-    async def test_scoped_view_max_turns_and_cost_used(self, sample_pipelines: Any) -> None:
-        """When scoped_view is provided, its max_turns and max_cost are used."""
+    async def test_registry_max_turns_and_cost_used(self, sample_pipelines: Any) -> None:
+        """Registry max_turns and max_cost are passed to execute_claude."""
         mock_db = AsyncMock(spec=Database)
         mock_tq = AsyncMock(spec=TaskQueue)
-        registry = _make_mock_registry()  # defaults: 30 turns, $5.0
-
-        scoped_view = MagicMock()
-        scoped_view.get_agent_prompt_file = MagicMock(return_value="/prompts/test.md")
-        scoped_view.get_agent_timeout = MagicMock(return_value=30)
-        scoped_view.get_agent_max_turns = MagicMock(return_value=75)
-        scoped_view.get_agent_max_cost = MagicMock(return_value=15.0)
-        scoped_view.get_allowed_tools = MagicMock(return_value=[])
-        scoped_view.get_denied_tools = MagicMock(return_value=[])
-        scoped_view.get_agent_environment = MagicMock(return_value={})
-        scoped_view.get_agent_output_schema = MagicMock(return_value=None)
+        registry = _make_mock_registry(max_turns=75, max_cost=15.0)
 
         claude_output = ClaudeOutput(
             structured={"ok": True, "_cost_usd": 0.1},
@@ -432,14 +351,11 @@ class TestExecutorAutoResume:
             await executor._execute_agent(
                 "test-agent", "task-1", {}, 0,
                 work_dir="/repos/test",
-                scoped_view=scoped_view,
             )
 
-        # Verify scoped_view methods were called (not registry)
-        scoped_view.get_agent_max_turns.assert_called_once_with("test-agent")
-        scoped_view.get_agent_max_cost.assert_called_once_with("test-agent")
-        registry.get_agent_max_turns.assert_not_called()
-        registry.get_agent_max_cost.assert_not_called()
+        # Verify registry methods were called
+        registry.get_agent_max_turns.assert_called_once_with("test-agent")
+        registry.get_agent_max_cost.assert_called_once_with("test-agent")
 
         # Verify max_turns was passed through
         call_kwargs = mock_exec.call_args.kwargs

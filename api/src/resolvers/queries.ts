@@ -367,7 +367,6 @@ export function mapRepository(row: Record<string, unknown>) {
     branch: row.branch,
     cloneDir: row.clone_dir,
     pollers: row.pollers ?? [],
-    isConfigRepo: row.is_config_repo ?? false,
     lastClonedAt: row.last_cloned_at ?? null,
     lastPulledAt: row.last_pulled_at ?? null,
     cloneStatus: (row.clone_status as string).toUpperCase(),

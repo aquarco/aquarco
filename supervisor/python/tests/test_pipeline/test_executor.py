@@ -343,9 +343,6 @@ async def test_execute_pipeline_no_pipeline_name_uses_task_pipeline(
         new_callable=AsyncMock,
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
-        "aquarco_supervisor.pipeline.executor.load_overlay",
-        return_value=None,
-    ), patch(
         "aquarco_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="0",
@@ -599,9 +596,6 @@ async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
         new_callable=AsyncMock,
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
-        "aquarco_supervisor.pipeline.executor.load_overlay",
-        return_value=None,
-    ), patch(
         "aquarco_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="0",
@@ -658,9 +652,6 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
         new_callable=AsyncMock,
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
-        "aquarco_supervisor.pipeline.executor.load_overlay",
-        return_value=None,
-    ), patch(
         "aquarco_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,
         return_value="0",
@@ -722,10 +713,7 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
     ), patch(
         "aquarco_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,
-    ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
-        "aquarco_supervisor.pipeline.executor.load_overlay",
-        return_value=None,
-    ):
+    ), patch("aquarco_supervisor.pipeline.executor.Path"):
         await executor.execute_pipeline("feature-pipeline", "task-1", {})
 
     # Required stage failures are now retried via postpone (not permanent fail)
@@ -778,9 +766,6 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
         new_callable=AsyncMock,
     ) as mock_claude, patch(
         "aquarco_supervisor.pipeline.executor.Path",
-    ), patch(
-        "aquarco_supervisor.pipeline.executor.load_overlay",
-        return_value=None,
     ), patch(
         "aquarco_supervisor.pipeline.executor._run_git",
         new_callable=AsyncMock,

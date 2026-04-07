@@ -337,7 +337,6 @@ export const Mutation = {
         branch?: string | null
         cloneDir?: string | null
         pollers?: string[] | null
-        isConfigRepo?: boolean | null
       }
     },
     ctx: Context
@@ -357,8 +356,8 @@ export const Mutation = {
     try {
       const trimmedUrl = input.url.trim()
       const result = await ctx.pool.query<Record<string, unknown>>(
-        `INSERT INTO repositories (name, url, original_url, branch, clone_dir, pollers, is_config_repo, clone_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+        `INSERT INTO repositories (name, url, original_url, branch, clone_dir, pollers, clone_status)
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending')
          RETURNING *`,
         [
           input.name,
@@ -367,7 +366,6 @@ export const Mutation = {
           input.branch || null,
           cloneDir,
           input.pollers ?? [],
-          input.isConfigRepo ?? false,
         ]
       )
       return { repository: mapRepository(result.rows[0]), errors: [] }
@@ -455,26 +453,6 @@ export const Mutation = {
       return { repository: mapRepository(result.rows[0]), errors: [] }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to remove repository'
-      return repoErrorPayload(null, message)
-    }
-  },
-
-  async setConfigRepo(
-    _: unknown,
-    args: { name: string; isConfigRepo: boolean },
-    ctx: Context
-  ) {
-    try {
-      const result = await ctx.pool.query<Record<string, unknown>>(
-        `UPDATE repositories SET is_config_repo = $1 WHERE name = $2 RETURNING *`,
-        [args.isConfigRepo, args.name]
-      )
-      if (result.rows.length === 0) {
-        return repoErrorPayload('name', `Repository "${args.name}" not found`)
-      }
-      return { repository: mapRepository(result.rows[0]), errors: [] }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update repository'
       return repoErrorPayload(null, message)
     }
   },

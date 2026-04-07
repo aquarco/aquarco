@@ -1,10 +1,9 @@
 """Tests for the 'Set model per agent' feature (GitHub issue #60).
 
 Covers the full model propagation chain:
-  Schema → YAML definitions → AgentRegistry → ScopedAgentView →
-  Executor → execute_claude CLI wrapper
+  Schema → YAML definitions → AgentRegistry → Executor → execute_claude CLI wrapper
 
-Also covers edge cases: resume + model, empty string, overlay resolution,
+Also covers edge cases: resume + model, empty string,
 and the condition evaluator's model passthrough.
 """
 
@@ -21,13 +20,7 @@ import yaml
 
 from aquarco_supervisor.cli.claude import ClaudeOutput, execute_claude
 from aquarco_supervisor.cli import claude as claude_mod
-from aquarco_supervisor.config_overlay import (
-    ResolvedConfig,
-    ScopedAgentView,
-    resolve_config,
-)
 from aquarco_supervisor.database import Database
-from aquarco_supervisor.models import ConfigOverlay, MergeConfig, MergeStrategy
 from aquarco_supervisor.pipeline.agent_registry import AgentRegistry
 from aquarco_supervisor.pipeline.executor import PipelineExecutor
 from aquarco_supervisor.task_queue import TaskQueue
@@ -185,94 +178,7 @@ async def test_discover_agents_loads_model_from_md(tmp_path: Path) -> None:
 
 
 # ===========================================================================
-# 5. ScopedAgentView.get_agent_model — edge cases
-# ===========================================================================
-
-
-def test_scoped_view_model_empty_string_returns_none(tmp_path: Path) -> None:
-    resolved = ResolvedConfig(
-        agents={"a": {"name": "a", "model": ""}},
-        pipelines=[],
-    )
-    view = ScopedAgentView(resolved)
-    assert view.get_agent_model("a") is None
-    view.cleanup()
-
-
-def test_scoped_view_model_nested_empty_string(tmp_path: Path) -> None:
-    resolved = ResolvedConfig(
-        agents={"a": {"name": "a", "spec": {"model": ""}}},
-        pipelines=[],
-    )
-    view = ScopedAgentView(resolved)
-    assert view.get_agent_model("a") is None
-    view.cleanup()
-
-
-def test_scoped_view_model_flat_takes_precedence_over_nested(tmp_path: Path) -> None:
-    """When both flat and nested model exist, flat (spec.get('spec', spec)) resolves correctly."""
-    resolved = ResolvedConfig(
-        agents={"a": {"name": "a", "model": "claude-opus-4", "spec": {"model": "claude-haiku-4-5"}}},
-        pipelines=[],
-    )
-    view = ScopedAgentView(resolved)
-    # The nested spec takes precedence because spec.get("spec", spec) returns the inner dict
-    assert view.get_agent_model("a") == "claude-haiku-4-5"
-    view.cleanup()
-
-
-def test_scoped_view_model_overlay_overrides_default(tmp_path: Path) -> None:
-    """Repo overlay should override default model via resolve_config."""
-    default_agents = {
-        "agent": {"name": "agent", "model": "claude-sonnet-4-6"},
-    }
-    repo_base = tmp_path / "repo"
-    repo_base.mkdir()
-    repo_overlay = ConfigOverlay(
-        agents=[{"name": "agent", "model": "claude-opus-4"}],
-        merge=MergeConfig(agents=MergeStrategy.EXTEND, pipelines=MergeStrategy.EXTEND),
-    )
-    resolved = resolve_config(
-        default_agents, [],
-        repo_overlay=repo_overlay,
-        repo_overlay_base=repo_base,
-    )
-    view = ScopedAgentView(resolved)
-    assert view.get_agent_model("agent") == "claude-opus-4"
-    view.cleanup()
-
-
-def test_scoped_view_model_global_overlay_then_repo_overlay(tmp_path: Path) -> None:
-    """Repo overlay model takes precedence over global overlay model."""
-    default_agents = {
-        "agent": {"name": "agent", "model": "claude-haiku-4-5"},
-    }
-    global_base = tmp_path / "global"
-    global_base.mkdir()
-    global_overlay = ConfigOverlay(
-        agents=[{"name": "agent", "model": "claude-sonnet-4-6"}],
-        merge=MergeConfig(agents=MergeStrategy.EXTEND, pipelines=MergeStrategy.EXTEND),
-    )
-    repo_base = tmp_path / "repo"
-    repo_base.mkdir()
-    repo_overlay = ConfigOverlay(
-        agents=[{"name": "agent", "model": "claude-opus-4"}],
-        merge=MergeConfig(agents=MergeStrategy.EXTEND, pipelines=MergeStrategy.EXTEND),
-    )
-    resolved = resolve_config(
-        default_agents, [],
-        global_overlay=global_overlay,
-        global_overlay_base=global_base,
-        repo_overlay=repo_overlay,
-        repo_overlay_base=repo_base,
-    )
-    view = ScopedAgentView(resolved)
-    assert view.get_agent_model("agent") == "claude-opus-4"
-    view.cleanup()
-
-
-# ===========================================================================
-# 6. execute_claude — model flag in CLI args
+# 5. execute_claude — model flag in CLI args
 # ===========================================================================
 
 
@@ -550,23 +456,22 @@ async def test_executor_passes_none_model_when_not_set(sample_pipelines: Any) ->
 
 
 @pytest.mark.asyncio
-async def test_executor_uses_scoped_view_model(sample_pipelines: Any) -> None:
-    """_execute_agent uses scoped_view.get_agent_model when provided."""
+async def test_executor_uses_registry_model(sample_pipelines: Any) -> None:
+    """_execute_agent uses registry.get_agent_model for model selection."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
 
     mock_registry = MagicMock()
-    mock_scoped = MagicMock()
-    mock_scoped.get_agent_prompt_file = MagicMock(return_value="/prompts/test.md")
-    mock_scoped.get_agent_timeout = MagicMock(return_value=30)
-    mock_scoped.get_agent_max_turns = MagicMock(return_value=30)
-    mock_scoped.get_agent_max_cost = MagicMock(return_value=5.0)
-    mock_scoped.get_allowed_tools = MagicMock(return_value=[])
-    mock_scoped.get_denied_tools = MagicMock(return_value=[])
-    mock_scoped.get_agent_environment = MagicMock(return_value={})
-    mock_scoped.get_agent_output_schema = MagicMock(return_value=None)
-    mock_scoped.get_agent_model = MagicMock(return_value="claude-haiku-4-5")
+    mock_registry.get_agent_prompt_file = MagicMock(return_value="/prompts/test.md")
+    mock_registry.get_agent_timeout = MagicMock(return_value=30)
+    mock_registry.get_agent_max_turns = MagicMock(return_value=30)
+    mock_registry.get_agent_max_cost = MagicMock(return_value=5.0)
+    mock_registry.get_allowed_tools = MagicMock(return_value=[])
+    mock_registry.get_denied_tools = MagicMock(return_value=[])
+    mock_registry.get_agent_environment = MagicMock(return_value={})
+    mock_registry.get_agent_output_schema = MagicMock(return_value=None)
+    mock_registry.get_agent_model = MagicMock(return_value="claude-haiku-4-5")
 
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
 
@@ -579,11 +484,9 @@ async def test_executor_uses_scoped_view_model(sample_pipelines: Any) -> None:
     ) as mock_execute, patch("aquarco_supervisor.pipeline.executor.Path"):
         await executor._execute_agent(
             "cond-agent", "task-1", {}, 0,
-            scoped_view=mock_scoped,
         )
 
-    mock_scoped.get_agent_model.assert_called_once_with("cond-agent")
-    mock_registry.get_agent_model.assert_not_called()
+    mock_registry.get_agent_model.assert_called_once_with("cond-agent")
     call_kwargs = mock_execute.call_args.kwargs
     assert call_kwargs["model"] == "claude-haiku-4-5"
 

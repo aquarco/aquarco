@@ -60,6 +60,8 @@ EXPECTED_MIGRATIONS = [
     "036_supervisor_state",
     "037_add_max_turns_stage_status",
     "038_drop_repo_agent_scans",
+    "039_add_stage_msg_spending_state",
+    "040_drop_is_config_repo",
 ]
 
 # Build expected dependency map: migration_name -> depends_on_name

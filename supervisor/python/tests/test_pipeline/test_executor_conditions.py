@@ -162,8 +162,8 @@ class TestOutputSchemaResolution:
         # Empty dict is falsy, so should fall back
         assert schema == {"type": "object"}
 
-    def test_scoped_view_used_for_fallback(self) -> None:
-        """When scoped_view is provided, use it for agent schema fallback."""
+    def test_registry_used_for_fallback(self) -> None:
+        """When no pipeline schema, registry is used for agent schema fallback."""
         pipeline = PipelineConfig(
             name="test-pipeline",
             trigger=PipelineTrigger(labels=["test"]),
@@ -171,16 +171,15 @@ class TestOutputSchemaResolution:
             categories={},
         )
         executor = self._make_executor([pipeline])
-        scoped_view = MagicMock()
-        scoped_view.get_agent_output_schema = MagicMock(
-            return_value={"type": "object", "from": "scoped"}
+        executor._registry.get_agent_output_schema = MagicMock(
+            return_value={"type": "object", "from": "registry"}
         )
         schema = executor._get_output_schema_for_stage(
-            "test-pipeline", "test", "test-agent", scoped_view=scoped_view
+            "test-pipeline", "test", "test-agent"
         )
         assert schema is not None
-        assert schema["from"] == "scoped"
-        scoped_view.get_agent_output_schema.assert_called_once_with("test-agent")
+        assert schema["from"] == "registry"
+        executor._registry.get_agent_output_schema.assert_called_once_with("test-agent")
 
 
 # ---------------------------------------------------------------------------

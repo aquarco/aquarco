@@ -123,32 +123,11 @@ class Repository(BaseModel):
     branch: str = "main"
     clone_dir: str = ""
     clone_status: CloneStatus = CloneStatus.PENDING
-    is_config_repo: bool = False
     head_sha: str | None = None
     last_cloned_at: datetime | None = None
     last_pulled_at: datetime | None = None
     error_message: str | None = None
     deploy_public_key: str | None = None
-
-
-class MergeStrategy(str, enum.Enum):
-    EXTEND = "extend"
-    REPLACE = "replace"
-
-
-class MergeConfig(BaseModel):
-    agents: MergeStrategy = MergeStrategy.EXTEND
-    pipelines: MergeStrategy = MergeStrategy.EXTEND
-
-
-class ConfigOverlay(BaseModel):
-    api_version: str = Field(default="aquarco.config/v1", alias="apiVersion")
-    kind: str = "ConfigOverlay"
-    merge: MergeConfig = Field(default_factory=MergeConfig)
-    agents: list[dict[str, Any]] = Field(default_factory=list)
-    pipelines: list[dict[str, Any]] = Field(default_factory=list)
-
-    model_config = {"populate_by_name": True}
 
 
 class AgentInstance(BaseModel):
@@ -302,7 +281,6 @@ class SupervisorSpec(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     global_limits: GlobalLimits = Field(default_factory=GlobalLimits, alias="globalLimits")
     config_reload: dict[str, Any] = Field(default_factory=dict, alias="configReload")
-    repo_config: dict[str, Any] = Field(default_factory=dict, alias="repoConfig")
     pipelines_file: str = Field(default="", alias="pipelinesFile")
     pollers: list[PollerDefinition] = Field(default_factory=list)
     health: HealthConfig = Field(default_factory=HealthConfig)

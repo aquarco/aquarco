@@ -911,32 +911,6 @@ def test_get_agent_environment_returns_defaults_for_unknown_agent(
 
 
 # ---------------------------------------------------------------------------
-# get_default_agents
-# ---------------------------------------------------------------------------
-
-
-def test_get_default_agents_returns_copy(
-    mock_db: AsyncMock, tmp_path: Path
-) -> None:
-    """get_default_agents returns a copy of the in-memory agent registry."""
-    # Arrange
-    reg = AgentRegistry(mock_db, str(tmp_path))
-    reg._agents = {
-        "planner-agent": {"_group": "system", "role": "planner"},
-        "analyze-agent": {"_group": "pipeline", "categories": ["analyze"]},
-    }
-
-    # Act
-    result = reg.get_default_agents()
-
-    # Assert — returns all agents
-    assert set(result.keys()) == {"planner-agent", "analyze-agent"}
-    # Modifying the copy should not affect the registry
-    result["new-agent"] = {}
-    assert "new-agent" not in reg._agents
-
-
-# ---------------------------------------------------------------------------
 # get_agent_group — system agents always excluded from category selection
 # ---------------------------------------------------------------------------
 

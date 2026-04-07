@@ -128,7 +128,6 @@ The supervisor system manages autonomous AI agent pipelines. It was rewritten fr
 | `pipeline/context.py` | Context accumulation for stages |
 | `cli/claude.py` | Claude CLI subprocess wrapper (with `extra_env` support) |
 | `config_store.py` | Agent/pipeline CRUD in database |
-| `config_overlay.py` | Multi-layer config resolution (default → global → repo) |
 | `pollers/` | GitHub issues, PRs, commits, file-drop triggers (repos from DB) |
 | `workers/` | Git clone and pull workers |
 

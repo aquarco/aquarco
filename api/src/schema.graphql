@@ -69,7 +69,6 @@ type Mutation {
 
   # Repository actions
   retryClone(name: String!): RepositoryPayload!
-  setConfigRepo(name: String!, isConfigRepo: Boolean!): RepositoryPayload!
 
   # Intervention
   unblockTask(id: ID!, resolution: String!): TaskPayload!
@@ -147,7 +146,6 @@ type Repository {
   branch: String
   cloneDir: String!
   pollers: [String!]!
-  isConfigRepo: Boolean!
   lastClonedAt: DateTime
   lastPulledAt: DateTime
   cloneStatus: CloneStatus!
@@ -260,7 +258,6 @@ input RegisterRepositoryInput {
   branch: String
   cloneDir: String
   pollers: [String!]
-  isConfigRepo: Boolean
 }
 
 # --- Enums ---

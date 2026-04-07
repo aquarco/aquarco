@@ -417,10 +417,6 @@ class AgentRegistry:
             for name, spec in self._agents.items()
         ]
 
-    def get_default_agents(self) -> dict[str, dict[str, Any]]:
-        """Return a copy of all loaded agent definitions."""
-        return dict(self._agents)
-
     def should_skip_planning(self, categories: list[str]) -> bool:
         """Return True if every category has exactly one registered agent.
 
