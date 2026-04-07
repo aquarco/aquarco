@@ -343,6 +343,7 @@ export type Query = {
   claudeAuthStatus: ClaudeAuthStatus;
   dashboardStats: DashboardStats;
   drainStatus: DrainStatus;
+  tokenUsageByModel: Array<TokenUsageByDay>;
   githubAuthStatus: GithubAuthStatus;
   githubBranches: Array<Scalars['String']['output']>;
   githubRepositories: Array<GithubRepo>;
@@ -374,6 +375,11 @@ export type QueryRepositoryArgs = {
 
 export type QueryTaskArgs = {
   id: Scalars['ID']['input'];
+};
+
+
+export type QueryTokenUsageByModelArgs = {
+  days?: InputMaybe<Scalars['Int']['input']>;
 };
 
 
@@ -436,6 +442,7 @@ export type Stage = {
   id: Scalars['ID']['output'];
   iteration: Scalars['Int']['output'];
   liveOutput?: Maybe<Scalars['String']['output']>;
+  model?: Maybe<Scalars['String']['output']>;
   rawOutput?: Maybe<Scalars['String']['output']>;
   retryCount: Scalars['Int']['output'];
   run: Scalars['Int']['output'];
@@ -500,6 +507,16 @@ export type Task = {
   totalCostUsd?: Maybe<Scalars['Float']['output']>;
   totalTokens?: Maybe<Scalars['Int']['output']>;
   updatedAt: Scalars['DateTime']['output'];
+};
+
+export type TokenUsageByDay = {
+  __typename?: 'TokenUsageByDay';
+  day: Scalars['DateTime']['output'];
+  model: Scalars['String']['output'];
+  tokensInput: Scalars['Int']['output'];
+  tokensOutput: Scalars['Int']['output'];
+  cacheReadTokens: Scalars['Int']['output'];
+  cacheWriteTokens: Scalars['Int']['output'];
 };
 
 export type TaskConnection = {
@@ -643,6 +660,7 @@ export type ResolversTypes = ResolversObject<{
   TaskConnection: ResolverTypeWrapper<TaskConnection>;
   TaskPayload: ResolverTypeWrapper<TaskPayload>;
   TaskStatus: null;
+  TokenUsageByDay: ResolverTypeWrapper<TokenUsageByDay>;
 }>;
 
 /** Mapping between all available schema types and the resolvers parents */
@@ -686,6 +704,7 @@ export type ResolversParentTypes = ResolversObject<{
   Task: Task;
   TaskConnection: TaskConnection;
   TaskPayload: TaskPayload;
+  TokenUsageByDay: TokenUsageByDay;
 }>;
 
 export type AgentDefinitionResolvers<ContextType = Context, ParentType extends ResolversParentTypes['AgentDefinition'] = ResolversParentTypes['AgentDefinition']> = ResolversObject<{
@@ -908,6 +927,7 @@ export type QueryResolvers<ContextType = Context, ParentType extends ResolversPa
   repository?: Resolver<Maybe<ResolversTypes['Repository']>, ParentType, ContextType, RequireFields<QueryRepositoryArgs, 'name'>>;
   task?: Resolver<Maybe<ResolversTypes['Task']>, ParentType, ContextType, RequireFields<QueryTaskArgs, 'id'>>;
   tasks?: Resolver<ResolversTypes['TaskConnection'], ParentType, ContextType, Partial<QueryTasksArgs>>;
+  tokenUsageByModel?: Resolver<Array<ResolversTypes['TokenUsageByDay']>, ParentType, ContextType, Partial<QueryTokenUsageByModelArgs>>;
 }>;
 
 export type RepositoryResolvers<ContextType = Context, ParentType extends ResolversParentTypes['Repository'] = ResolversParentTypes['Repository']> = ResolversObject<{
@@ -952,6 +972,7 @@ export type StageResolvers<ContextType = Context, ParentType extends ResolversPa
   id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
   iteration?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   liveOutput?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  model?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   rawOutput?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   retryCount?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   run?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
@@ -1015,6 +1036,16 @@ export type TaskPayloadResolvers<ContextType = Context, ParentType extends Resol
 
 export type TaskStatusResolvers = { BLOCKED: 'blocked', CLOSED: 'closed', COMPLETED: 'completed', EXECUTING: 'executing', FAILED: 'failed', PENDING: 'pending', PLANNING?: 'PLANNING', QUEUED: 'queued', RATE_LIMITED: 'rate_limited', TIMEOUT: 'timeout' };
 
+export type TokenUsageByDayResolvers<ContextType = Context, ParentType extends ResolversParentTypes['TokenUsageByDay'] = ResolversParentTypes['TokenUsageByDay']> = ResolversObject<{
+  cacheReadTokens?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  cacheWriteTokens?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  day?: Resolver<ResolversTypes['DateTime'], ParentType, ContextType>;
+  model?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  tokensInput?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  tokensOutput?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
 export type Resolvers<ContextType = Context> = ResolversObject<{
   AgentDefinition?: AgentDefinitionResolvers<ContextType>;
   AgentDefinitionPayload?: AgentDefinitionPayloadResolvers<ContextType>;
@@ -1051,5 +1082,6 @@ export type Resolvers<ContextType = Context> = ResolversObject<{
   TaskConnection?: TaskConnectionResolvers<ContextType>;
   TaskPayload?: TaskPayloadResolvers<ContextType>;
   TaskStatus?: TaskStatusResolvers;
+  TokenUsageByDay?: TokenUsageByDayResolvers<ContextType>;
 }>;
 

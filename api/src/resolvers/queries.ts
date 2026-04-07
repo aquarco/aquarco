@@ -269,6 +269,36 @@ export const Query = {
     }
   },
 
+  async tokenUsageByModel(
+    _: unknown,
+    args: { days?: number | null },
+    ctx: Context
+  ) {
+    const days = Math.min(Math.max(args.days ?? 30, 1), 365)
+    const result = await ctx.pool.query<Record<string, unknown>>(
+      `SELECT
+         DATE_TRUNC('day', started_at AT TIME ZONE 'UTC') AS day,
+         COALESCE(model, 'unknown') AS model,
+         COALESCE(SUM(tokens_input), 0)::int AS tokens_input,
+         COALESCE(SUM(tokens_output), 0)::int AS tokens_output,
+         COALESCE(SUM(cache_read_tokens), 0)::int AS cache_read_tokens,
+         COALESCE(SUM(cache_write_tokens), 0)::int AS cache_write_tokens
+       FROM stages
+       WHERE started_at >= NOW() - ($1 || ' days')::INTERVAL
+       GROUP BY 1, 2
+       ORDER BY 1 ASC, 2 ASC`,
+      [String(days)]
+    )
+    return result.rows.map((row) => ({
+      day: (row.day as Date).toISOString(),
+      model: row.model as string,
+      tokensInput: row.tokens_input as number,
+      tokensOutput: row.tokens_output as number,
+      cacheReadTokens: row.cache_read_tokens as number,
+      cacheWriteTokens: row.cache_write_tokens as number,
+    }))
+  },
+
   async drainStatus(_: unknown, __: unknown, ctx: Context) {
     return getDrainStatus(ctx.pool)
   },
@@ -369,6 +399,7 @@ export function mapStage(row: Record<string, unknown>) {
     costUsd: row.cost_usd ?? null,
     cacheReadTokens: row.cache_read_tokens ?? null,
     cacheWriteTokens: row.cache_write_tokens ?? null,
+    model: row.model ?? null,
     errorMessage: row.error_message ?? null,
     retryCount: row.retry_count,
     liveOutput: row.live_output ?? null,

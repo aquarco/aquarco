@@ -50,6 +50,7 @@ def _resolve_stage_status(
 from .database import Database
 from .logging import get_logger
 from .models import Task, TaskStatus
+from .spending import parse_ndjson_spending
 
 log = get_logger("task-queue")
 
@@ -376,12 +377,22 @@ class TaskQueue:
         cache_read = _pop_cumulative("_cache_read_tokens", "_cumulative_cache_read_tokens")
         cache_write = _pop_cumulative("_cache_write_tokens", "_cumulative_cache_write_tokens")
         structured_json = json.dumps(output)
+        # Extract model from raw_output NDJSON for the model column
+        model = None
+        if raw_output:
+            try:
+                spending_summary = parse_ndjson_spending(raw_output)
+                model = spending_summary.model
+            except Exception:
+                log.warning("Failed to extract model from raw_output for stage", exc_info=True)
+
         spending_params = {
             "cost_usd": cost_usd,
             "tokens_in": tokens_input,
             "tokens_out": tokens_output,
             "cache_read": cache_read,
             "cache_write": cache_write,
+            "model": model,
         }
         if stage_id is not None:
             await self._db.execute(
@@ -397,6 +408,7 @@ class TaskQueue:
                     tokens_output = %(tokens_out)s,
                     cache_read_tokens = %(cache_read)s,
                     cache_write_tokens = %(cache_write)s,
+                    model = %(model)s,
                     started_at = COALESCE(stages.started_at, NOW()),
                     completed_at = NOW()
                 WHERE id = %(id)s
@@ -425,6 +437,7 @@ class TaskQueue:
                     tokens_output = %(tokens_out)s,
                     cache_read_tokens = %(cache_read)s,
                     cache_write_tokens = %(cache_write)s,
+                    model = %(model)s,
                     started_at = COALESCE(stages.started_at, NOW()),
                     completed_at = NOW()
                 WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
@@ -451,12 +464,12 @@ class TaskQueue:
                                    structured_output, raw_output, error_message,
                                    cost_usd, tokens_input, tokens_output,
                                    cache_read_tokens, cache_write_tokens,
-                                   started_at, completed_at)
+                                   model, started_at, completed_at)
                 VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s, %(status)s,
                         %(output)s::jsonb, %(raw)s, %(error_msg)s,
                         %(cost_usd)s, %(tokens_in)s, %(tokens_out)s,
                         %(cache_read)s, %(cache_write)s,
-                        NOW(), NOW())
+                        %(model)s, NOW(), NOW())
                 ON CONFLICT (task_id, stage_number) DO UPDATE
                 SET agent = %(agent)s, status = %(status)s,
                     structured_output = %(output)s::jsonb,
@@ -467,6 +480,7 @@ class TaskQueue:
                     tokens_output = %(tokens_out)s,
                     cache_read_tokens = %(cache_read)s,
                     cache_write_tokens = %(cache_write)s,
+                    model = %(model)s,
                     started_at = COALESCE(stages.started_at, NOW()),
                     completed_at = NOW()
                 """,

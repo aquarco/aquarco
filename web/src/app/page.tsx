@@ -18,8 +18,9 @@ import Skeleton from '@mui/material/Skeleton'
 import Alert from '@mui/material/Alert'
 import Stack from '@mui/material/Stack'
 import Divider from '@mui/material/Divider'
-import { DASHBOARD_STATS, GET_TASKS } from '@/lib/graphql/queries'
+import { DASHBOARD_STATS, GET_TASKS, TOKEN_USAGE_BY_MODEL } from '@/lib/graphql/queries'
 import { StatusChip } from '@/components/ui/StatusChip'
+import { TokenUsageChart } from '@/components/dashboard/TokenUsageChart'
 import { formatDate } from '@/lib/format'
 import { formatCost, formatTokens } from '@/lib/spending'
 
@@ -72,6 +73,11 @@ export default function DashboardPage() {
     loading: tasksLoading,
     error: tasksError,
   } = useQuery(GET_TASKS, { variables: { limit: 10, offset: 0 } })
+
+  const {
+    data: tokenUsageData,
+    loading: tokenUsageLoading,
+  } = useQuery(TOKEN_USAGE_BY_MODEL, { variables: { days: 30 } })
 
   const stats = statsData?.dashboardStats
 
@@ -190,6 +196,20 @@ export default function DashboardPage() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* Token Usage Chart */}
+      <Card variant="outlined" sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+            Token Usage by Model (Last 30 Days)
+          </Typography>
+          <Divider sx={{ mb: 2 }} />
+          <TokenUsageChart
+            data={tokenUsageData?.tokenUsageByModel ?? []}
+            loading={tokenUsageLoading}
+          />
+        </CardContent>
+      </Card>
 
       {/* Recent tasks */}
       <Typography variant="subtitle1" fontWeight={700} gutterBottom>

@@ -1,5 +1,24 @@
 # Changelog
 
+## [2026-04-07] — Show token usage chart on Dashboard (#83)
+
+### Added
+- **Token Usage Chart** — new dashboard card displaying daily token consumption broken down by model (Opus, Sonnet, Haiku) with a stacked bar chart showing Input, Output, Cache Read, and Cache Write tokens
+- **Model extraction from stages** — new `model` column on `stages` table populated from NDJSON `raw_output`; supervisor extracts model when completing stages via `parse_ndjson_spending()`
+- **GraphQL `tokenUsageByModel` query** — new query accepting optional `days` parameter (clamped to [1, 365]) returning daily aggregated token data grouped by model; NULL models coalesced to `'unknown'` for backward compatibility
+- **Model field on Stage type** — GraphQL `Stage` type now includes `model: String` field for accessing the per-stage model value
+- **TokenUsageChart React component** (`web/src/components/dashboard/TokenUsageChart.tsx`) — recharts-powered stacked bar chart with token type toggle (Input/Output/Cache Read/Cache Write/Total), model color mapping (Opus=purple, Sonnet=blue, Haiku=green), and responsive skeleton loading state
+- **Backfill script** (`db/scripts/backfill_stage_model.py`) — one-time operator-run script that parses existing `raw_output` NDJSON to retroactively populate `model` for completed stages
+- **Database migration 040** — adds `model VARCHAR(100)` column to `stages` table with rollback support
+
+### Changed
+- **Dashboard layout** — added Token Usage Chart section showing last 30 days of model-based token consumption
+- **`mapStage()` resolver** — now includes `model` field in Stage object mapping
+
+### Test Coverage
+- 58 new tests across Python (model extraction from NDJSON), GraphQL (tokenUsageByModel resolver with days parameter clamping), and React (TokenUsageChart component color mapping, token filtering, data transformation)
+- All Python tests passing (16/16); API and Web tests written following existing patterns
+
 ## [2026-04-07] — Improve stage output rendering (#95)
 
 ### Added
