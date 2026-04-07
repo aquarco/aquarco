@@ -958,49 +958,114 @@ class TaskQueue:
 
         Also incrementally updates spending columns when the line contains
         assistant-message token usage.
+
+        Deduplication: the Claude CLI streaming protocol may emit the same
+        ``message.id`` multiple times with cumulative (not delta) token counts.
+        This method uses the ``msg_spending_state`` JSONB column to track
+        per-message-id max values. The actual delta added to spending columns
+        is ``new_value - previous_max`` for each token field, ensuring that
+        duplicate message IDs don't cause overcounting.
         """
         from .spending import get_pricing
 
-        # Parse spending deltas from this NDJSON line
+        # Parse spending from this NDJSON line
         delta_input = 0
         delta_output = 0
         delta_cache_read = 0
         delta_cache_write = 0
         delta_cost = 0.0
+        msg_id: str | None = None
+        raw_input = 0
+        raw_output_tokens = 0
+        raw_cache_read = 0
+        raw_cache_write = 0
+        model = ""
         try:
             msg = json.loads(live_output)
             if isinstance(msg, dict) and msg.get("type") == "assistant":
                 message = msg.get("message", {})
                 usage = message.get("usage") if isinstance(message, dict) else None
                 if isinstance(usage, dict):
-                    delta_input = usage.get("input_tokens", 0)
-                    delta_output = usage.get("output_tokens", 0)
-                    delta_cache_read = usage.get("cache_read_input_tokens", 0)
-                    delta_cache_write = usage.get("cache_creation_input_tokens", 0)
+                    raw_input = usage.get("input_tokens", 0)
+                    raw_output_tokens = usage.get("output_tokens", 0)
+                    raw_cache_read = usage.get("cache_read_input_tokens", 0)
+                    raw_cache_write = usage.get("cache_creation_input_tokens", 0)
                     model = message.get("model", "") if isinstance(message, dict) else ""
-                    pricing = get_pricing(model)
-                    delta_cost = (
-                        delta_input * pricing["input"] / 1_000_000
-                        + delta_output * pricing["output"] / 1_000_000
-                        + delta_cache_read * pricing["cache_read"] / 1_000_000
-                        + delta_cache_write * pricing["cache_write"] / 1_000_000
-                    )
+                    msg_id = message.get("id") if isinstance(message, dict) else None
         except (json.JSONDecodeError, TypeError, KeyError):
             pass
 
-        spending_sql = """,
+        has_usage = raw_input or raw_output_tokens or raw_cache_read or raw_cache_write
+
+        if has_usage and msg_id:
+            # Deduplication path: compute delta as (new_max - old_max) using
+            # msg_spending_state JSONB column atomically in SQL.
+            # The JSONB column stores: {"msg_id": {"i": N, "o": N, "cr": N, "cw": N}, ...}
+            pricing = get_pricing(model)
+            spending_sql = """,
+                    msg_spending_state = (
+                        SELECT jsonb_set(
+                            COALESCE(stages.msg_spending_state, '{{}}'::jsonb),
+                            ARRAY[%(msg_id)s],
+                            jsonb_build_object(
+                                'i', GREATEST(COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'i')::int, 0), %(raw_input)s),
+                                'o', GREATEST(COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'o')::int, 0), %(raw_output)s),
+                                'cr', GREATEST(COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'cr')::int, 0), %(raw_cache_read)s),
+                                'cw', GREATEST(COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'cw')::int, 0), %(raw_cache_write)s)
+                            )
+                        )
+                    ),
+                    tokens_input = COALESCE(tokens_input, 0) + GREATEST(%(raw_input)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'i')::int, 0), 0),
+                    tokens_output = COALESCE(tokens_output, 0) + GREATEST(%(raw_output)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'o')::int, 0), 0),
+                    cache_read_tokens = COALESCE(cache_read_tokens, 0) + GREATEST(%(raw_cache_read)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'cr')::int, 0), 0),
+                    cache_write_tokens = COALESCE(cache_write_tokens, 0) + GREATEST(%(raw_cache_write)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'cw')::int, 0), 0),
+                    cost_usd = COALESCE(cost_usd, 0) + (
+                        GREATEST(%(raw_input)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'i')::int, 0), 0) * %(price_input)s
+                        + GREATEST(%(raw_output)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'o')::int, 0), 0) * %(price_output)s
+                        + GREATEST(%(raw_cache_read)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'cr')::int, 0), 0) * %(price_cache_read)s
+                        + GREATEST(%(raw_cache_write)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'cw')::int, 0), 0) * %(price_cache_write)s
+                    )"""
+            spending_params = {
+                "msg_id": msg_id,
+                "raw_input": raw_input,
+                "raw_output": raw_output_tokens,
+                "raw_cache_read": raw_cache_read,
+                "raw_cache_write": raw_cache_write,
+                "price_input": pricing["input"] / 1_000_000,
+                "price_output": pricing["output"] / 1_000_000,
+                "price_cache_read": pricing["cache_read"] / 1_000_000,
+                "price_cache_write": pricing["cache_write"] / 1_000_000,
+            }
+        elif has_usage:
+            # No message ID — treat as unique, add full values (no dedup needed)
+            pricing = get_pricing(model)
+            delta_input = raw_input
+            delta_output = raw_output_tokens
+            delta_cache_read = raw_cache_read
+            delta_cache_write = raw_cache_write
+            delta_cost = (
+                delta_input * pricing["input"] / 1_000_000
+                + delta_output * pricing["output"] / 1_000_000
+                + delta_cache_read * pricing["cache_read"] / 1_000_000
+                + delta_cache_write * pricing["cache_write"] / 1_000_000
+            )
+            spending_sql = """,
                     tokens_input = COALESCE(tokens_input, 0) + %(delta_input)s,
                     tokens_output = COALESCE(tokens_output, 0) + %(delta_output)s,
                     cache_read_tokens = COALESCE(cache_read_tokens, 0) + %(delta_cache_read)s,
                     cache_write_tokens = COALESCE(cache_write_tokens, 0) + %(delta_cache_write)s,
                     cost_usd = COALESCE(cost_usd, 0) + %(delta_cost)s"""
-        spending_params = {
-            "delta_input": delta_input,
-            "delta_output": delta_output,
-            "delta_cache_read": delta_cache_read,
-            "delta_cache_write": delta_cache_write,
-            "delta_cost": delta_cost,
-        }
+            spending_params = {
+                "delta_input": delta_input,
+                "delta_output": delta_output,
+                "delta_cache_read": delta_cache_read,
+                "delta_cache_write": delta_cache_write,
+                "delta_cost": delta_cost,
+            }
+        else:
+            # No usage data in this line — no spending update
+            spending_sql = ""
+            spending_params = {}
 
         if stage_id is not None:
             await self._db.execute(

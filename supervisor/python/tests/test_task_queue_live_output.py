@@ -303,16 +303,17 @@ async def test_get_live_stage_spending_filters_by_executing_status(
 async def test_get_live_stage_spending_multi_turn_accumulation(
     task_queue: TaskQueue, mock_db: AsyncMock
 ) -> None:
-    """raw_output with multiple assistant turns sums tokens correctly."""
+    """raw_output with multiple assistant turns (unique IDs) sums tokens correctly."""
     turns = [
-        {"input_tokens": 100, "output_tokens": 50},
-        {"input_tokens": 150, "output_tokens": 60},
-        {"input_tokens": 200, "output_tokens": 70},
+        {"id": "msg_01", "input_tokens": 100, "output_tokens": 50},
+        {"id": "msg_02", "input_tokens": 150, "output_tokens": 60},
+        {"id": "msg_03", "input_tokens": 200, "output_tokens": 70},
     ]
     lines = [
         json.dumps({
             "type": "assistant",
             "message": {
+                "id": t["id"],
                 "model": "claude-sonnet-4-5",
                 "usage": {
                     "input_tokens": t["input_tokens"],
@@ -334,3 +335,96 @@ async def test_get_live_stage_spending_multi_turn_accumulation(
     assert result["input_tokens"] == 450   # 100 + 150 + 200
     assert result["output_tokens"] == 180  # 50 + 60 + 70
     assert result["turns"] == 3
+
+
+# ---------------------------------------------------------------------------
+# update_stage_live_output – deduplication by message.id (issue #93)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_stage_live_output_dedup_uses_msg_spending_state(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """When a line contains message.id, the SQL should reference msg_spending_state
+    for deduplication instead of naively adding deltas."""
+    line = json.dumps({
+        "type": "assistant",
+        "message": {
+            "id": "msg_01AAA",
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": 10,
+                "cache_creation_input_tokens": 100,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 20,
+            },
+        },
+    })
+    await task_queue.update_stage_live_output(
+        task_id="task-1",
+        stage_key="0:review:review-agent",
+        iteration=1,
+        run=1,
+        live_output=line,
+    )
+
+    sql, params = mock_db.execute.call_args[0]
+    # Should use msg_spending_state and GREATEST for dedup
+    assert "msg_spending_state" in sql
+    assert "GREATEST" in sql
+    assert params["msg_id"] == "msg_01AAA"
+    assert params["raw_input"] == 10
+    assert params["raw_output"] == 20
+
+
+@pytest.mark.asyncio
+async def test_update_stage_live_output_no_message_id_uses_simple_delta(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """When a line has no message.id, should fall back to simple delta addition."""
+    line = json.dumps({
+        "type": "assistant",
+        "message": {
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": 10,
+                "cache_creation_input_tokens": 100,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 20,
+            },
+        },
+    })
+    await task_queue.update_stage_live_output(
+        task_id="task-1",
+        stage_key="0:review:review-agent",
+        iteration=1,
+        run=1,
+        live_output=line,
+    )
+
+    sql, params = mock_db.execute.call_args[0]
+    # Should use simple delta addition (no msg_spending_state)
+    assert "msg_spending_state" not in sql
+    assert params["delta_input"] == 10
+    assert params["delta_output"] == 20
+
+
+@pytest.mark.asyncio
+async def test_update_stage_live_output_non_assistant_no_spending_update(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Non-assistant lines should not produce spending SQL."""
+    line = json.dumps({"type": "system", "subtype": "init", "model": "claude-sonnet-4-6"})
+    await task_queue.update_stage_live_output(
+        task_id="task-1",
+        stage_key="0:review:review-agent",
+        iteration=1,
+        run=1,
+        live_output=line,
+    )
+
+    sql, params = mock_db.execute.call_args[0]
+    # Should not contain any spending update SQL
+    assert "tokens_input" not in sql
+    assert "cost_usd" not in sql
