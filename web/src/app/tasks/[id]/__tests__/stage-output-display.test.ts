@@ -5,106 +5,11 @@
  * 1. parseLiveOutput — JSON line parsing and field extraction
  * 2. toSectionTitle — snake_case / camelCase → Title Case
  * 3. isFindingArray — type guard for structured findings
- *
- * The functions under test are copied from page.tsx since they are not exported.
+ * 4. formatDurationSeconds — human-readable duration formatting
  */
 
 import { describe, it, expect } from 'vitest'
-
-// ---------------------------------------------------------------------------
-// Copied from page.tsx — parseLiveOutput (lines 107-154)
-// ---------------------------------------------------------------------------
-
-function parseLiveOutput(liveOutput: string): string[] {
-  const results: string[] = []
-  for (const line of liveOutput.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    let parsed: Record<string, unknown>
-    try {
-      parsed = JSON.parse(trimmed)
-    } catch {
-      continue // skip non-JSON lines
-    }
-
-    // Top-level stdout / output
-    if (typeof parsed.stdout === 'string' && parsed.stdout) results.push(parsed.stdout)
-    if (typeof parsed.output === 'string' && parsed.output) results.push(parsed.output)
-
-    // message.content array fields
-    const msgContent = (parsed.message as Record<string, unknown> | undefined)?.content
-    if (Array.isArray(msgContent)) {
-      for (const c of msgContent) {
-        if (typeof c !== 'object' || c == null) continue
-        const item = c as Record<string, unknown>
-        if (typeof item.thinking === 'string' && item.thinking) results.push(item.thinking)
-        if (typeof item.text === 'string' && item.text) results.push(item.text)
-        if (typeof item.content === 'string' && item.content) results.push(item.content)
-        const input = item.input as Record<string, unknown> | undefined
-        if (input) {
-          if (typeof input.description === 'string' && input.description) results.push(input.description)
-          if (typeof input.file_path === 'string' && input.file_path) results.push(input.file_path)
-        }
-      }
-    }
-
-    // tool_use_result
-    const tur = parsed.tool_use_result
-    if (typeof tur === 'string' && tur) {
-      results.push(tur)
-    } else if (typeof tur === 'object' && tur != null) {
-      const t = tur as Record<string, unknown>
-      if (typeof t.stdout === 'string' && t.stdout) results.push(t.stdout)
-      if (typeof t.stderr === 'string' && t.stderr) results.push(t.stderr)
-      if (typeof t.content === 'string' && t.content) results.push(t.content)
-      const f = t.file as Record<string, unknown> | undefined
-      if (f && typeof f.filePath === 'string' && f.filePath) results.push(f.filePath)
-    }
-  }
-  return results
-}
-
-// ---------------------------------------------------------------------------
-// Copied from page.tsx — toSectionTitle (lines 158-164)
-// ---------------------------------------------------------------------------
-
-function toSectionTitle(key: string): string {
-  return key
-    .replace(/_/g, ' ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
-// ---------------------------------------------------------------------------
-// Copied from page.tsx — isFindingArray (lines 173-178)
-// ---------------------------------------------------------------------------
-
-interface FindingItem {
-  severity?: string
-  file?: string
-  line?: number
-  message?: string
-}
-
-function isFindingArray(arr: unknown[]): arr is FindingItem[] {
-  if (arr.length === 0) return false
-  return arr.every(
-    (item) => typeof item === 'object' && item != null && 'message' in item && 'severity' in item,
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Copied from page.tsx — formatDurationSeconds (lines 318-325)
-// ---------------------------------------------------------------------------
-
-function formatDurationSeconds(totalSeconds: number): string {
-  if (totalSeconds < 60) return `${totalSeconds}s`
-  const minutes = Math.floor(totalSeconds / 60)
-  const secs = totalSeconds % 60
-  if (minutes < 60) return `${minutes}m ${secs}s`
-  const hours = Math.floor(minutes / 60)
-  return `${hours}h ${minutes % 60}m`
-}
+import { parseLiveOutput, toSectionTitle, isFindingArray, formatDurationSeconds } from '../utils'
 
 // ===========================================================================
 // Tests
@@ -428,6 +333,26 @@ describe('formatDurationSeconds', () => {
     expect(formatDurationSeconds(7200)).toBe('2h 0m')
     expect(formatDurationSeconds(7260)).toBe('2h 1m')
   })
+
+  it('handles negative numbers by returning 0s', () => {
+    expect(formatDurationSeconds(-1)).toBe('0s')
+    expect(formatDurationSeconds(-100)).toBe('0s')
+  })
+
+  it('handles NaN by returning 0s', () => {
+    expect(formatDurationSeconds(NaN)).toBe('0s')
+  })
+
+  it('handles Infinity by returning 0s', () => {
+    expect(formatDurationSeconds(Infinity)).toBe('0s')
+    expect(formatDurationSeconds(-Infinity)).toBe('0s')
+  })
+
+  it('handles fractional seconds by flooring', () => {
+    expect(formatDurationSeconds(90.7)).toBe('1m 30s')
+    expect(formatDurationSeconds(0.9)).toBe('0s')
+    expect(formatDurationSeconds(59.99)).toBe('59s')
+  })
 })
 
 // ===========================================================================
@@ -488,6 +413,23 @@ describe('parseLiveOutput edge cases', () => {
       message: { content: [{ thinking: '', text: '', content: '' }] },
     })
     expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('handles very long input strings without performance issues', () => {
+    const longText = 'x'.repeat(100_000)
+    const input = JSON.stringify({ tool_use_result: { stdout: longText } })
+    const result = parseLiveOutput(input)
+    expect(result.length).toBeGreaterThan(0)
+  })
+
+  it('handles deeply nested large JSON objects', () => {
+    const largeContent = Array.from({ length: 200 }, (_, i) => ({
+      text: `line ${i}`,
+      type: 'text',
+    }))
+    const input = JSON.stringify({ message: { content: largeContent } })
+    const result = parseLiveOutput(input)
+    expect(result.length).toBe(200)
   })
 })
 
