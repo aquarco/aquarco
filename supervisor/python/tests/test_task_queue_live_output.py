@@ -696,3 +696,241 @@ async def test_update_stage_live_output_dedup_raw_token_params(
     assert params["raw_output"] == 44
     assert params["raw_cache_read"] == 333
     assert params["raw_cache_write"] == 222
+
+
+# ---------------------------------------------------------------------------
+# Additional dedup tests (test-agent stage 4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_stage_live_output_dedup_opus_pricing(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Dedup path with an Opus model should use Opus pricing in params."""
+    line = json.dumps({
+        "type": "assistant",
+        "message": {
+            "id": "msg_opus",
+            "model": "claude-opus-4-6",
+            "usage": {
+                "input_tokens": 100,
+                "cache_creation_input_tokens": 200,
+                "cache_read_input_tokens": 300,
+                "output_tokens": 400,
+            },
+        },
+    })
+    await task_queue.update_stage_live_output(
+        task_id="task-1",
+        stage_key="0:review:review-agent",
+        iteration=1,
+        run=1,
+        live_output=line,
+    )
+
+    _, params = mock_db.execute.call_args[0]
+    # Opus 4.5/4.6: input=$5, output=$25, cache_write=$6.25, cache_read=$0.50 per MTok
+    assert params["price_input"] == 5 / 1_000_000
+    assert params["price_output"] == 25 / 1_000_000
+    assert params["price_cache_write"] == 6.25 / 1_000_000
+    assert params["price_cache_read"] == 0.50 / 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_update_stage_live_output_no_id_haiku_pricing(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """No-ID fallback path with Haiku model should compute delta_cost with Haiku pricing."""
+    line = json.dumps({
+        "type": "assistant",
+        "message": {
+            "model": "claude-haiku-4-5",
+            "usage": {
+                "input_tokens": 1_000_000,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 0,
+            },
+        },
+    })
+    await task_queue.update_stage_live_output(
+        task_id="task-1",
+        stage_key="0:review:review-agent",
+        iteration=1,
+        run=1,
+        live_output=line,
+    )
+
+    _, params = mock_db.execute.call_args[0]
+    # Haiku 4.5: $1/MTok input
+    assert params["delta_cost"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_update_stage_live_output_dedup_sql_has_all_four_token_fields(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """The dedup SQL must update all four token columns and cost_usd."""
+    line = json.dumps({
+        "type": "assistant",
+        "message": {
+            "id": "msg_complete",
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": 10,
+                "cache_creation_input_tokens": 20,
+                "cache_read_input_tokens": 30,
+                "output_tokens": 40,
+            },
+        },
+    })
+    await task_queue.update_stage_live_output(
+        task_id="task-1",
+        stage_key="0:review:review-agent",
+        iteration=1,
+        run=1,
+        live_output=line,
+    )
+
+    sql, _ = mock_db.execute.call_args[0]
+    # All four token columns must be updated
+    assert "tokens_input" in sql
+    assert "tokens_output" in sql
+    assert "cache_read_tokens" in sql
+    assert "cache_write_tokens" in sql
+    assert "cost_usd" in sql
+    assert "msg_spending_state" in sql
+
+
+@pytest.mark.asyncio
+async def test_update_stage_live_output_dedup_sql_no_double_brace_anywhere(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Regression guard: the spending_sql must not contain any '{{' or '}}' sequences
+    that would produce invalid JSONB literals in PostgreSQL."""
+    line = json.dumps({
+        "type": "assistant",
+        "message": {
+            "id": "msg_brace_check",
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": 1,
+                "cache_creation_input_tokens": 1,
+                "cache_read_input_tokens": 1,
+                "output_tokens": 1,
+            },
+        },
+    })
+    await task_queue.update_stage_live_output(
+        task_id="task-1",
+        stage_key="0:review:review-agent",
+        iteration=1,
+        run=1,
+        live_output=line,
+    )
+
+    sql, _ = mock_db.execute.call_args[0]
+    # Count all occurrences of '{}'::jsonb — should be present
+    assert sql.count("'{}'::jsonb") >= 1, "Expected valid '{}'::jsonb literals"
+    # Must not contain '{{}}' anywhere (the fixed bug)
+    assert "{{" not in sql, "SQL contains '{{' — possible f-string escaping regression"
+    assert "}}" not in sql, "SQL contains '}}' — possible f-string escaping regression"
+
+
+@pytest.mark.asyncio
+async def test_update_stage_live_output_usage_missing_some_fields(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Message with usage dict missing some optional token fields should default to 0."""
+    line = json.dumps({
+        "type": "assistant",
+        "message": {
+            "id": "msg_sparse",
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": 50,
+                "output_tokens": 25,
+                # cache fields omitted
+            },
+        },
+    })
+    await task_queue.update_stage_live_output(
+        task_id="task-1",
+        stage_key="0:review:review-agent",
+        iteration=1,
+        run=1,
+        live_output=line,
+    )
+
+    _, params = mock_db.execute.call_args[0]
+    # Missing cache fields default to 0
+    assert params["raw_input"] == 50
+    assert params["raw_output"] == 25
+    assert params["raw_cache_read"] == 0
+    assert params["raw_cache_write"] == 0
+    assert params["msg_id"] == "msg_sparse"
+
+
+@pytest.mark.asyncio
+async def test_update_stage_live_output_consecutive_dedup_calls(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Two consecutive calls with the same message.id should both use dedup SQL,
+    verifying the path is consistent across calls."""
+    for tokens in [10, 20]:
+        line = json.dumps({
+            "type": "assistant",
+            "message": {
+                "id": "msg_repeat",
+                "model": "claude-sonnet-4-6",
+                "usage": {
+                    "input_tokens": tokens,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "output_tokens": tokens,
+                },
+            },
+        })
+        await task_queue.update_stage_live_output(
+            task_id="task-1",
+            stage_key="0:review:review-agent",
+            iteration=1,
+            run=1,
+            live_output=line,
+        )
+
+    assert mock_db.execute.call_count == 2
+    # Both calls should use dedup path
+    for i in range(2):
+        sql, params = mock_db.execute.call_args_list[i][0]
+        assert "msg_spending_state" in sql
+        assert "GREATEST" in sql
+        assert params["msg_id"] == "msg_repeat"
+
+
+@pytest.mark.asyncio
+async def test_get_live_stage_spending_with_deduped_duplicates(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """get_live_stage_spending reading raw_output with duplicate message IDs
+    should return deduped totals."""
+    lines = [
+        json.dumps({"type": "assistant", "message": {
+            "id": "msg_dup", "model": "claude-sonnet-4-5",
+            "usage": {"input_tokens": 100, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 0, "output_tokens": 50}}}),
+        json.dumps({"type": "assistant", "message": {
+            "id": "msg_dup", "model": "claude-sonnet-4-5",
+            "usage": {"input_tokens": 100, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 0, "output_tokens": 50}}}),
+    ]
+    mock_db.fetch_one.return_value = {"raw_output": "\n".join(lines)}
+
+    result = await task_queue.get_live_stage_spending("task-1", "0:review:review-agent")
+
+    assert result is not None
+    # Deduped: max(100,100)=100, max(50,50)=50 — NOT 200,100
+    assert result["input_tokens"] == 100
+    assert result["output_tokens"] == 50
+    assert result["turns"] == 2  # turns still count both emissions

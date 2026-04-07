@@ -619,3 +619,205 @@ def test_message_with_zero_usage_and_id() -> None:
     assert result.total_input == 10
     assert result.total_cache_write == 50
     assert result.total_output == 5
+
+
+# ---------------------------------------------------------------------------
+# Additional edge-case tests (test-agent stage 4)
+# ---------------------------------------------------------------------------
+
+
+def test_result_usage_partial_fields_uses_defaults() -> None:
+    """When result usage dict is present but missing some fields, the missing
+    fields should default to 0 (from summary defaults), not the deduped totals.
+    This documents the current behavior noted in the review."""
+    ndjson = _ndjson(
+        {"type": "assistant", "message": {
+            "id": "msg_01AAA",
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": 100,
+                "cache_creation_input_tokens": 500,
+                "cache_read_input_tokens": 200,
+                "output_tokens": 50,
+            },
+        }},
+        # Result with partial usage — only input_tokens and output_tokens
+        {"type": "result", "subtype": "success",
+         "total_cost_usd": 0.10,
+         "usage": {
+             "input_tokens": 90,
+             "output_tokens": 45,
+             # cache fields missing
+         }},
+    )
+    result = parse_ndjson_spending(ndjson)
+    assert result.total_cost_usd == 0.10
+    # Fields present in result usage override
+    assert result.total_input == 90
+    assert result.total_output == 45
+    # Missing fields fall back to summary defaults (0), not deduped totals
+    # This is the subtle regression noted in the review
+    assert result.total_cache_write == 0
+    assert result.total_cache_read == 0
+
+
+def test_compute_deduped_totals_missing_keys_default_to_zero() -> None:
+    """_compute_deduped_totals handles entries with missing keys gracefully."""
+    msg_maxes = {
+        "msg_01": {"input_tokens": 5},  # only input_tokens
+        "msg_02": {"output_tokens": 10},  # only output_tokens
+    }
+    result = _compute_deduped_totals(msg_maxes)
+    assert result == (5, 0, 0, 10)
+
+
+def test_many_duplicate_emissions_same_id() -> None:
+    """Stress test: 50 emissions of the same ID with increasing values.
+    Only the max should be counted."""
+    messages = []
+    for i in range(1, 51):
+        messages.append({"type": "assistant", "message": {
+            "id": "msg_stress",
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": i,
+                "cache_creation_input_tokens": i * 100,
+                "cache_read_input_tokens": i * 10,
+                "output_tokens": i * 2,
+            },
+        }})
+    ndjson = _ndjson(*messages)
+    result = parse_ndjson_spending(ndjson)
+    # Max values are from the 50th emission
+    assert result.total_input == 50
+    assert result.total_cache_write == 5000
+    assert result.total_cache_read == 500
+    assert result.total_output == 100
+    assert len(result.turns) == 50
+
+
+def test_dedup_with_missing_usage_fields() -> None:
+    """Message usage dict missing some optional fields should not crash."""
+    ndjson = _ndjson(
+        {"type": "assistant", "message": {
+            "id": "msg_partial",
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": 10,
+                # cache fields omitted
+                "output_tokens": 5,
+            },
+        }},
+        {"type": "assistant", "message": {
+            "id": "msg_partial",
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": 15,
+                "output_tokens": 8,
+            },
+        }},
+    )
+    result = parse_ndjson_spending(ndjson)
+    assert result.total_input == 15       # max(10, 15)
+    assert result.total_cache_write == 0  # missing defaults to 0
+    assert result.total_cache_read == 0
+    assert result.total_output == 8       # max(5, 8)
+
+
+def test_estimated_cost_opus_pricing_with_dedup() -> None:
+    """Verify cost estimation uses correct Opus pricing with deduped totals."""
+    ndjson = _ndjson(
+        {"type": "assistant", "message": {
+            "id": "msg_opus",
+            "model": "claude-opus-4-6",
+            "usage": {
+                "input_tokens": 1_000_000,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 0,
+            },
+        }},
+        # Duplicate — should not double cost
+        {"type": "assistant", "message": {
+            "id": "msg_opus",
+            "model": "claude-opus-4-6",
+            "usage": {
+                "input_tokens": 1_000_000,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 0,
+            },
+        }},
+    )
+    result = parse_ndjson_spending(ndjson)
+    # Opus 4.5/4.6: $5/MTok input. Deduped = 1M tokens.
+    assert result.estimated_cost_usd == 5.0
+
+
+def test_message_id_is_empty_string_treated_as_no_id() -> None:
+    """An empty-string message ID should be treated as no ID (unique)."""
+    ndjson = _ndjson(
+        {"type": "assistant", "message": {
+            "id": "",
+            "model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": 10, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 0, "output_tokens": 5},
+        }},
+        {"type": "assistant", "message": {
+            "id": "",
+            "model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": 10, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 0, "output_tokens": 5},
+        }},
+    )
+    result = parse_ndjson_spending(ndjson)
+    # Empty string is falsy, so each message gets a synthetic unique ID → summed
+    assert result.total_input == 20
+    assert result.total_output == 10
+
+
+def test_non_dict_message_field_does_not_crash() -> None:
+    """If message field is not a dict, the parser should skip without error."""
+    ndjson = _ndjson(
+        {"type": "assistant", "message": "not a dict"},
+        {"type": "assistant", "message": ["list", "instead"]},
+        {"type": "assistant", "message": {
+            "id": "msg_ok",
+            "model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": 5, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 0, "output_tokens": 3},
+        }},
+    )
+    result = parse_ndjson_spending(ndjson)
+    # Only the valid message is counted
+    assert result.total_input == 5
+    assert result.total_output == 3
+    assert len(result.turns) == 1
+
+
+def test_interleaved_ids_and_no_ids() -> None:
+    """Messages with and without IDs interleaved — dedup applies only to ID-bearing."""
+    ndjson = _ndjson(
+        {"type": "assistant", "message": {"id": "msg_A", "model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": 10, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 0, "output_tokens": 5}}},
+        # No ID
+        {"type": "assistant", "message": {"model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": 7, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 0, "output_tokens": 3}}},
+        # Duplicate of msg_A with higher values
+        {"type": "assistant", "message": {"id": "msg_A", "model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": 20, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 0, "output_tokens": 15}}},
+        # Another no-ID
+        {"type": "assistant", "message": {"model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": 4, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 0, "output_tokens": 2}}},
+    )
+    result = parse_ndjson_spending(ndjson)
+    # msg_A: max(10,20)=20, max(5,15)=15
+    # no-id-1: 7, 3
+    # no-id-2: 4, 2
+    # Total: 31, 20
+    assert result.total_input == 31
+    assert result.total_output == 20
