@@ -414,6 +414,23 @@ describe('parseLiveOutput edge cases', () => {
     })
     expect(parseLiveOutput(input)).toEqual([])
   })
+
+  it('handles very long input strings without performance issues', () => {
+    const longText = 'x'.repeat(100_000)
+    const input = JSON.stringify({ tool_use_result: { stdout: longText } })
+    const result = parseLiveOutput(input)
+    expect(result.length).toBeGreaterThan(0)
+  })
+
+  it('handles deeply nested large JSON objects', () => {
+    const largeContent = Array.from({ length: 200 }, (_, i) => ({
+      text: `line ${i}`,
+      type: 'text',
+    }))
+    const input = JSON.stringify({ message: { content: largeContent } })
+    const result = parseLiveOutput(input)
+    expect(result.length).toBe(200)
+  })
 })
 
 // ===========================================================================
