@@ -96,7 +96,6 @@ export const GET_TASK = gql`
         startedAt
         completedAt
         structuredOutput
-        rawOutput
         tokensInput
         tokensOutput
         costUsd

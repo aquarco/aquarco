@@ -1,0 +1,393 @@
+/**
+ * Tests for Stage Output display logic (GitHub issue #95).
+ *
+ * Validates:
+ * 1. parseLiveOutput — JSON line parsing and field extraction
+ * 2. toSectionTitle — snake_case / camelCase → Title Case
+ * 3. isFindingArray — type guard for structured findings
+ *
+ * The functions under test are copied from page.tsx since they are not exported.
+ */
+
+import { describe, it, expect } from 'vitest'
+
+// ---------------------------------------------------------------------------
+// Copied from page.tsx — parseLiveOutput (lines 107-154)
+// ---------------------------------------------------------------------------
+
+function parseLiveOutput(liveOutput: string): string[] {
+  const results: string[] = []
+  for (const line of liveOutput.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    let parsed: Record<string, unknown>
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      continue // skip non-JSON lines
+    }
+
+    // Top-level stdout / output
+    if (typeof parsed.stdout === 'string' && parsed.stdout) results.push(parsed.stdout)
+    if (typeof parsed.output === 'string' && parsed.output) results.push(parsed.output)
+
+    // message.content array fields
+    const msgContent = (parsed.message as Record<string, unknown> | undefined)?.content
+    if (Array.isArray(msgContent)) {
+      for (const c of msgContent) {
+        if (typeof c !== 'object' || c == null) continue
+        const item = c as Record<string, unknown>
+        if (typeof item.thinking === 'string' && item.thinking) results.push(item.thinking)
+        if (typeof item.text === 'string' && item.text) results.push(item.text)
+        if (typeof item.content === 'string' && item.content) results.push(item.content)
+        const input = item.input as Record<string, unknown> | undefined
+        if (input) {
+          if (typeof input.description === 'string' && input.description) results.push(input.description)
+          if (typeof input.file_path === 'string' && input.file_path) results.push(input.file_path)
+        }
+      }
+    }
+
+    // tool_use_result
+    const tur = parsed.tool_use_result
+    if (typeof tur === 'string' && tur) {
+      results.push(tur)
+    } else if (typeof tur === 'object' && tur != null) {
+      const t = tur as Record<string, unknown>
+      if (typeof t.stdout === 'string' && t.stdout) results.push(t.stdout)
+      if (typeof t.stderr === 'string' && t.stderr) results.push(t.stderr)
+      if (typeof t.content === 'string' && t.content) results.push(t.content)
+      const f = t.file as Record<string, unknown> | undefined
+      if (f && typeof f.filePath === 'string' && f.filePath) results.push(f.filePath)
+    }
+  }
+  return results
+}
+
+// ---------------------------------------------------------------------------
+// Copied from page.tsx — toSectionTitle (lines 158-164)
+// ---------------------------------------------------------------------------
+
+function toSectionTitle(key: string): string {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+// ---------------------------------------------------------------------------
+// Copied from page.tsx — isFindingArray (lines 173-178)
+// ---------------------------------------------------------------------------
+
+interface FindingItem {
+  severity?: string
+  file?: string
+  line?: number
+  message?: string
+}
+
+function isFindingArray(arr: unknown[]): arr is FindingItem[] {
+  if (arr.length === 0) return false
+  return arr.every(
+    (item) => typeof item === 'object' && item != null && 'message' in item && 'severity' in item,
+  )
+}
+
+// ===========================================================================
+// Tests
+// ===========================================================================
+
+describe('parseLiveOutput', () => {
+  it('returns empty array for empty string', () => {
+    expect(parseLiveOutput('')).toEqual([])
+  })
+
+  it('returns empty array for whitespace-only input', () => {
+    expect(parseLiveOutput('   \n  \n\n')).toEqual([])
+  })
+
+  it('skips non-JSON lines', () => {
+    const input = 'not json\n{ invalid json\nstill not json'
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('extracts top-level stdout', () => {
+    const input = JSON.stringify({ stdout: 'hello world' })
+    expect(parseLiveOutput(input)).toEqual(['hello world'])
+  })
+
+  it('extracts top-level output', () => {
+    const input = JSON.stringify({ output: 'build succeeded' })
+    expect(parseLiveOutput(input)).toEqual(['build succeeded'])
+  })
+
+  it('extracts both stdout and output from same line', () => {
+    const input = JSON.stringify({ stdout: 'line1', output: 'line2' })
+    expect(parseLiveOutput(input)).toEqual(['line1', 'line2'])
+  })
+
+  it('ignores empty stdout/output strings', () => {
+    const input = JSON.stringify({ stdout: '', output: '' })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('ignores non-string stdout/output', () => {
+    const input = JSON.stringify({ stdout: 42, output: true })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('extracts message.content.thinking', () => {
+    const input = JSON.stringify({
+      message: { content: [{ thinking: 'I should check the database' }] },
+    })
+    expect(parseLiveOutput(input)).toEqual(['I should check the database'])
+  })
+
+  it('extracts message.content.text', () => {
+    const input = JSON.stringify({
+      message: { content: [{ text: 'Here is the result' }] },
+    })
+    expect(parseLiveOutput(input)).toEqual(['Here is the result'])
+  })
+
+  it('extracts message.content.content', () => {
+    const input = JSON.stringify({
+      message: { content: [{ content: 'File contents here' }] },
+    })
+    expect(parseLiveOutput(input)).toEqual(['File contents here'])
+  })
+
+  it('extracts message.content.input.description', () => {
+    const input = JSON.stringify({
+      message: { content: [{ input: { description: 'Read the config file' } }] },
+    })
+    expect(parseLiveOutput(input)).toEqual(['Read the config file'])
+  })
+
+  it('extracts message.content.input.file_path', () => {
+    const input = JSON.stringify({
+      message: { content: [{ input: { file_path: '/src/index.ts' } }] },
+    })
+    expect(parseLiveOutput(input)).toEqual(['/src/index.ts'])
+  })
+
+  it('extracts multiple fields from message.content array', () => {
+    const input = JSON.stringify({
+      message: {
+        content: [
+          { thinking: 'step 1' },
+          { text: 'result text' },
+          { input: { description: 'do something', file_path: '/a/b.ts' } },
+        ],
+      },
+    })
+    expect(parseLiveOutput(input)).toEqual([
+      'step 1',
+      'result text',
+      'do something',
+      '/a/b.ts',
+    ])
+  })
+
+  it('skips non-object items in message.content array', () => {
+    const input = JSON.stringify({
+      message: { content: ['a string', null, 42, { text: 'valid' }] },
+    })
+    expect(parseLiveOutput(input)).toEqual(['valid'])
+  })
+
+  it('handles message.content that is not an array', () => {
+    const input = JSON.stringify({ message: { content: 'plain string' } })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('extracts tool_use_result when string', () => {
+    const input = JSON.stringify({ tool_use_result: 'success' })
+    expect(parseLiveOutput(input)).toEqual(['success'])
+  })
+
+  it('ignores empty tool_use_result string', () => {
+    const input = JSON.stringify({ tool_use_result: '' })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('extracts tool_use_result.stdout', () => {
+    const input = JSON.stringify({ tool_use_result: { stdout: 'npm test passed' } })
+    expect(parseLiveOutput(input)).toEqual(['npm test passed'])
+  })
+
+  it('extracts tool_use_result.stderr', () => {
+    const input = JSON.stringify({ tool_use_result: { stderr: 'warning: deprecated' } })
+    expect(parseLiveOutput(input)).toEqual(['warning: deprecated'])
+  })
+
+  it('extracts tool_use_result.content', () => {
+    const input = JSON.stringify({ tool_use_result: { content: 'file read ok' } })
+    expect(parseLiveOutput(input)).toEqual(['file read ok'])
+  })
+
+  it('extracts tool_use_result.file.filePath', () => {
+    const input = JSON.stringify({
+      tool_use_result: { file: { filePath: '/home/user/code.ts' } },
+    })
+    expect(parseLiveOutput(input)).toEqual(['/home/user/code.ts'])
+  })
+
+  it('extracts multiple tool_use_result fields from one line', () => {
+    const input = JSON.stringify({
+      tool_use_result: {
+        stdout: 'out',
+        stderr: 'err',
+        content: 'body',
+        file: { filePath: '/x.ts' },
+      },
+    })
+    expect(parseLiveOutput(input)).toEqual(['out', 'err', 'body', '/x.ts'])
+  })
+
+  it('handles multi-line input with mixed JSON and non-JSON', () => {
+    const lines = [
+      JSON.stringify({ stdout: 'first' }),
+      'garbage line',
+      JSON.stringify({ output: 'second' }),
+      '',
+      JSON.stringify({ tool_use_result: 'third' }),
+    ].join('\n')
+    expect(parseLiveOutput(lines)).toEqual(['first', 'second', 'third'])
+  })
+
+  it('handles a realistic mixed payload across lines', () => {
+    const lines = [
+      JSON.stringify({ stdout: 'Installing dependencies...' }),
+      JSON.stringify({
+        message: {
+          content: [
+            { thinking: 'Analyzing imports' },
+            { input: { description: 'Read package.json', file_path: '/app/package.json' } },
+          ],
+        },
+      }),
+      JSON.stringify({ tool_use_result: { stdout: 'npm install ok', file: { filePath: '/app/node_modules' } } }),
+    ].join('\n')
+
+    expect(parseLiveOutput(lines)).toEqual([
+      'Installing dependencies...',
+      'Analyzing imports',
+      'Read package.json',
+      '/app/package.json',
+      'npm install ok',
+      '/app/node_modules',
+    ])
+  })
+
+  it('ignores JSON lines with no recognized fields', () => {
+    const input = JSON.stringify({ foo: 'bar', baz: 123 })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('handles lines with leading/trailing whitespace', () => {
+    const input = `  ${JSON.stringify({ stdout: 'trimmed' })}  `
+    expect(parseLiveOutput(input)).toEqual(['trimmed'])
+  })
+})
+
+describe('toSectionTitle', () => {
+  it('converts snake_case to Title Case', () => {
+    expect(toSectionTitle('my_field_name')).toBe('My Field Name')
+  })
+
+  it('converts camelCase to Title Case', () => {
+    expect(toSectionTitle('myFieldName')).toBe('My Field Name')
+  })
+
+  it('converts single word', () => {
+    expect(toSectionTitle('summary')).toBe('Summary')
+  })
+
+  it('converts already Title Case', () => {
+    expect(toSectionTitle('Summary')).toBe('Summary')
+  })
+
+  it('handles mixed snake_case and camelCase', () => {
+    expect(toSectionTitle('my_fieldName')).toBe('My Field Name')
+  })
+
+  it('handles empty string', () => {
+    expect(toSectionTitle('')).toBe('')
+  })
+
+  it('converts real examples from issue', () => {
+    expect(toSectionTitle('findings')).toBe('Findings')
+    expect(toSectionTitle('recommendation')).toBe('Recommendation')
+    expect(toSectionTitle('structured_output')).toBe('Structured Output')
+    expect(toSectionTitle('coveragePercent')).toBe('Coverage Percent')
+  })
+
+  it('handles consecutive uppercase in camelCase', () => {
+    // The regex only splits on lowercase→uppercase boundaries,
+    // so consecutive uppercase letters stay grouped
+    expect(toSectionTitle('parseHTMLOutput')).toBe('Parse HTMLOutput')
+  })
+})
+
+describe('isFindingArray', () => {
+  it('returns false for empty array', () => {
+    expect(isFindingArray([])).toBe(false)
+  })
+
+  it('returns true for array of findings with severity and message', () => {
+    const findings = [
+      { severity: 'error', message: 'Something is wrong', file: 'a.ts', line: 10 },
+      { severity: 'warning', message: 'Consider this', file: 'b.ts', line: 20 },
+    ]
+    expect(isFindingArray(findings)).toBe(true)
+  })
+
+  it('returns true for minimal findings (only severity and message)', () => {
+    const findings = [{ severity: 'info', message: 'Note' }]
+    expect(isFindingArray(findings)).toBe(true)
+  })
+
+  it('returns false if an item lacks severity', () => {
+    const arr = [
+      { severity: 'error', message: 'ok' },
+      { message: 'missing severity' },
+    ]
+    expect(isFindingArray(arr)).toBe(false)
+  })
+
+  it('returns false if an item lacks message', () => {
+    const arr = [
+      { severity: 'error', message: 'ok' },
+      { severity: 'warning' },
+    ]
+    expect(isFindingArray(arr)).toBe(false)
+  })
+
+  it('returns false for array of strings', () => {
+    expect(isFindingArray(['a', 'b', 'c'] as unknown[])).toBe(false)
+  })
+
+  it('returns false for array of numbers', () => {
+    expect(isFindingArray([1, 2, 3] as unknown[])).toBe(false)
+  })
+
+  it('returns false for array with null items', () => {
+    expect(isFindingArray([null, null] as unknown[])).toBe(false)
+  })
+
+  it('returns false for mixed valid/invalid items', () => {
+    const arr = [
+      { severity: 'error', message: 'ok' },
+      'not an object',
+    ]
+    expect(isFindingArray(arr as unknown[])).toBe(false)
+  })
+
+  it('returns true when items have extra properties', () => {
+    const findings = [
+      { severity: 'error', message: 'msg', extra: 'data', count: 5 },
+    ]
+    expect(isFindingArray(findings)).toBe(true)
+  })
+})
