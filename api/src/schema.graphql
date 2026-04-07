@@ -33,6 +33,9 @@ type Query {
   # Dashboard stats
   dashboardStats: DashboardStats!
 
+  # Token usage chart data
+  tokenUsageByModel(days: Int): [TokenUsageByDay!]!
+
   # Supervisor drain mode
   drainStatus: DrainStatus!
 }
@@ -132,6 +135,7 @@ type Stage {
   costUsd: Float
   cacheReadTokens: Int
   cacheWriteTokens: Int
+  model: String
   errorMessage: String
   retryCount: Int!
   liveOutput: String
@@ -205,6 +209,15 @@ type PipelineCount {
 type RepositoryCount {
   repository: String!
   count: Int!
+}
+
+type TokenUsageByDay {
+  day: DateTime!
+  model: String!
+  tokensInput: Int!
+  tokensOutput: Int!
+  cacheReadTokens: Int!
+  cacheWriteTokens: Int!
 }
 
 type TaskConnection {
