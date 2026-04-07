@@ -47,7 +47,7 @@ import Checkbox from '@mui/material/Checkbox'
 import SettingsIcon from '@mui/icons-material/Settings'
 import Snackbar from '@mui/material/Snackbar'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
-import { GET_REPOSITORIES, REGISTER_REPOSITORY, REMOVE_REPOSITORY, RETRY_CLONE, SET_CONFIG_REPO, GITHUB_AUTH_STATUS, GITHUB_LOGIN_START, GITHUB_LOGIN_POLL, GITHUB_LOGOUT, GITHUB_REPOSITORIES } from '@/lib/graphql/queries'
+import { GET_REPOSITORIES, REGISTER_REPOSITORY, REMOVE_REPOSITORY, RETRY_CLONE, GITHUB_AUTH_STATUS, GITHUB_LOGIN_START, GITHUB_LOGIN_POLL, GITHUB_LOGOUT, GITHUB_REPOSITORIES } from '@/lib/graphql/queries'
 import { formatDate } from '@/lib/format'
 
 interface Repository {
@@ -55,7 +55,6 @@ interface Repository {
   url: string
   branch: string
   cloneDir: string
-  isConfigRepo: boolean
   cloneStatus: string
   lastPulledAt: string | null
   errorMessage: string | null
@@ -93,10 +92,9 @@ interface AddRepoFormState {
   url: string
   defaultBranch: string | null
   pollers: string[]
-  isConfigRepo: boolean
 }
 
-const EMPTY_FORM: AddRepoFormState = { name: '', url: '', defaultBranch: null, pollers: [...DEFAULT_POLLERS], isConfigRepo: false }
+const EMPTY_FORM: AddRepoFormState = { name: '', url: '', defaultBranch: null, pollers: [...DEFAULT_POLLERS] }
 
 export default function ReposPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -233,9 +231,6 @@ export default function ReposPage() {
     onCompleted: () => refetch(),
   })
 
-  const [setConfigRepo] = useMutation(SET_CONFIG_REPO, {
-    onCompleted: () => refetch(),
-  })
 
   function handleSubmit() {
     if (!form.name.trim() || !form.url.trim()) {
@@ -249,7 +244,6 @@ export default function ReposPage() {
           url: form.url.trim(),
           branch: form.defaultBranch || undefined,
           pollers: form.pollers,
-          isConfigRepo: form.isConfigRepo,
         },
       },
     })
@@ -315,7 +309,6 @@ export default function ReposPage() {
               <TableCell>URL</TableCell>
               <TableCell>Branch</TableCell>
               <TableCell>Clone Status</TableCell>
-              <TableCell>Config</TableCell>
               <TableCell>Last Pulled</TableCell>
               <TableCell align="right">Tasks</TableCell>
               <TableCell />
@@ -375,19 +368,6 @@ export default function ReposPage() {
                             color={getCloneStatusColor(repo.cloneStatus)}
                             size="small"
                           />
-                        </TableCell>
-                        <TableCell sx={{ py: 0 }}>
-                          <Tooltip title={repo.isConfigRepo ? 'Global config repo' : 'Mark as config repo'}>
-                            <Switch
-                              size="small"
-                              checked={repo.isConfigRepo}
-                              onClick={(e) => e.stopPropagation()}
-                              onChange={(e) => {
-                                setConfigRepo({ variables: { name: repo.name, isConfigRepo: e.target.checked } })
-                              }}
-                              data-testid={`toggle-config-repo-${repo.name}`}
-                            />
-                          </Tooltip>
                         </TableCell>
                         <TableCell>{formatDate(repo.lastPulledAt)}</TableCell>
                         <TableCell align="right">{repo.taskCount ?? 0}</TableCell>
@@ -625,16 +605,6 @@ export default function ReposPage() {
                 ))}
               </FormGroup>
             </Box>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={form.isConfigRepo}
-                  onChange={(e) => setForm((f) => ({ ...f, isConfigRepo: e.target.checked }))}
-                  data-testid="repo-form-is-config-repo"
-                />
-              }
-              label="Use as global config repository"
-            />
           </Stack>
         </DialogContent>
         <DialogActions>

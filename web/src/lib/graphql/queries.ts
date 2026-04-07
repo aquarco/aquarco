@@ -142,7 +142,6 @@ export const GET_REPOSITORIES = gql`
       branch
       cloneDir
       pollers
-      isConfigRepo
       lastClonedAt
       lastPulledAt
       cloneStatus
@@ -163,7 +162,6 @@ export const REGISTER_REPOSITORY = gql`
         url
         branch
         pollers
-        isConfigRepo
         cloneStatus
         taskCount
       }
@@ -181,21 +179,6 @@ export const RETRY_CLONE = gql`
       repository {
         name
         cloneStatus
-      }
-      errors {
-        field
-        message
-      }
-    }
-  }
-`
-
-export const SET_CONFIG_REPO = gql`
-  mutation SetConfigRepo($name: String!, $isConfigRepo: Boolean!) {
-    setConfigRepo(name: $name, isConfigRepo: $isConfigRepo) {
-      repository {
-        name
-        isConfigRepo
       }
       errors {
         field
