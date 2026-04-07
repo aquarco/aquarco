@@ -62,6 +62,8 @@ EXPECTED_MIGRATIONS = [
     "038_drop_repo_agent_scans",
     "039_add_stage_msg_spending_state",
     "040_drop_is_config_repo",
+    "040_add_stage_model",
+    "041_backfill_stage_model",
 ]
 
 # Build expected dependency map: migration_name -> depends_on_name

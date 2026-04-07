@@ -1,4 +1,4 @@
--- depends: 039_add_stage_msg_spending_state
+-- depends: 040_drop_is_config_repo
 -- Migration 040: Add model column to stages
 --
 -- Stores the Claude model identifier (e.g. 'claude-sonnet-4-6') used for

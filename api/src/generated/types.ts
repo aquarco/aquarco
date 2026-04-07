@@ -197,7 +197,6 @@ export type Mutation = {
   retryClone: RepositoryPayload;
   retryTask: TaskPayload;
   setAgentDisabled: AgentDefinitionPayload;
-  setConfigRepo: RepositoryPayload;
   setDrainMode: DrainStatus;
   unblockTask: TaskPayload;
   updateTaskStatus: TaskPayload;
@@ -274,12 +273,6 @@ export type MutationSetAgentDisabledArgs = {
 };
 
 
-export type MutationSetConfigRepoArgs = {
-  isConfigRepo: Scalars['Boolean']['input'];
-  name: Scalars['String']['input'];
-};
-
-
 export type MutationSetDrainModeArgs = {
   enabled: Scalars['Boolean']['input'];
 };
@@ -343,7 +336,6 @@ export type Query = {
   claudeAuthStatus: ClaudeAuthStatus;
   dashboardStats: DashboardStats;
   drainStatus: DrainStatus;
-  tokenUsageByModel: Array<TokenUsageByDay>;
   githubAuthStatus: GithubAuthStatus;
   githubBranches: Array<Scalars['String']['output']>;
   githubRepositories: Array<GithubRepo>;
@@ -354,6 +346,7 @@ export type Query = {
   repository?: Maybe<Repository>;
   task?: Maybe<Task>;
   tasks: TaskConnection;
+  tokenUsageByModel: Array<TokenUsageByDay>;
 };
 
 
@@ -378,11 +371,6 @@ export type QueryTaskArgs = {
 };
 
 
-export type QueryTokenUsageByModelArgs = {
-  days?: InputMaybe<Scalars['Int']['input']>;
-};
-
-
 export type QueryTasksArgs = {
   limit?: InputMaybe<Scalars['Int']['input']>;
   offset?: InputMaybe<Scalars['Int']['input']>;
@@ -390,10 +378,14 @@ export type QueryTasksArgs = {
   status?: InputMaybe<TaskStatus>;
 };
 
+
+export type QueryTokenUsageByModelArgs = {
+  days?: InputMaybe<Scalars['Int']['input']>;
+};
+
 export type RegisterRepositoryInput = {
   branch?: InputMaybe<Scalars['String']['input']>;
   cloneDir?: InputMaybe<Scalars['String']['input']>;
-  isConfigRepo?: InputMaybe<Scalars['Boolean']['input']>;
   name: Scalars['String']['input'];
   pollers?: InputMaybe<Array<Scalars['String']['input']>>;
   url: Scalars['String']['input'];
@@ -408,7 +400,6 @@ export type Repository = {
   errorMessage?: Maybe<Scalars['String']['output']>;
   hasClaudeAgents: Scalars['Boolean']['output'];
   headSha?: Maybe<Scalars['String']['output']>;
-  isConfigRepo: Scalars['Boolean']['output'];
   lastClonedAt?: Maybe<Scalars['DateTime']['output']>;
   lastPulledAt?: Maybe<Scalars['DateTime']['output']>;
   name: Scalars['String']['output'];
@@ -509,16 +500,6 @@ export type Task = {
   updatedAt: Scalars['DateTime']['output'];
 };
 
-export type TokenUsageByDay = {
-  __typename?: 'TokenUsageByDay';
-  day: Scalars['DateTime']['output'];
-  model: Scalars['String']['output'];
-  tokensInput: Scalars['Int']['output'];
-  tokensOutput: Scalars['Int']['output'];
-  cacheReadTokens: Scalars['Int']['output'];
-  cacheWriteTokens: Scalars['Int']['output'];
-};
-
 export type TaskConnection = {
   __typename?: 'TaskConnection';
   nodes: Array<Task>;
@@ -543,6 +524,16 @@ export enum TaskStatus {
   RateLimited = 'rate_limited',
   Timeout = 'timeout'
 }
+
+export type TokenUsageByDay = {
+  __typename?: 'TokenUsageByDay';
+  cacheReadTokens: Scalars['Int']['output'];
+  cacheWriteTokens: Scalars['Int']['output'];
+  day: Scalars['DateTime']['output'];
+  model: Scalars['String']['output'];
+  tokensInput: Scalars['Int']['output'];
+  tokensOutput: Scalars['Int']['output'];
+};
 
 export type WithIndex<TObject> = TObject & Record<string, any>;
 export type ResolversObject<TObject> = WithIndex<TObject>;
@@ -865,7 +856,6 @@ export type MutationResolvers<ContextType = Context, ParentType extends Resolver
   retryClone?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationRetryCloneArgs, 'name'>>;
   retryTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationRetryTaskArgs, 'id'>>;
   setAgentDisabled?: Resolver<ResolversTypes['AgentDefinitionPayload'], ParentType, ContextType, RequireFields<MutationSetAgentDisabledArgs, 'disabled' | 'name' | 'scope'>>;
-  setConfigRepo?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationSetConfigRepoArgs, 'isConfigRepo' | 'name'>>;
   setDrainMode?: Resolver<ResolversTypes['DrainStatus'], ParentType, ContextType, RequireFields<MutationSetDrainModeArgs, 'enabled'>>;
   unblockTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationUnblockTaskArgs, 'id' | 'resolution'>>;
   updateTaskStatus?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationUpdateTaskStatusArgs, 'id' | 'status'>>;
@@ -938,7 +928,6 @@ export type RepositoryResolvers<ContextType = Context, ParentType extends Resolv
   errorMessage?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   hasClaudeAgents?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   headSha?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
-  isConfigRepo?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   lastClonedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   lastPulledAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   name?: Resolver<ResolversTypes['String'], ParentType, ContextType>;

@@ -22,7 +22,6 @@ import { DASHBOARD_STATS, GET_TASKS, TOKEN_USAGE_BY_MODEL } from '@/lib/graphql/
 import { StatusChip } from '@/components/ui/StatusChip'
 import { TokenUsageChart } from '@/components/dashboard/TokenUsageChart'
 import { formatDate } from '@/lib/format'
-import { formatCost, formatTokens } from '@/lib/spending'
 
 interface StatCardProps {
   label: string
@@ -88,8 +87,6 @@ export default function DashboardPage() {
     { label: 'Completed', value: stats?.completedTasks, color: '#2e7d32' },
     { label: 'Failed', value: stats?.failedTasks, color: '#d32f2f' },
     { label: 'Blocked', value: stats?.blockedTasks, color: '#e65100' },
-    { label: 'Cost Today', value: stats?.totalCostToday != null ? formatCost(stats.totalCostToday) : '—', color: '#ed6c02' },
-    { label: 'Tokens Today', value: formatTokens(stats?.totalTokensToday), color: '#1976d2' },
   ]
 
   return (
@@ -117,6 +114,20 @@ export default function DashboardPage() {
           </Grid>
         ))}
       </Grid>
+
+      {/* Token Usage Chart */}
+      <Card variant="outlined" sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+            Token Usage (Last 30 Days)
+          </Typography>
+          <Divider sx={{ mb: 2 }} />
+          <TokenUsageChart
+            data={tokenUsageData?.tokenUsageByModel ?? []}
+            loading={tokenUsageLoading}
+          />
+        </CardContent>
+      </Card>
 
       {/* Tasks by Pipeline + Tasks by Repository */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
@@ -196,20 +207,6 @@ export default function DashboardPage() {
           </Card>
         </Grid>
       </Grid>
-
-      {/* Token Usage Chart */}
-      <Card variant="outlined" sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-            Token Usage by Model (Last 30 Days)
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
-          <TokenUsageChart
-            data={tokenUsageData?.tokenUsageByModel ?? []}
-            loading={tokenUsageLoading}
-          />
-        </CardContent>
-      </Card>
 
       {/* Recent tasks */}
       <Typography variant="subtitle1" fontWeight={700} gutterBottom>
