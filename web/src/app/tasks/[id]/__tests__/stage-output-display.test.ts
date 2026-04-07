@@ -93,6 +93,19 @@ function isFindingArray(arr: unknown[]): arr is FindingItem[] {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Copied from page.tsx — formatDurationSeconds (lines 318-325)
+// ---------------------------------------------------------------------------
+
+function formatDurationSeconds(totalSeconds: number): string {
+  if (totalSeconds < 60) return `${totalSeconds}s`
+  const minutes = Math.floor(totalSeconds / 60)
+  const secs = totalSeconds % 60
+  if (minutes < 60) return `${minutes}m ${secs}s`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ${minutes % 60}m`
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -389,5 +402,131 @@ describe('isFindingArray', () => {
       { severity: 'error', message: 'msg', extra: 'data', count: 5 },
     ]
     expect(isFindingArray(findings)).toBe(true)
+  })
+})
+
+// ===========================================================================
+// formatDurationSeconds Tests
+// ===========================================================================
+
+describe('formatDurationSeconds', () => {
+  it('formats seconds only when under 60', () => {
+    expect(formatDurationSeconds(0)).toBe('0s')
+    expect(formatDurationSeconds(1)).toBe('1s')
+    expect(formatDurationSeconds(59)).toBe('59s')
+  })
+
+  it('formats minutes and seconds when under 60 minutes', () => {
+    expect(formatDurationSeconds(60)).toBe('1m 0s')
+    expect(formatDurationSeconds(90)).toBe('1m 30s')
+    expect(formatDurationSeconds(3599)).toBe('59m 59s')
+  })
+
+  it('formats hours and remaining minutes when >= 60 minutes', () => {
+    expect(formatDurationSeconds(3600)).toBe('1h 0m')
+    expect(formatDurationSeconds(5400)).toBe('1h 30m')
+    expect(formatDurationSeconds(7200)).toBe('2h 0m')
+    expect(formatDurationSeconds(7260)).toBe('2h 1m')
+  })
+})
+
+// ===========================================================================
+// Additional parseLiveOutput edge cases
+// ===========================================================================
+
+describe('parseLiveOutput edge cases', () => {
+  it('handles tool_use_result as null', () => {
+    const input = JSON.stringify({ tool_use_result: null })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('handles tool_use_result as a number (not string or object)', () => {
+    const input = JSON.stringify({ tool_use_result: 42 })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('handles tool_use_result object with empty strings', () => {
+    const input = JSON.stringify({ tool_use_result: { stdout: '', stderr: '', content: '' } })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('handles message.content with empty input object', () => {
+    const input = JSON.stringify({
+      message: { content: [{ input: {} }] },
+    })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('handles message.content with input having non-string values', () => {
+    const input = JSON.stringify({
+      message: { content: [{ input: { description: 123, file_path: true } }] },
+    })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('handles tool_use_result.file without filePath', () => {
+    const input = JSON.stringify({
+      tool_use_result: { file: { name: 'foo.ts' } },
+    })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('handles tool_use_result.file.filePath as empty string', () => {
+    const input = JSON.stringify({
+      tool_use_result: { file: { filePath: '' } },
+    })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('handles message with no content property', () => {
+    const input = JSON.stringify({ message: { role: 'assistant' } })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+
+  it('handles message.content items with empty strings', () => {
+    const input = JSON.stringify({
+      message: { content: [{ thinking: '', text: '', content: '' }] },
+    })
+    expect(parseLiveOutput(input)).toEqual([])
+  })
+})
+
+// ===========================================================================
+// Additional isFindingArray edge cases
+// ===========================================================================
+
+describe('isFindingArray edge cases', () => {
+  it('returns false for array of undefined items', () => {
+    expect(isFindingArray([undefined, undefined] as unknown[])).toBe(false)
+  })
+
+  it('returns true for single finding with all optional fields', () => {
+    const findings = [
+      { severity: 'error', message: 'msg', file: 'a.ts', line: 1 },
+    ]
+    expect(isFindingArray(findings)).toBe(true)
+  })
+
+  it('returns false for objects with severity but empty message key missing', () => {
+    const arr = [{ severity: 'info', msg: 'wrong key name' }]
+    expect(isFindingArray(arr as unknown[])).toBe(false)
+  })
+})
+
+// ===========================================================================
+// Additional toSectionTitle edge cases
+// ===========================================================================
+
+describe('toSectionTitle edge cases', () => {
+  it('handles all-uppercase key', () => {
+    expect(toSectionTitle('SUMMARY')).toBe('SUMMARY')
+  })
+
+  it('handles key with numbers', () => {
+    expect(toSectionTitle('test_count_v2')).toBe('Test Count V2')
+  })
+
+  it('handles key with multiple underscores', () => {
+    expect(toSectionTitle('a__b___c')).toBe('A  B   C')
   })
 })
