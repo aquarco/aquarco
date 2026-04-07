@@ -795,6 +795,102 @@ def test_non_dict_message_field_does_not_crash() -> None:
     assert len(result.turns) == 1
 
 
+def test_get_pricing_opus_40() -> None:
+    """Opus 4.0/4.1 models should use higher pricing tier."""
+    for model in ["claude-opus-4-0", "claude-opus-4.0", "claude-opus-4-1", "claude-opus-4.1"]:
+        p = get_pricing(model)
+        assert p["input"] == 15, f"Wrong input pricing for {model}"
+        assert p["output"] == 75, f"Wrong output pricing for {model}"
+        assert p["cache_write"] == 18.75, f"Wrong cache_write pricing for {model}"
+        assert p["cache_read"] == 1.50, f"Wrong cache_read pricing for {model}"
+
+
+def test_get_pricing_haiku_35() -> None:
+    """Haiku 3.5 models should use lower pricing tier."""
+    for model in ["claude-haiku-3-5", "claude-haiku-3.5"]:
+        p = get_pricing(model)
+        assert p["input"] == 0.80, f"Wrong input pricing for {model}"
+        assert p["output"] == 4, f"Wrong output pricing for {model}"
+        assert p["cache_write"] == 1.00, f"Wrong cache_write pricing for {model}"
+        assert p["cache_read"] == 0.08, f"Wrong cache_read pricing for {model}"
+
+
+def test_blank_and_whitespace_lines_skipped() -> None:
+    """Empty and whitespace-only lines in NDJSON should be silently skipped."""
+    ndjson = "\n  \n\n" + _ndjson(
+        {"type": "assistant", "message": {"model": "claude-sonnet-4-6", "usage": {
+            "input_tokens": 10, "output_tokens": 5,
+        }}},
+    ) + "\n\n   \n"
+    result = parse_ndjson_spending(ndjson)
+    assert len(result.turns) == 1
+    assert result.total_input == 10
+
+
+def test_non_dict_top_level_json_skipped() -> None:
+    """JSON values that parse to non-dict types (array, string, number) should be skipped."""
+    ndjson = '42\n"just a string"\n[1,2,3]\nnull\ntrue\n' + _ndjson(
+        {"type": "assistant", "message": {"model": "claude-sonnet-4-6", "usage": {
+            "input_tokens": 7, "output_tokens": 3,
+        }}},
+    )
+    result = parse_ndjson_spending(ndjson)
+    assert len(result.turns) == 1
+    assert result.total_input == 7
+    assert result.total_output == 3
+
+
+def test_convergence_property_accumulated_never_exceeds_final() -> None:
+    """Verify the convergence property from issue #93: accumulated deduped totals
+    at each step must be <= the final totals. This simulates processing the stream
+    incrementally."""
+    # Simulate progressive emissions for two message IDs
+    emissions = [
+        ("msg_A", 2, 5000, 0, 10),
+        ("msg_A", 3, 10000, 0, 15),
+        ("msg_B", 1, 3000, 5000, 5),
+        ("msg_A", 3, 15000, 0, 23),
+        ("msg_B", 1, 7000, 10000, 12),
+    ]
+    # Final expected totals (max per msg_id then sum)
+    # msg_A: input=3, cw=15000, cr=0, out=23
+    # msg_B: input=1, cw=7000, cr=10000, out=12
+    final_input = 4
+    final_cw = 22000
+    final_cr = 10000
+    final_out = 35
+
+    # Process incrementally: parse first N lines and verify totals <= final
+    for n in range(1, len(emissions) + 1):
+        partial_ndjson = _ndjson(*[
+            {"type": "assistant", "message": {
+                "id": msg_id, "model": "claude-sonnet-4-6",
+                "usage": {"input_tokens": inp, "cache_creation_input_tokens": cw,
+                          "cache_read_input_tokens": cr, "output_tokens": out},
+            }}
+            for msg_id, inp, cw, cr, out in emissions[:n]
+        ])
+        result = parse_ndjson_spending(partial_ndjson)
+        assert result.total_input <= final_input, f"Step {n}: input {result.total_input} > {final_input}"
+        assert result.total_cache_write <= final_cw, f"Step {n}: cache_write {result.total_cache_write} > {final_cw}"
+        assert result.total_cache_read <= final_cr, f"Step {n}: cache_read {result.total_cache_read} > {final_cr}"
+        assert result.total_output <= final_out, f"Step {n}: output {result.total_output} > {final_out}"
+
+    # Final step must equal expected totals
+    full_result = parse_ndjson_spending(_ndjson(*[
+        {"type": "assistant", "message": {
+            "id": msg_id, "model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": inp, "cache_creation_input_tokens": cw,
+                      "cache_read_input_tokens": cr, "output_tokens": out},
+        }}
+        for msg_id, inp, cw, cr, out in emissions
+    ]))
+    assert full_result.total_input == final_input
+    assert full_result.total_cache_write == final_cw
+    assert full_result.total_cache_read == final_cr
+    assert full_result.total_output == final_out
+
+
 def test_interleaved_ids_and_no_ids() -> None:
     """Messages with and without IDs interleaved — dedup applies only to ID-bearing."""
     ndjson = _ndjson(

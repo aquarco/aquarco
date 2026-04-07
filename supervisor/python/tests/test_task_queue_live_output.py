@@ -934,3 +934,211 @@ async def test_get_live_stage_spending_with_deduped_duplicates(
     assert result["input_tokens"] == 100
     assert result["output_tokens"] == 50
     assert result["turns"] == 2  # turns still count both emissions
+
+
+@pytest.mark.asyncio
+async def test_get_live_stage_spending_issue_93_pattern(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """get_live_stage_spending with the exact issue #93 data pattern should
+    return deduped totals matching GROUP BY MAX approach."""
+    messages = [
+        ("msg_01RRjSF2uva5HRKurdkcStgH", 3, 15078, 0, 23),
+        ("msg_01TLGaJaQZFGnMSjgtoJ7Efp", 1, 15757, 0, 64),
+        ("msg_01XLR1TsFTuhP2vcV3bVs6LE", 1, 7028, 15757, 37),
+        ("msg_01SLZd8wN1CASCxzWamjZA3C", 1, 6019, 22785, 9),
+        ("msg_01Do3ihFfK3tBVMXQZFMx5ge", 1, 3559, 28804, 1),
+        ("msg_01MSQDJAuKvw7va8gvBtZX2W", 1, 541, 32363, 60),
+        ("msg_01UDc2i8TGAyrms2fy1sFLyE", 1, 3934, 32363, 2),
+    ]
+    lines = [
+        json.dumps({"type": "assistant", "message": {
+            "id": msg_id, "model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": inp, "cache_creation_input_tokens": cw,
+                      "cache_read_input_tokens": cr, "output_tokens": out}}})
+        for msg_id, inp, cw, cr, out in messages
+    ]
+    mock_db.fetch_one.return_value = {"raw_output": "\n".join(lines)}
+
+    result = await task_queue.get_live_stage_spending("task-1", "0:review:review-agent")
+
+    assert result is not None
+    assert result["input_tokens"] == 9
+    assert result["cache_write_tokens"] == 51916
+    assert result["cache_read_tokens"] == 132072
+    assert result["output_tokens"] == 196
+    assert result["turns"] == 7
+
+
+@pytest.mark.asyncio
+async def test_get_live_stage_spending_duplicate_emissions_deduped(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Progressive duplicate emissions should be deduped through get_live_stage_spending."""
+    lines = [
+        # msg_A: 3 emissions with increasing values
+        json.dumps({"type": "assistant", "message": {
+            "id": "msg_A", "model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": 5, "cache_creation_input_tokens": 100,
+                      "cache_read_input_tokens": 0, "output_tokens": 10}}}),
+        json.dumps({"type": "assistant", "message": {
+            "id": "msg_A", "model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": 5, "cache_creation_input_tokens": 200,
+                      "cache_read_input_tokens": 0, "output_tokens": 20}}}),
+        json.dumps({"type": "assistant", "message": {
+            "id": "msg_A", "model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": 5, "cache_creation_input_tokens": 300,
+                      "cache_read_input_tokens": 0, "output_tokens": 30}}}),
+        # msg_B: single emission
+        json.dumps({"type": "assistant", "message": {
+            "id": "msg_B", "model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": 1, "cache_creation_input_tokens": 50,
+                      "cache_read_input_tokens": 100, "output_tokens": 5}}}),
+    ]
+    mock_db.fetch_one.return_value = {"raw_output": "\n".join(lines)}
+
+    result = await task_queue.get_live_stage_spending("task-1", "0:review:review-agent")
+
+    assert result is not None
+    # msg_A: max(5)=5, max(100,200,300)=300, max(0)=0, max(10,20,30)=30
+    # msg_B: 1, 50, 100, 5
+    assert result["input_tokens"] == 6
+    assert result["cache_write_tokens"] == 350
+    assert result["cache_read_tokens"] == 100
+    assert result["output_tokens"] == 35
+    assert result["turns"] == 4
+
+
+@pytest.mark.asyncio
+async def test_update_stage_live_output_dedup_cost_references_all_price_params(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """The dedup SQL cost computation must reference all four pricing params."""
+    line = json.dumps({
+        "type": "assistant",
+        "message": {
+            "id": "msg_cost",
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": 10,
+                "cache_creation_input_tokens": 20,
+                "cache_read_input_tokens": 30,
+                "output_tokens": 40,
+            },
+        },
+    })
+    await task_queue.update_stage_live_output(
+        task_id="task-1",
+        stage_key="0:review:review-agent",
+        iteration=1,
+        run=1,
+        live_output=line,
+    )
+
+    sql, _ = mock_db.execute.call_args[0]
+    # The cost_usd computation must reference all four price params
+    cost_section = sql[sql.index("cost_usd"):]
+    assert "%(price_input)s" in cost_section
+    assert "%(price_output)s" in cost_section
+    assert "%(price_cache_read)s" in cost_section
+    assert "%(price_cache_write)s" in cost_section
+
+
+@pytest.mark.asyncio
+async def test_update_stage_live_output_no_id_all_four_token_columns(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """No-ID fallback path should update all four token columns and cost_usd."""
+    line = json.dumps({
+        "type": "assistant",
+        "message": {
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": 10,
+                "cache_creation_input_tokens": 20,
+                "cache_read_input_tokens": 30,
+                "output_tokens": 40,
+            },
+        },
+    })
+    await task_queue.update_stage_live_output(
+        task_id="task-1",
+        stage_key="0:review:review-agent",
+        iteration=1,
+        run=1,
+        live_output=line,
+    )
+
+    sql, params = mock_db.execute.call_args[0]
+    assert "tokens_input" in sql
+    assert "tokens_output" in sql
+    assert "cache_read_tokens" in sql
+    assert "cache_write_tokens" in sql
+    assert "cost_usd" in sql
+    # Verify delta params match raw values
+    assert params["delta_input"] == 10
+    assert params["delta_output"] == 40
+    assert params["delta_cache_read"] == 30
+    assert params["delta_cache_write"] == 20
+
+
+@pytest.mark.asyncio
+async def test_update_stage_live_output_no_id_cost_includes_all_token_types(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """No-ID fallback path should compute delta_cost from all four token types."""
+    line = json.dumps({
+        "type": "assistant",
+        "message": {
+            "model": "claude-sonnet-4-6",  # Sonnet pricing
+            "usage": {
+                "input_tokens": 1_000_000,      # $3
+                "cache_creation_input_tokens": 1_000_000,  # $3.75
+                "cache_read_input_tokens": 1_000_000,      # $0.30
+                "output_tokens": 1_000_000,     # $15
+            },
+        },
+    })
+    await task_queue.update_stage_live_output(
+        task_id="task-1",
+        stage_key="0:review:review-agent",
+        iteration=1,
+        run=1,
+        live_output=line,
+    )
+
+    _, params = mock_db.execute.call_args[0]
+    expected_cost = 3.0 + 3.75 + 0.30 + 15.0  # $22.05
+    assert abs(params["delta_cost"] - expected_cost) < 0.001
+
+
+@pytest.mark.asyncio
+async def test_get_live_stage_spending_mixed_id_and_no_id(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """get_live_stage_spending with mix of ID and no-ID messages should
+    dedup ID-bearing and sum no-ID messages independently."""
+    lines = [
+        json.dumps({"type": "assistant", "message": {
+            "id": "msg_dup", "model": "claude-sonnet-4-5",
+            "usage": {"input_tokens": 10, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 0, "output_tokens": 5}}}),
+        json.dumps({"type": "assistant", "message": {
+            "id": "msg_dup", "model": "claude-sonnet-4-5",
+            "usage": {"input_tokens": 10, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 0, "output_tokens": 5}}}),
+        # No ID — always counted
+        json.dumps({"type": "assistant", "message": {
+            "model": "claude-sonnet-4-5",
+            "usage": {"input_tokens": 7, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 0, "output_tokens": 3}}}),
+    ]
+    mock_db.fetch_one.return_value = {"raw_output": "\n".join(lines)}
+
+    result = await task_queue.get_live_stage_spending("task-1", "0:review:review-agent")
+
+    assert result is not None
+    # msg_dup: max(10,10)=10, max(5,5)=5
+    # no-id: 7, 3
+    assert result["input_tokens"] == 17
+    assert result["output_tokens"] == 8
