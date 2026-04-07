@@ -376,6 +376,9 @@ async def test_update_stage_live_output_dedup_uses_msg_spending_state(
     assert params["msg_id"] == "msg_01AAA"
     assert params["raw_input"] == 10
     assert params["raw_output"] == 20
+    # Verify JSONB literals are valid JSON (not double-braced from f-string confusion)
+    assert "'{}'::jsonb" in sql, "JSONB fallback must use valid JSON '{}', not '{{}}'::jsonb"
+    assert "'{{}}'::jsonb" not in sql, "Found invalid '{{}}'::jsonb literal in SQL"
 
 
 @pytest.mark.asyncio

@@ -1005,25 +1005,25 @@ class TaskQueue:
             spending_sql = """,
                     msg_spending_state = (
                         SELECT jsonb_set(
-                            COALESCE(stages.msg_spending_state, '{{}}'::jsonb),
+                            COALESCE(stages.msg_spending_state, '{}'::jsonb),
                             ARRAY[%(msg_id)s],
                             jsonb_build_object(
-                                'i', GREATEST(COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'i')::int, 0), %(raw_input)s),
-                                'o', GREATEST(COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'o')::int, 0), %(raw_output)s),
-                                'cr', GREATEST(COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'cr')::int, 0), %(raw_cache_read)s),
-                                'cw', GREATEST(COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'cw')::int, 0), %(raw_cache_write)s)
+                                'i', GREATEST(COALESCE((COALESCE(stages.msg_spending_state, '{}'::jsonb) -> %(msg_id)s ->> 'i')::int, 0), %(raw_input)s),
+                                'o', GREATEST(COALESCE((COALESCE(stages.msg_spending_state, '{}'::jsonb) -> %(msg_id)s ->> 'o')::int, 0), %(raw_output)s),
+                                'cr', GREATEST(COALESCE((COALESCE(stages.msg_spending_state, '{}'::jsonb) -> %(msg_id)s ->> 'cr')::int, 0), %(raw_cache_read)s),
+                                'cw', GREATEST(COALESCE((COALESCE(stages.msg_spending_state, '{}'::jsonb) -> %(msg_id)s ->> 'cw')::int, 0), %(raw_cache_write)s)
                             )
                         )
                     ),
-                    tokens_input = COALESCE(tokens_input, 0) + GREATEST(%(raw_input)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'i')::int, 0), 0),
-                    tokens_output = COALESCE(tokens_output, 0) + GREATEST(%(raw_output)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'o')::int, 0), 0),
-                    cache_read_tokens = COALESCE(cache_read_tokens, 0) + GREATEST(%(raw_cache_read)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'cr')::int, 0), 0),
-                    cache_write_tokens = COALESCE(cache_write_tokens, 0) + GREATEST(%(raw_cache_write)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'cw')::int, 0), 0),
+                    tokens_input = COALESCE(tokens_input, 0) + GREATEST(%(raw_input)s - COALESCE((COALESCE(stages.msg_spending_state, '{}'::jsonb) -> %(msg_id)s ->> 'i')::int, 0), 0),
+                    tokens_output = COALESCE(tokens_output, 0) + GREATEST(%(raw_output)s - COALESCE((COALESCE(stages.msg_spending_state, '{}'::jsonb) -> %(msg_id)s ->> 'o')::int, 0), 0),
+                    cache_read_tokens = COALESCE(cache_read_tokens, 0) + GREATEST(%(raw_cache_read)s - COALESCE((COALESCE(stages.msg_spending_state, '{}'::jsonb) -> %(msg_id)s ->> 'cr')::int, 0), 0),
+                    cache_write_tokens = COALESCE(cache_write_tokens, 0) + GREATEST(%(raw_cache_write)s - COALESCE((COALESCE(stages.msg_spending_state, '{}'::jsonb) -> %(msg_id)s ->> 'cw')::int, 0), 0),
                     cost_usd = COALESCE(cost_usd, 0) + (
-                        GREATEST(%(raw_input)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'i')::int, 0), 0) * %(price_input)s
-                        + GREATEST(%(raw_output)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'o')::int, 0), 0) * %(price_output)s
-                        + GREATEST(%(raw_cache_read)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'cr')::int, 0), 0) * %(price_cache_read)s
-                        + GREATEST(%(raw_cache_write)s - COALESCE((COALESCE(stages.msg_spending_state, '{{}}'::jsonb) -> %(msg_id)s ->> 'cw')::int, 0), 0) * %(price_cache_write)s
+                        GREATEST(%(raw_input)s - COALESCE((COALESCE(stages.msg_spending_state, '{}'::jsonb) -> %(msg_id)s ->> 'i')::int, 0), 0) * %(price_input)s
+                        + GREATEST(%(raw_output)s - COALESCE((COALESCE(stages.msg_spending_state, '{}'::jsonb) -> %(msg_id)s ->> 'o')::int, 0), 0) * %(price_output)s
+                        + GREATEST(%(raw_cache_read)s - COALESCE((COALESCE(stages.msg_spending_state, '{}'::jsonb) -> %(msg_id)s ->> 'cr')::int, 0), 0) * %(price_cache_read)s
+                        + GREATEST(%(raw_cache_write)s - COALESCE((COALESCE(stages.msg_spending_state, '{}'::jsonb) -> %(msg_id)s ->> 'cw')::int, 0), 0) * %(price_cache_write)s
                     )"""
             spending_params = {
                 "msg_id": msg_id,
