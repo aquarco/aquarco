@@ -52,9 +52,12 @@ def setup_logging(level: str = "info", log_file: str | None = None) -> None:
     if log_file:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(str(log_path))
-        file_handler.setFormatter(formatter)
-        root_logger.addHandler(file_handler)
+        try:
+            file_handler = logging.FileHandler(str(log_path))
+            file_handler.setFormatter(formatter)
+            root_logger.addHandler(file_handler)
+        except PermissionError as exc:
+            root_logger.warning("Could not open log file %s: %s — logging to stderr only", log_path, exc)
 
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:

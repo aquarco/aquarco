@@ -233,6 +233,7 @@ log "Installing aquarco-supervisor Python package..."
 apt-get install -y -qq python3-pip python3-venv
 python3 -m venv "${AGENT_HOME}/.venv"
 chown -R "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}/.venv"
+chmod -R u+w "${AGENT_HOME}/.venv/lib/"
 su - "${AGENT_USER}" -c "${AGENT_HOME}/.venv/bin/pip install -e /home/agent/aquarco/supervisor/python/" || {
   log "WARNING: pip install failed; supervisor CLI may not be available"
 }
