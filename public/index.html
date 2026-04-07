@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aquarco — AI agents in a sealed world</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #060d18;
+    --bg2:       #0a1525;
+    --glass:     #0d1e33;
+    --water:     #0a2040;
+    --teal:      #0d9e75;
+    --teal-dim:  #085c44;
+    --blue:      #1a6fa8;
+    --blue-dim:  #0f3d5e;
+    --purple:    #6b5ce7;
+    --text:      #d4e8f7;
+    --text-dim:  #4a7a9b;
+    --text-muted:#2a4a62;
+    --border:    #132234;
+    --accent:    #0d9e75;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Libre Baskerville', Georgia, serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ---- HERO ---- */
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    padding: 4rem 2rem;
+    text-align: center;
+    overflow: hidden;
+  }
+
+  /* subtle grid bg */
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(13,158,117,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(13,158,117,0.04) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none;
+  }
+
+  /* radial glow */
+  .hero::after {
+    content: '';
+    position: absolute;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(13,158,117,0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .logo-wrap {
+    position: relative;
+    z-index: 1;
+    margin-bottom: 2.5rem;
+    animation: fadeUp 1s ease both;
+  }
+
+  .logo-wrap::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 340px;
+    height: 340px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(13,158,117,0.22) 0%, rgba(13,158,117,0.08) 30%, rgba(13,158,117,0.02) 55%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .logo-wrap svg {
+    position: relative;
+    z-index: 1;
+    width: 160px;
+    height: 160px;
+  }
+
+  .hero-name {
+    position: relative;
+    z-index: 1;
+    font-size: clamp(3rem, 8vw, 6rem);
+    font-weight: 400;
+    letter-spacing: 0.18em;
+    color: #e8f4fd;
+    animation: fadeUp 1s 0.1s ease both;
+  }
+
+  .hero-name span {
+    color: var(--teal);
+  }
+
+  .hero-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--teal);
+    margin-left: 4px;
+    vertical-align: super;
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+
+  .tagline {
+    position: relative;
+    z-index: 1;
+    margin-top: 1.5rem;
+    font-size: clamp(1rem, 2.5vw, 1.25rem);
+    font-style: italic;
+    color: var(--text-dim);
+    max-width: 480px;
+    line-height: 1.7;
+    animation: fadeUp 1s 0.2s ease both;
+  }
+
+  .tagline-alts {
+    position: relative;
+    z-index: 1;
+    margin-top: 2.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    animation: fadeUp 1s 0.3s ease both;
+  }
+
+  .tagline-alt {
+    font-size: 0.78rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    transition: color 0.2s;
+    cursor: default;
+  }
+  .tagline-alt:hover { color: var(--text-dim); }
+  .tagline-alt.primary { color: var(--text-dim); }
+
+  .cta-row {
+    position: relative;
+    z-index: 1;
+    margin-top: 3rem;
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    animation: fadeUp 1s 0.4s ease both;
+  }
+
+  .btn {
+    padding: 0.75rem 2rem;
+    border-radius: 2px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.2s;
+    display: inline-block;
+  }
+  .btn-primary {
+    background: var(--teal);
+    color: #03120d;
+    border: 1px solid var(--teal);
+  }
+  .btn-primary:hover { background: #0ec98d; border-color: #0ec98d; }
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { border-color: var(--text-muted); color: var(--text); }
+
+  /* ---- TERMINAL DEMO ---- */
+  .terminal-section {
+    padding: 4rem 2rem;
+    display: flex;
+    justify-content: center;
+    animation: fadeUp 1s 0.5s ease both;
+  }
+
+  .terminal {
+    width: 100%;
+    max-width: 640px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .terminal-bar {
+    padding: 10px 16px;
+    background: var(--glass);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .terminal-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .td-red    { background: #3d1515; }
+  .td-amber  { background: #2d200a; }
+  .td-green  { background: var(--teal-dim); }
+  .terminal-title {
+    margin-left: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+  }
+
+  .terminal-body {
+    padding: 1.5rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+    line-height: 1.8;
+  }
+
+  .t-prompt { color: var(--teal); }
+  .t-cmd    { color: #d4e8f7; }
+  .t-out    { color: var(--text-muted); }
+  .t-ok     { color: var(--teal); }
+  .t-info   { color: var(--blue); }
+  .t-warn   { color: #ba7517; }
+  .t-agent  { color: var(--purple); }
+  .t-blank  { display: block; height: 0.4rem; }
+
+  /* ---- HOW IT WORKS ---- */
+  .section {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 5rem 2rem;
+  }
+
+  .section-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--teal);
+    margin-bottom: 1rem;
+  }
+
+  .section-title {
+    font-size: clamp(1.5rem, 4vw, 2.2rem);
+    font-weight: 400;
+    color: #e8f4fd;
+    margin-bottom: 3rem;
+    line-height: 1.3;
+  }
+
+  .pipeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .pipeline-step {
+    display: flex;
+    gap: 2rem;
+    align-items: flex-start;
+    padding: 1.5rem 0;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.2s;
+  }
+  .pipeline-step:last-child { border-bottom: none; }
+
+  .step-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--teal);
+    min-width: 2rem;
+    padding-top: 4px;
+    opacity: 0.7;
+  }
+
+  .step-name {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #c4dff0;
+    margin-bottom: 0.4rem;
+    letter-spacing: 0.05em;
+  }
+
+  .step-desc {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+    font-style: italic;
+  }
+
+  /* ---- ISOLATION SECTION ---- */
+  .isolation-block {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--teal);
+    border-radius: 0 4px 4px 0;
+    padding: 2rem 2.5rem;
+    margin: 3rem 0;
+  }
+
+  .isolation-block p {
+    font-size: 1rem;
+    line-height: 1.9;
+    color: var(--text-dim);
+  }
+
+  .isolation-block strong {
+    color: var(--text);
+    font-style: italic;
+  }
+
+  /* ---- TAGLINES SECTION ---- */
+  .taglines-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1.5rem;
+    margin-top: 2rem;
+  }
+
+  .tagline-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1.5rem;
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.15s;
+  }
+  .tagline-card:hover {
+    border-color: var(--teal-dim);
+    transform: translateY(-2px);
+  }
+  .tagline-card.featured {
+    border-color: var(--teal-dim);
+  }
+
+  .tc-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+  }
+
+  .tc-text {
+    font-size: 0.95rem;
+    font-style: italic;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+
+  .tc-text strong { color: var(--text); font-style: normal; }
+
+  /* ---- FOOTER ---- */
+  footer {
+    text-align: center;
+    padding: 3rem 2rem;
+    border-top: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+  }
+
+  footer a { color: var(--teal-dim); text-decoration: none; }
+  footer a:hover { color: var(--teal); }
+
+  /* ---- ANIMATIONS ---- */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.4; transform: scale(0.7); }
+  }
+
+  /* bubbles animated via JS */
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="logo-wrap">
+    <svg viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg" overflow="visible">
+      <rect x="40" y="60" width="240" height="170" rx="8" fill="none" stroke="#132234" stroke-width="2"/>
+      <rect x="42" y="62" width="236" height="166" rx="7" fill="#060d18" opacity="0.98"/>
+      <!-- water -->
+      <rect x="43" y="100" width="234" height="127" rx="0" fill="#0a1e38" opacity="0.95"/>
+      <path d="M43 100 Q120 93 160 100 Q200 107 277 100" fill="none" stroke="#1a5a8a" stroke-width="1.2" opacity="0.6"/>
+      <!-- bubbles injected by JS -->
+      <!-- fish 1 teal -->
+      <g id="fish1" transform="translate(130,148) scale(1,1)">
+        <ellipse rx="16" ry="8" fill="#0d9e75" opacity="0.9"/>
+        <polygon points="-16,0 -26,-7 -26,7" fill="#0d9e75" opacity="0.65"/>
+        <circle cx="9" cy="-1" r="2.5" fill="#040d1a"/>
+        <circle cx="9.8" cy="-1.8" r="1" fill="#7ff0d0"/>
+      </g>
+      <!-- fish 2 blue -->
+      <g id="fish2" transform="translate(210,168) scale(0.72,0.72)">
+        <ellipse rx="16" ry="8" fill="#1a6fa8" opacity="0.85"/>
+        <polygon points="-16,0 -26,-7 -26,7" fill="#1a6fa8" opacity="0.6"/>
+        <circle cx="9" cy="-1" r="2.5" fill="#030c18"/>
+        <circle cx="9.8" cy="-1.8" r="1" fill="#a0d4f5"/>
+      </g>
+      <!-- fish 3 purple -->
+      <g id="fish3" transform="translate(95,192) scale(0.52,0.52)">
+        <ellipse rx="16" ry="8" fill="#6b5ce7" opacity="0.8"/>
+        <polygon points="-16,0 -26,-7 -26,7" fill="#6b5ce7" opacity="0.55"/>
+        <circle cx="9" cy="-1" r="2.5" fill="#040415"/>
+        <circle cx="9.8" cy="-1.8" r="1" fill="#c4b5fd"/>
+      </g>
+      <!-- tank stand -->
+      <rect x="34" y="230" width="252" height="9" rx="3" fill="#0a1828"/>
+      <!-- glass shimmer -->
+      <rect x="43" y="62" width="7" height="166" rx="3" fill="white" opacity="0.03"/>
+      <rect x="43" y="62" width="234" height="5" rx="2" fill="white" opacity="0.04"/>
+    </svg>
+  </div>
+
+  <h1 class="hero-name">aquarco<span class="hero-dot"></span></h1>
+
+  <p class="tagline">A sealed glass world where AI agents work autonomously.</p>
+
+  <div class="tagline-alts">
+    <div class="tagline-alt primary">Sandboxed VM · Autonomous agents · Git-native pipelines</div>
+    <div class="tagline-alt">Issues go in. Pull requests come out.</div>
+    <div class="tagline-alt">The glass is the product.</div>
+  </div>
+
+  <div class="cta-row">
+    <a href="#how" class="btn btn-primary">See how it works</a>
+    <a href="https://github.com/aquarco/aquarco" class="btn btn-ghost">GitHub ↗</a>
+  </div>
+</section>
+
+<!-- TERMINAL -->
+<div class="terminal-section">
+  <div class="terminal">
+    <div class="terminal-bar">
+      <div class="terminal-dot td-red"></div>
+      <div class="terminal-dot td-amber"></div>
+      <div class="terminal-dot td-green"></div>
+      <span class="terminal-title">aquarco — bash</span>
+    </div>
+    <div class="terminal-body">
+      <div><span class="t-prompt">$</span> <span class="t-cmd">aquarco init</span></div>
+      <div class="t-agent">Starting VM with provisioning (this may take several minutes)...</div>
+      <div class="t-agent">...</div>
+      <div class="t-ok">Aquarco initialized successfully!</div>
+      <span class="t-blank"></span>
+      <div><span class="t-prompt">$</span> <span class="t-cmd">aquarco auth</span></div>
+      <div class="t-agent">Claude is not authenticated. Starting login flow...</div>
+      <div class="t-agent">Opening browser for Claude authentication...</div>
+      <span class="t-blank"></span>
+      <div><span class="t-prompt">$</span> <span class="t-cmd">aquarco repos add https://github.com/yourorg/yourrepo.git</span></div>
+      <div class="t-out">→ Watching for issues labeled [agent-task]</div>
+    </div>
+  </div>
+</div>
+
+<!-- HOW IT WORKS -->
+<section class="section" id="how">
+  <div class="section-label">Pipeline</div>
+  <h2 class="section-title">Every issue runs the full pipeline</h2>
+
+  <div class="pipeline">
+    <div class="pipeline-step">
+      <div class="step-num">01</div>
+      <div>
+        <div class="step-name">Analyze</div>
+        <div class="step-desc">Understand the issue, gather context, map affected code paths, identify dependencies.</div>
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-num">02</div>
+      <div>
+        <div class="step-name">Design</div>
+        <div class="step-desc">Draft an implementation approach, identify risks, choose a path that won't break things.</div>
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-num">03</div>
+      <div>
+        <div class="step-name">Implement</div>
+        <div class="step-desc">Write the code. All changes happen inside the VM — nothing touches the host.</div>
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-num">04</div>
+      <div>
+        <div class="step-name">Test</div>
+        <div class="step-desc">Run the full test suite. Catch regressions before they leave the tank.</div>
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-num">05</div>
+      <div>
+        <div class="step-name">Review</div>
+        <div class="step-desc">Self-review the diff. Check edge cases, security implications, code style.</div>
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-num">06</div>
+      <div>
+        <div class="step-name">Submit</div>
+        <div class="step-desc">Open a pull request with a clear description. You review. You merge.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="isolation-block">
+    <p>The VM is a hard boundary. Agents have full autonomy <strong>inside the glass</strong> — network access, file writes, process execution — but nothing escapes. No credentials leak. No supply-chain surprises. The isolation layer is <strong>not an afterthought. It is the product.</strong></p>
+  </div>
+</section>
+
+<!-- TAGLINES -->
+<section class="section">
+  <div class="section-label">Taglines</div>
+  <h2 class="section-title">How we describe it</h2>
+
+  <div class="taglines-grid">
+    <div class="tagline-card featured">
+      <div class="tc-label">Primary</div>
+      <div class="tc-text">A sealed glass world where <strong>AI agents work autonomously.</strong></div>
+    </div>
+    <div class="tagline-card">
+      <div class="tc-label">Short</div>
+      <div class="tc-text"><strong>Issues go in.</strong> Pull requests come out.</div>
+    </div>
+    <div class="tagline-card">
+      <div class="tc-label">Philosophy</div>
+      <div class="tc-text">The glass is <strong>not a limitation.</strong> It's the product.</div>
+    </div>
+    <div class="tagline-card">
+      <div class="tc-label">Technical</div>
+      <div class="tc-text">Sandboxed VM. Autonomous agents. <strong>Git-native pipelines.</strong></div>
+    </div>
+    <div class="tagline-card">
+      <div class="tc-label">Poetic</div>
+      <div class="tc-text">An aquarium is not a prison. <strong>It's a world with glass walls.</strong></div>
+    </div>
+    <div class="tagline-card">
+      <div class="tc-label">Direct</div>
+      <div class="tc-text">AI agents that ship code. <strong>Safely. While you sleep.</strong></div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <p>aquarco.com &nbsp;·&nbsp; MIT License &nbsp;·&nbsp; <a href="https://github.com/aquarco/aquarco">github.com/yourorg/aquarco</a></p>
+</footer>
+
+<script>
+// ---- Fish swimming ----
+const fishes = [
+  { id: 'fish1', bx: 130, by: 148, s:  1.0,  range: 55,  dur: 7000,  phase: 0    },
+  { id: 'fish2', bx: 210, by: 168, s:  0.72, range: -45, dur: 9000,  phase: 1200 },
+  { id: 'fish3', bx: 95,  by: 192, s:  0.52, range: 50,  dur: 11000, phase: 3000 },
+];
+
+fishes.forEach(f => {
+  const el = document.getElementById(f.id);
+  if (!el) return;
+  let lastX = null;
+  function tick(ts) {
+    const t = ((ts + f.phase) % f.dur) / f.dur;
+    const ease = (1 - Math.cos(t * 2 * Math.PI)) / 2;
+    const dx = ease * f.range;
+    const x = f.bx + dx;
+    const dir = (lastX === null || x >= lastX) ? 1 : -1;
+    lastX = x;
+    el.setAttribute('transform', `translate(${x},${f.by}) scale(${dir * f.s},${f.s})`);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+});
+
+// ---- Bubbles rising from bottom ----
+// Tank water: top y≈100, bottom y≈227, x range 43-277
+const svgNS = 'http://www.w3.org/2000/svg';
+const heroSvg = document.querySelector('.logo-wrap svg');
+
+const bubbleDefs = [
+  { x: 105, dur: 2800, delay: 0,    r: 3,   color: '#1a6fa8' },
+  { x: 190, dur: 3400, delay: 1100, r: 2.5, color: '#1a6fa8' },
+  { x: 148, dur: 3100, delay: 2200, r: 2,   color: '#0d9e75' },
+];
+
+const yBottom = 222;
+const yTop    = 106;
+
+bubbleDefs.forEach(bd => {
+  const circle = document.createElementNS(svgNS, 'circle');
+  circle.setAttribute('cx', bd.x);
+  circle.setAttribute('r', bd.r);
+  circle.setAttribute('fill', 'none');
+  circle.setAttribute('stroke', bd.color);
+  circle.setAttribute('stroke-width', '1');
+  circle.setAttribute('cy', yBottom);
+  circle.setAttribute('opacity', '0');
+  heroSvg.appendChild(circle);
+
+  const travel = yBottom - yTop;
+
+  function animBubble(ts) {
+    // use modulo with offset delay
+    const t = ((ts + (bd.dur - bd.delay)) % bd.dur) / bd.dur; // 0→1
+
+    const cy = yBottom - t * travel;
+
+    let opacity = 0;
+    if      (t < 0.12) opacity = (t / 0.12) * 0.6;
+    else if (t < 0.80) opacity = 0.6;
+    else               opacity = ((1 - t) / 0.2) * 0.6;
+
+    circle.setAttribute('cy', cy.toFixed(1));
+    circle.setAttribute('opacity', opacity.toFixed(3));
+    requestAnimationFrame(animBubble);
+  }
+  requestAnimationFrame(animBubble);
+});
+</script>
+
+</body>
+</html>
