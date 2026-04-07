@@ -274,7 +274,7 @@ export const Query = {
     args: { days?: number | null },
     ctx: Context
   ) {
-    const days = args.days ?? 30
+    const days = Math.min(Math.max(args.days ?? 30, 1), 365)
     const result = await ctx.pool.query<Record<string, unknown>>(
       `SELECT
          DATE_TRUNC('day', started_at AT TIME ZONE 'UTC') AS day,

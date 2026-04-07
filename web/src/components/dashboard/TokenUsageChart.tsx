@@ -116,14 +116,14 @@ export function TokenUsageChart({ data, loading }: TokenUsageChartProps) {
   }, [data, tokenType])
 
   if (loading) {
-    return <Skeleton variant="rectangular" height={200} />
+    return <Skeleton variant="rectangular" height={300} />
   }
 
   if (!chartData.length) {
     return (
       <Box
         sx={{
-          height: 200,
+          height: 300,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',

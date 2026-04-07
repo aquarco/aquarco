@@ -50,6 +50,7 @@ def _resolve_stage_status(
 from .database import Database
 from .logging import get_logger
 from .models import Task, TaskStatus
+from .spending import parse_ndjson_spending
 
 log = get_logger("task-queue")
 
@@ -380,12 +381,10 @@ class TaskQueue:
         model = None
         if raw_output:
             try:
-                from .spending import parse_ndjson_spending
-
                 spending_summary = parse_ndjson_spending(raw_output)
                 model = spending_summary.model
             except Exception:
-                pass  # Non-critical — model remains NULL
+                log.warning("Failed to extract model from raw_output for stage", exc_info=True)
 
         spending_params = {
             "cost_usd": cost_usd,
