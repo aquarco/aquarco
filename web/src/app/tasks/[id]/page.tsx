@@ -43,7 +43,6 @@ interface Stage {
   startedAt: string | null
   completedAt: string | null
   structuredOutput: unknown | null
-  rawOutput: string | null
   tokensInput: number | null
   tokensOutput: number | null
   costUsd: number | null
@@ -101,6 +100,219 @@ function resolveContextValue(entry: ContextEntry): { display: string; isJson: bo
     return { display: entry.valueFileRef, isJson: false }
   }
   return { display: '—', isJson: false }
+}
+
+// ── Live Output Parser ──────────────────────────────────────────────────────
+
+function parseLiveOutput(liveOutput: string): string[] {
+  const results: string[] = []
+  for (const line of liveOutput.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    let parsed: Record<string, unknown>
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      continue // skip non-JSON lines
+    }
+
+    // Top-level stdout / output
+    if (typeof parsed.stdout === 'string' && parsed.stdout) results.push(parsed.stdout)
+    if (typeof parsed.output === 'string' && parsed.output) results.push(parsed.output)
+
+    // message.content array fields
+    const msgContent = (parsed.message as Record<string, unknown> | undefined)?.content
+    if (Array.isArray(msgContent)) {
+      for (const c of msgContent) {
+        if (typeof c !== 'object' || c == null) continue
+        const item = c as Record<string, unknown>
+        if (typeof item.thinking === 'string' && item.thinking) results.push(item.thinking)
+        if (typeof item.text === 'string' && item.text) results.push(item.text)
+        if (typeof item.content === 'string' && item.content) results.push(item.content)
+        const input = item.input as Record<string, unknown> | undefined
+        if (input) {
+          if (typeof input.description === 'string' && input.description) results.push(input.description)
+          if (typeof input.file_path === 'string' && input.file_path) results.push(input.file_path)
+        }
+      }
+    }
+
+    // tool_use_result
+    const tur = parsed.tool_use_result
+    if (typeof tur === 'string' && tur) {
+      results.push(tur)
+    } else if (typeof tur === 'object' && tur != null) {
+      const t = tur as Record<string, unknown>
+      if (typeof t.stdout === 'string' && t.stdout) results.push(t.stdout)
+      if (typeof t.stderr === 'string' && t.stderr) results.push(t.stderr)
+      if (typeof t.content === 'string' && t.content) results.push(t.content)
+      const f = t.file as Record<string, unknown> | undefined
+      if (f && typeof f.filePath === 'string' && f.filePath) results.push(f.filePath)
+    }
+  }
+  return results
+}
+
+// ── Structured Output Display ───────────────────────────────────────────────
+
+function toSectionTitle(key: string): string {
+  // snake_case → Title Case, camelCase → Title Case
+  return key
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+interface FindingItem {
+  severity?: string
+  file?: string
+  line?: number
+  message?: string
+}
+
+function isFindingArray(arr: unknown[]): arr is FindingItem[] {
+  if (arr.length === 0) return false
+  return arr.every(
+    (item) => typeof item === 'object' && item != null && 'message' in item && 'severity' in item,
+  )
+}
+
+function StructuredOutputDisplay({ output }: { output: Record<string, unknown> }) {
+  const entries = Object.entries(output).filter(([key]) => !key.startsWith('_'))
+  if (entries.length === 0) return null
+
+  return (
+    <Stack spacing={2}>
+      {entries.map(([key, value]) => {
+        const title = toSectionTitle(key)
+
+        // String value → heading + body
+        if (typeof value === 'string') {
+          return (
+            <Box key={key}>
+              <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                {title}
+              </Typography>
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                {value}
+              </Typography>
+            </Box>
+          )
+        }
+
+        // Array of findings (objects with severity/message)
+        if (Array.isArray(value) && isFindingArray(value)) {
+          return (
+            <Box key={key}>
+              <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                {title}
+              </Typography>
+              <Stack spacing={1}>
+                {value.map((f, i) => (
+                  <Box
+                    key={i}
+                    sx={{
+                      p: 1.5,
+                      borderRadius: 1,
+                      backgroundColor: 'background.default',
+                      border: '1px solid',
+                      borderColor: 'divider',
+                    }}
+                  >
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                      <Typography variant="body2" fontWeight={600}>
+                        {i + 1}.
+                      </Typography>
+                      {f.severity && (
+                        <Chip
+                          label={f.severity}
+                          size="small"
+                          color={
+                            f.severity === 'error' || f.severity === 'critical'
+                              ? 'error'
+                              : f.severity === 'warning'
+                                ? 'warning'
+                                : 'default'
+                          }
+                        />
+                      )}
+                      {f.file && (
+                        <Typography variant="caption" sx={monoStyle}>
+                          {f.file}{f.line != null ? `:${f.line}` : ''}
+                        </Typography>
+                      )}
+                    </Stack>
+                    {f.message && (
+                      <Typography variant="body2">{f.message}</Typography>
+                    )}
+                  </Box>
+                ))}
+              </Stack>
+            </Box>
+          )
+        }
+
+        // Plain array (strings, numbers, etc.)
+        if (Array.isArray(value)) {
+          return (
+            <Box key={key}>
+              <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                {title}
+              </Typography>
+              <Box component="ol" sx={{ m: 0, pl: 3 }}>
+                {value.map((item, i) => (
+                  <Typography component="li" variant="body2" key={i} sx={{ mb: 0.5 }}>
+                    {typeof item === 'object' ? JSON.stringify(item) : String(item)}
+                  </Typography>
+                ))}
+              </Box>
+            </Box>
+          )
+        }
+
+        // Number / boolean
+        if (typeof value === 'number' || typeof value === 'boolean') {
+          return (
+            <Box key={key}>
+              <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                {title}
+              </Typography>
+              <Typography variant="body2">{String(value)}</Typography>
+            </Box>
+          )
+        }
+
+        // Object fallback → JSON pre
+        if (typeof value === 'object' && value != null) {
+          return (
+            <Box key={key}>
+              <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                {title}
+              </Typography>
+              <Box
+                component="pre"
+                sx={{
+                  m: 0,
+                  p: 1.5,
+                  backgroundColor: 'background.default',
+                  borderRadius: 1,
+                  overflow: 'auto',
+                  ...monoStyle,
+                  fontSize: '0.78rem',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {JSON.stringify(value, null, 2)}
+              </Box>
+            </Box>
+          )
+        }
+
+        return null
+      })}
+    </Stack>
+  )
 }
 
 function formatDurationSeconds(totalSeconds: number): string {
@@ -716,14 +928,6 @@ export default function TaskDetailPage() {
                   const stageTotalTokens = (stage.tokensInput ?? 0) + (stage.tokensOutput ?? 0) + (stage.cacheReadTokens ?? 0) + (stage.cacheWriteTokens ?? 0)
 
                   const output = stage.structuredOutput as Record<string, unknown> | null
-                  const findings = output?.findings as Array<{
-                    severity?: string
-                    file?: string
-                    line?: number
-                    message?: string
-                  }> | undefined
-                  const summary = output?.summary as string | undefined
-                  const recommendation = output?.recommendation as string | undefined
                   const conditionMessage = output?._condition_message as string | undefined
 
                   items.push(
@@ -795,118 +999,46 @@ export default function TaskDetailPage() {
                             </Stack>
                           )
                         })()}
-                        {/* Summary & recommendation */}
-                        {summary && (
-                          <Typography variant="body2" sx={{ mb: 2 }}>
-                            {summary}
-                          </Typography>
-                        )}
-                        {recommendation && (
-                          <Alert severity="info" sx={{ mb: 2 }}>
-                            {recommendation}
-                          </Alert>
-                        )}
-                        {/* Findings */}
-                        {findings && findings.length > 0 && (
-                          <Stack spacing={1} sx={{ mb: 2 }}>
-                            {findings.map((f, i) => (
-                              <Box
-                                key={i}
-                                sx={{
-                                  p: 1.5,
-                                  borderRadius: 1,
-                                  backgroundColor: 'background.default',
-                                  border: '1px solid',
-                                  borderColor: 'divider',
-                                }}
-                              >
-                                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-                                  {f.severity && (
-                                    <Chip
-                                      label={f.severity}
-                                      size="small"
-                                      color={
-                                        f.severity === 'error' || f.severity === 'critical'
-                                          ? 'error'
-                                          : f.severity === 'warning'
-                                            ? 'warning'
-                                            : 'default'
-                                      }
-                                    />
-                                  )}
-                                  {f.file && (
-                                    <Typography variant="caption" sx={monoStyle}>
-                                      {f.file}{f.line ? `:${f.line}` : ''}
-                                    </Typography>
-                                  )}
-                                </Stack>
-                                {f.message && (
-                                  <Typography variant="body2">{f.message}</Typography>
-                                )}
-                              </Box>
-                            ))}
-                          </Stack>
-                        )}
-                        {/* Structured output (when no findings) */}
-                        {!findings && output && (
-                          <Box
-                            component="pre"
-                            sx={{
-                              m: 0,
-                              p: 1.5,
-                              backgroundColor: 'background.default',
-                              borderRadius: 1,
-                              overflow: 'auto',
-                              ...monoStyle,
-                              fontSize: '0.78rem',
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                            }}
-                          >
-                            {JSON.stringify(output, null, 2)}
-                          </Box>
-                        )}
-                        {/* Live output stream */}
-                        {effectiveStatus === 'EXECUTING' && stage.liveOutput && (
-                          <Box
-                            component="pre"
-                            sx={{
-                              m: 0,
-                              mt: 1,
-                              p: 1.5,
-                              backgroundColor: '#1e1e1e',
-                              color: '#d4d4d4',
-                              borderRadius: 1,
-                              overflow: 'auto',
-                              maxHeight: 400,
-                              ...monoStyle,
-                              fontSize: '0.75rem',
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                            }}
-                          >
-                            {stage.liveOutput}
-                          </Box>
-                        )}
-                        {/* Raw output fallback */}
-                        {!output && stage.rawOutput && (
-                          <Box
-                            component="pre"
-                            sx={{
-                              m: 0,
-                              p: 1.5,
-                              backgroundColor: 'background.default',
-                              borderRadius: 1,
-                              overflow: 'auto',
-                              ...monoStyle,
-                              fontSize: '0.78rem',
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                            }}
-                          >
-                            {stage.rawOutput}
-                          </Box>
-                        )}
+                        {/* Structured output */}
+                        {output && <StructuredOutputDisplay output={output} />}
+                        {/* Live output stream (parsed) */}
+                        {stage.liveOutput && (() => {
+                          const lines = parseLiveOutput(stage.liveOutput)
+                          if (lines.length === 0) return null
+                          return (
+                            <Box
+                              sx={{
+                                mt: 1,
+                                p: 1.5,
+                                backgroundColor: '#1e1e1e',
+                                color: '#d4d4d4',
+                                borderRadius: 1,
+                                overflow: 'auto',
+                                maxHeight: 400,
+                                ...monoStyle,
+                                fontSize: '0.75rem',
+                              }}
+                            >
+                              {lines.map((line, i) => (
+                                <Typography
+                                  key={i}
+                                  variant="body2"
+                                  component="div"
+                                  sx={{
+                                    color: '#d4d4d4',
+                                    ...monoStyle,
+                                    fontSize: '0.75rem',
+                                    whiteSpace: 'pre-wrap',
+                                    wordBreak: 'break-word',
+                                    mb: 0.5,
+                                  }}
+                                >
+                                  {line}
+                                </Typography>
+                              ))}
+                            </Box>
+                          )
+                        })()}
                       </AccordionDetails>
                     </Accordion>
                   )
