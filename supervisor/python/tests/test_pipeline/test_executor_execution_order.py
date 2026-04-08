@@ -32,6 +32,9 @@ from aquarco_supervisor.task_queue import TaskQueue
 @pytest.fixture
 def mock_db() -> AsyncMock:
     db = AsyncMock(spec=Database)
+    db.fetch_one = AsyncMock(
+        return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"}
+    )
     return db
 
 
@@ -156,7 +159,7 @@ class TestExecutionOrderInitialization:
         mock_tq.get_task = AsyncMock(return_value=mock_task)
 
         mock_db.fetch_one = AsyncMock(
-            return_value={"clone_dir": "/repos/test", "branch": "main"}
+            return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"}
         )
 
         with patch(
@@ -210,7 +213,7 @@ class TestExecutionOrderInitialization:
         mock_tq.get_max_execution_order = AsyncMock(return_value=5)
 
         mock_db.fetch_one = AsyncMock(
-            return_value={"clone_dir": "/repos/test", "branch": "main"}
+            return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"}
         )
 
         with patch(
@@ -267,7 +270,7 @@ class TestExecutionOrderCleanup:
         mock_tq.get_task = AsyncMock(return_value=mock_task)
 
         mock_db.fetch_one = AsyncMock(
-            return_value={"clone_dir": "/repos/test", "branch": "main"}
+            return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"}
         )
 
         with patch(
@@ -311,7 +314,7 @@ class TestExecutionOrderCleanup:
         mock_tq.get_task = AsyncMock(return_value=mock_task)
 
         mock_db.fetch_one = AsyncMock(
-            return_value={"clone_dir": "/repos/test", "branch": "main"}
+            return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"}
         )
 
         # Make the stage execution fail via StageError so the pipeline fails
@@ -433,7 +436,7 @@ class TestParallelExecutionOrder:
         executor._execution_order["task-1"] = 0
 
         mock_db.fetch_one = AsyncMock(
-            return_value={"clone_dir": "/repos/test", "branch": "main"}
+            return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"}
         )
 
         agents = ["agent-a", "agent-b"]

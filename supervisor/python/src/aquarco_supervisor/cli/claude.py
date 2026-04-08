@@ -40,7 +40,7 @@ _POST_RESULT_GRACE_SECONDS = 90.0
 _TAIL_POLL_INTERVAL = 0.5
 
 # Directory for debug/stderr logs (overridable in tests).
-_LOG_DIR = Path("/var/log/aquarco")
+LOG_DIR = Path("/var/log/aquarco")
 
 # Maximum bytes to read from the NDJSON stdout file for raw_output (128 KB).
 _RAW_OUTPUT_MAX_BYTES = 131072
@@ -264,7 +264,7 @@ def _read_file_tail(path: Path, max_bytes: int = _RAW_OUTPUT_MAX_BYTES) -> str:
         return ""
 
 
-def _scan_file_for_rate_limit_event(path: Path) -> str | None:
+def scan_file_for_rate_limit_event(path: Path) -> str | None:
     """Stream-scan *path* in 64 KB chunks for a ``rate_limit_event`` NDJSON line.
 
     Returns the raw JSON line string if found, ``None`` otherwise.  Avoids
@@ -363,7 +363,7 @@ async def execute_claude(
     # Named stdout file in the log directory.  Kept after execute_claude returns
     # so callers can reference it for debugging; deleted when the task is closed
     # via close_task_resources().
-    stdout_file = _LOG_DIR / f"claude-raw-{safe_id}-stage{stage_num}.ndjson"
+    stdout_file = LOG_DIR / f"claude-raw-{safe_id}-stage{stage_num}.ndjson"
 
     try:
         with os.fdopen(fd, "w") as f:
@@ -421,10 +421,10 @@ async def execute_claude(
                 args.extend(["--append-system-prompt", _format_schema_prompt(output_schema)])
                 args.extend(["--json-schema", json.dumps(output_schema)])
 
-        debug_log = _LOG_DIR / f"claude-{safe_id}-stage{stage_num}.log"
+        debug_log = LOG_DIR / f"claude-{safe_id}-stage{stage_num}.log"
         debug_log.parent.mkdir(parents=True, exist_ok=True)
 
-        stderr_log = _LOG_DIR / f"claude-{safe_id}-stage{stage_num}.stderr"
+        stderr_log = LOG_DIR / f"claude-{safe_id}-stage{stage_num}.stderr"
         args.extend(["--debug-file", str(debug_log)])
 
         log.info(
@@ -444,10 +444,14 @@ async def execute_claude(
         # The subprocess writes its stdout to stdout_file on disk.  Close the
         # supervisor's file handle after fork so the child owns the only writer.
         # _tail_file reads the file on disk (not via fd) so closing here is safe.
+        # Use os.open with 0o600 for stdout/stderr to restrict permissions —
+        # NDJSON output may contain sensitive task data.
+        stdout_fd = os.open(str(stdout_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        stderr_fd = os.open(str(stderr_log), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with (
             open(context_file) as stdin_f,
-            open(stdout_file, "w") as stdout_f,
-            open(stderr_log, "w") as stderr_f,
+            os.fdopen(stdout_fd, "w") as stdout_f,
+            os.fdopen(stderr_fd, "w") as stderr_f,
         ):
             proc = await asyncio.create_subprocess_exec(
                 *args,

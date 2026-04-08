@@ -49,7 +49,7 @@ def _make_temp_file(path: Path) -> tuple[int, str]:
 def _patch_log_dir(tmp_path: Path) -> Any:
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
-    with patch.object(claude_mod, "_LOG_DIR", log_dir):
+    with patch.object(claude_mod, "LOG_DIR", log_dir):
         yield
 
 
@@ -387,7 +387,7 @@ async def test_execute_claude_resume_without_model(tmp_path: Path) -> None:
 async def test_executor_passes_model_from_registry(sample_pipelines: Any) -> None:
     """_execute_agent resolves model from registry and passes to execute_claude."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
 
     mock_registry = MagicMock()
@@ -421,7 +421,7 @@ async def test_executor_passes_model_from_registry(sample_pipelines: Any) -> Non
 async def test_executor_passes_none_model_when_not_set(sample_pipelines: Any) -> None:
     """_execute_agent passes model=None when registry returns None."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
 
     mock_registry = MagicMock()
@@ -454,7 +454,7 @@ async def test_executor_passes_none_model_when_not_set(sample_pipelines: Any) ->
 async def test_executor_uses_registry_model(sample_pipelines: Any) -> None:
     """_execute_agent uses registry.get_agent_model for model selection."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
 
     mock_registry = MagicMock()

@@ -181,10 +181,12 @@ def test_compare_complexity_invalid_expected() -> None:
 # --- PipelineExecutor._resolve_clone_dir ---
 
 @pytest.mark.asyncio
-async def test_resolve_clone_dir_found(sample_pipelines: Any) -> None:
-    """Returns clone_dir when the DB row is found."""
+async def test_resolve_clone_dir_found(sample_pipelines: Any, tmp_path: Any) -> None:
+    """Returns clone_dir when the DB row is found and path exists."""
+    repo_dir = tmp_path / "my-repo"
+    repo_dir.mkdir()
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/my-repo", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": str(repo_dir), "branch": "main", "clone_status": "ready"})
 
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_registry = AsyncMock()
@@ -192,7 +194,7 @@ async def test_resolve_clone_dir_found(sample_pipelines: Any) -> None:
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
     clone_dir = await executor._resolve_clone_dir("task-001")
 
-    assert clone_dir == "/repos/my-repo"
+    assert clone_dir == str(repo_dir)
 
 
 @pytest.mark.asyncio
@@ -208,6 +210,42 @@ async def test_resolve_clone_dir_not_found_raises(sample_pipelines: Any) -> None
 
     with pytest.raises(PipelineError, match="No clone_dir found for task task-999"):
         await executor._resolve_clone_dir("task-999")
+
+
+@pytest.mark.asyncio
+async def test_resolve_clone_dir_not_ready_raises(sample_pipelines: Any, tmp_path: Any) -> None:
+    """Raises PipelineError when clone_status is not 'ready'."""
+    repo_dir = tmp_path / "my-repo"
+    repo_dir.mkdir()
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(
+        return_value={"clone_dir": str(repo_dir), "branch": "main", "clone_status": "cloning"}
+    )
+
+    mock_tq = AsyncMock(spec=TaskQueue)
+    mock_registry = AsyncMock()
+
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+
+    with pytest.raises(PipelineError, match="Repository not ready.*clone_status=cloning"):
+        await executor._resolve_clone_dir("task-001")
+
+
+@pytest.mark.asyncio
+async def test_resolve_clone_dir_missing_path_raises(sample_pipelines: Any, tmp_path: Any) -> None:
+    """Raises PipelineError when clone_dir path does not exist on disk."""
+    mock_db = AsyncMock(spec=Database)
+    mock_db.fetch_one = AsyncMock(
+        return_value={"clone_dir": str(tmp_path / "nonexistent"), "branch": "main", "clone_status": "ready"}
+    )
+
+    mock_tq = AsyncMock(spec=TaskQueue)
+    mock_registry = AsyncMock()
+
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+
+    with pytest.raises(PipelineError, match="Clone directory missing"):
+        await executor._resolve_clone_dir("task-001")
 
 
 # --- PipelineExecutor._get_repo_slug ---
@@ -311,7 +349,7 @@ async def test_execute_pipeline_no_pipeline_name_uses_task_pipeline(
 ) -> None:
     """When pipeline_name is empty, reads pipeline from the task record."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_stage_number_for_id = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
@@ -506,7 +544,7 @@ async def test_get_ahead_count_returns_zero_on_non_numeric() -> None:
 async def test_execute_stage_success(sample_pipelines: Any) -> None:
     """_execute_stage selects agent, runs it, and returns output."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_registry = AsyncMock()
     mock_registry.select_agent = AsyncMock(return_value="impl-agent")
@@ -536,7 +574,7 @@ async def test_execute_stage_success(sample_pipelines: Any) -> None:
 async def test_execute_stage_failure_records_and_raises(sample_pipelines: Any) -> None:
     """_execute_stage records failure and raises StageError on agent error."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_registry = AsyncMock()
     mock_registry.select_agent = AsyncMock(return_value="impl-agent")
@@ -565,7 +603,7 @@ async def test_execute_stage_failure_records_and_raises(sample_pipelines: Any) -
 async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
     """Full pipeline execution with stages, branch setup, and PR creation."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_stage_number_for_id = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
@@ -619,7 +657,7 @@ async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
 async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) -> None:
     """Pipeline resumes from checkpoint, skipping completed stages."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_stage_number_for_id = AsyncMock(return_value=0)  # stage_number for the last completed stage
     mock_tq.get_task_context = AsyncMock(return_value={})
@@ -677,7 +715,7 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
 async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> None:
     """When a required stage fails, the task is postponed for retry."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_stage_number_for_id = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
@@ -727,7 +765,7 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
 async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) -> None:
     """When an optional stage fails, pipeline continues to next stage."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_stage_number_for_id = AsyncMock(return_value=None)
     mock_tq.get_task_context = AsyncMock(return_value={})
@@ -832,7 +870,7 @@ def _make_registry_mock() -> MagicMock:
 async def test_execute_planned_stage_fresh_run(sample_pipelines: Any) -> None:
     """When get_latest_stage_run returns None, the stage executes with run=1."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_latest_stage_run = AsyncMock(return_value=None)
     mock_registry = _make_registry_mock()
@@ -860,7 +898,7 @@ async def test_execute_planned_stage_fresh_run(sample_pipelines: Any) -> None:
 async def test_execute_planned_stage_retry_after_failure(sample_pipelines: Any) -> None:
     """When latest run has status=failed, creates a retry row with run=latest+1."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_latest_stage_run = AsyncMock(
         return_value={"id": 10, "status": "failed", "run": 1, "error_message": "boom", "session_id": None}
@@ -895,7 +933,7 @@ async def test_execute_planned_stage_retry_after_failure(sample_pipelines: Any) 
 async def test_execute_planned_stage_retry_after_rate_limited(sample_pipelines: Any) -> None:
     """When latest run has status=rate_limited, creates a retry row with run=latest+1."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_latest_stage_run = AsyncMock(
         return_value={"id": 15, "status": "rate_limited", "run": 2, "error_message": "429", "session_id": None}
@@ -927,7 +965,7 @@ async def test_execute_planned_stage_retry_after_rate_limited(sample_pipelines: 
 async def test_execute_planned_stage_reuse_pending_run(sample_pipelines: Any) -> None:
     """When latest run has status=pending, reuses that run number without creating a new row."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_tq.get_latest_stage_run = AsyncMock(
         return_value={"id": 30, "status": "pending", "run": 3, "error_message": None, "session_id": None}
@@ -964,7 +1002,7 @@ async def test_close_task_resources_removes_worktree(
     """close_task_resources removes the worktree directory."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(
-        return_value={"clone_dir": str(tmp_path / "clone"), "branch": "main"}
+        return_value={"clone_dir": str(tmp_path / "clone"), "branch": "main", "clone_status": "ready"}
     )
     mock_tq = AsyncMock(spec=TaskQueue)
     executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
@@ -1020,7 +1058,7 @@ async def test_close_task_resources_fallback_rmtree(
     """close_task_resources falls back to rmtree when git worktree remove fails."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(
-        return_value={"clone_dir": str(tmp_path / "clone"), "branch": "main"}
+        return_value={"clone_dir": str(tmp_path / "clone"), "branch": "main", "clone_status": "ready"}
     )
     mock_tq = AsyncMock(spec=TaskQueue)
     executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)

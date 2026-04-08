@@ -21,7 +21,7 @@ async def test_execute_agent_returns_structured_with_agent_name_and_raw(
     """_execute_agent returns structured output with _agent_name and _raw_output."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(
-        return_value={"clone_dir": "/repos/test", "branch": "main"}
+        return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"}
     )
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_registry = MagicMock()
@@ -59,7 +59,7 @@ async def test_execute_agent_uses_registry(sample_pipelines: Any) -> None:
     """_execute_agent uses the registry for config lookups."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(
-        return_value={"clone_dir": "/repos/test", "branch": "main"}
+        return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"}
     )
     mock_tq = AsyncMock(spec=TaskQueue)
 
@@ -131,7 +131,7 @@ async def test_execute_agent_passes_output_schema(sample_pipelines: Any) -> None
     """_execute_agent passes output_schema from registry to execute_claude."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(
-        return_value={"clone_dir": "/repos/test", "branch": "main"}
+        return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"}
     )
     mock_tq = AsyncMock(spec=TaskQueue)
 

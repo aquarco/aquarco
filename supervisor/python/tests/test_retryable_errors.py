@@ -206,10 +206,10 @@ def test_is_overloaded_no_false_positive_on_clean_log(tmp_path: Any) -> None:
 
 @pytest.fixture(autouse=True)
 def _patch_log_dir(tmp_path: Path) -> Any:
-    """Redirect _LOG_DIR to tmp_path so tests don't need /var/log/aquarco."""
+    """Redirect LOG_DIR to tmp_path so tests don't need /var/log/aquarco."""
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
-    with patch.object(claude_mod, "_LOG_DIR", log_dir):
+    with patch.object(claude_mod, "LOG_DIR", log_dir):
         yield
 
 

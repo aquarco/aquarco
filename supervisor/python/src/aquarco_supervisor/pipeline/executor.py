@@ -10,8 +10,8 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from ..cli.claude import _LOG_DIR as _CLAUDE_LOG_DIR
-from ..cli.claude import _scan_file_for_rate_limit_event, execute_claude
+from ..cli.claude import LOG_DIR as _CLAUDE_LOG_DIR
+from ..cli.claude import scan_file_for_rate_limit_event, execute_claude
 from ..config import get_pipeline_categories, get_pipeline_config
 from .conditions import ConditionResult, evaluate_ai_condition, evaluate_conditions
 from ..database import Database
@@ -1163,7 +1163,7 @@ class PipelineExecutor:
                     continue
             # Slow path: stream-scan the full file if not found in tail.
             if rate_event_line is None and claude_output.raw_output_path:
-                rate_event_line = _scan_file_for_rate_limit_event(
+                rate_event_line = scan_file_for_rate_limit_event(
                     Path(claude_output.raw_output_path)
                 )
             if rate_event_line:

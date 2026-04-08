@@ -61,7 +61,7 @@ def _make_temp_file(path: Path) -> tuple[int, str]:
 def _patch_log_dir(tmp_path: Path) -> Any:
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
-    with patch.object(claude_mod, "_LOG_DIR", log_dir):
+    with patch.object(claude_mod, "LOG_DIR", log_dir):
         yield
 
 

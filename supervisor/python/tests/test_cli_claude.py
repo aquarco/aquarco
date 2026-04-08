@@ -17,8 +17,10 @@ from aquarco_supervisor.cli.claude import (
     _extract_json,
     _find_result_message,
     _parse_output,
+    _read_file_tail,
     _tail_file,
     execute_claude,
+    scan_file_for_rate_limit_event,
 )
 from aquarco_supervisor.cli import claude as claude_mod
 from aquarco_supervisor.exceptions import AgentExecutionError, AgentTimeoutError
@@ -26,10 +28,10 @@ from aquarco_supervisor.exceptions import AgentExecutionError, AgentTimeoutError
 
 @pytest.fixture(autouse=True)
 def _patch_log_dir(tmp_path: Path) -> Any:
-    """Redirect _LOG_DIR to tmp_path so tests don't need /var/log/aquarco."""
+    """Redirect LOG_DIR to tmp_path so tests don't need /var/log/aquarco."""
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
-    with patch.object(claude_mod, "_LOG_DIR", log_dir):
+    with patch.object(claude_mod, "LOG_DIR", log_dir):
         yield
 
 
@@ -968,3 +970,131 @@ async def test_execute_claude_no_model_flag_when_none(tmp_path: Any) -> None:
 
     args_str = " ".join(str(a) for a in captured_args)
     assert "--model" not in args_str
+
+
+# ===========================================================================
+# _read_file_tail tests
+# ===========================================================================
+
+
+def test_read_file_tail_empty_file(tmp_path: Path) -> None:
+    """Returns empty string for an empty file."""
+    f = tmp_path / "empty.ndjson"
+    f.write_bytes(b"")
+    assert _read_file_tail(f) == ""
+
+
+def test_read_file_tail_missing_file(tmp_path: Path) -> None:
+    """Returns empty string for a missing file."""
+    assert _read_file_tail(tmp_path / "nonexistent.ndjson") == ""
+
+
+def test_read_file_tail_small_file(tmp_path: Path) -> None:
+    """Returns full content when file is smaller than max_bytes."""
+    content = "line1\nline2\nline3\n"
+    f = tmp_path / "small.ndjson"
+    f.write_text(content)
+    assert _read_file_tail(f) == content
+
+
+def test_read_file_tail_large_file(tmp_path: Path) -> None:
+    """Returns only the last max_bytes of a large file."""
+    # Create a file larger than max_bytes
+    max_bytes = 256
+    prefix = "A" * 500  # more than max_bytes
+    suffix = "TAIL_DATA_HERE\n"
+    f = tmp_path / "large.ndjson"
+    f.write_text(prefix + suffix)
+    result = _read_file_tail(f, max_bytes=max_bytes)
+    assert len(result.encode("utf-8")) <= max_bytes
+    assert "TAIL_DATA_HERE" in result
+
+
+def test_read_file_tail_multibyte_boundary(tmp_path: Path) -> None:
+    """Handles multibyte characters at the seek boundary gracefully."""
+    # Write content with multibyte characters
+    content = "\u00e9" * 200  # each char is 2 bytes in UTF-8
+    f = tmp_path / "multibyte.ndjson"
+    f.write_text(content, encoding="utf-8")
+    # Read with a small max_bytes that might split a multibyte char
+    result = _read_file_tail(f, max_bytes=50)
+    # Should not raise; replacement chars are acceptable at boundary
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+# ===========================================================================
+# scan_file_for_rate_limit_event tests
+# ===========================================================================
+
+
+def test_scan_rate_limit_event_not_found(tmp_path: Path) -> None:
+    """Returns None when no rate_limit_event exists in the file."""
+    f = tmp_path / "output.ndjson"
+    f.write_text(
+        '{"type": "result", "data": "ok"}\n'
+        '{"type": "message", "text": "hello"}\n'
+    )
+    assert scan_file_for_rate_limit_event(f) is None
+
+
+def test_scan_rate_limit_event_missing_file(tmp_path: Path) -> None:
+    """Returns None for a missing file."""
+    assert scan_file_for_rate_limit_event(tmp_path / "nonexistent.ndjson") is None
+
+
+def test_scan_rate_limit_event_empty_file(tmp_path: Path) -> None:
+    """Returns None for an empty file."""
+    f = tmp_path / "empty.ndjson"
+    f.write_bytes(b"")
+    assert scan_file_for_rate_limit_event(f) is None
+
+
+def test_scan_rate_limit_event_at_start(tmp_path: Path) -> None:
+    """Finds rate_limit_event at the start of the file."""
+    event = '{"type": "rate_limit_event", "retry_after": 60}'
+    f = tmp_path / "output.ndjson"
+    f.write_text(event + "\n" + '{"type": "result"}\n')
+    result = scan_file_for_rate_limit_event(f)
+    assert result is not None
+    assert "rate_limit_event" in result
+
+
+def test_scan_rate_limit_event_at_end(tmp_path: Path) -> None:
+    """Finds rate_limit_event at the end of the file."""
+    f = tmp_path / "output.ndjson"
+    lines = ['{"type": "message", "text": "hello"}\n'] * 20
+    lines.append('{"type": "rate_limit_event", "retry_after": 30}\n')
+    f.write_text("".join(lines))
+    result = scan_file_for_rate_limit_event(f)
+    assert result is not None
+    assert "rate_limit_event" in result
+
+
+def test_scan_rate_limit_event_in_middle(tmp_path: Path) -> None:
+    """Finds rate_limit_event in the middle of the file."""
+    f = tmp_path / "output.ndjson"
+    lines = [
+        '{"type": "message", "text": "before"}\n',
+        '{"type": "rate_limit_event", "retry_after": 10}\n',
+        '{"type": "message", "text": "after"}\n',
+    ]
+    f.write_text("".join(lines))
+    result = scan_file_for_rate_limit_event(f)
+    assert result is not None
+    parsed = json.loads(result)
+    assert parsed["type"] == "rate_limit_event"
+    assert parsed["retry_after"] == 10
+
+
+def test_scan_rate_limit_event_with_invalid_json_line(tmp_path: Path) -> None:
+    """Skips lines containing 'rate_limit_event' that are not valid JSON."""
+    f = tmp_path / "output.ndjson"
+    f.write_text(
+        'this line mentions rate_limit_event but is not JSON\n'
+        '{"type": "rate_limit_event", "retry_after": 5}\n'
+    )
+    result = scan_file_for_rate_limit_event(f)
+    assert result is not None
+    parsed = json.loads(result)
+    assert parsed["type"] == "rate_limit_event"

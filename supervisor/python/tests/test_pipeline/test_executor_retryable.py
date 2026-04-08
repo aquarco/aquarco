@@ -80,7 +80,7 @@ def _make_executor(
 ) -> tuple[PipelineExecutor, AsyncMock, AsyncMock]:
     """Build a PipelineExecutor with minimal mocks for running-phase tests."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_db.execute = AsyncMock()
 
     mock_tq = AsyncMock(spec=TaskQueue)
