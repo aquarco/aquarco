@@ -791,7 +791,7 @@ async def test_tail_file_timeout_kills_process(tmp_path: Any) -> None:
 @pytest.mark.asyncio
 async def test_tail_file_post_result_grace_terminates(tmp_path: Any) -> None:
     """After result event, process is terminated after grace period."""
-    from aquarco_supervisor.cli import claude as claude_mod
+    from aquarco_supervisor.cli import file_tailer as tailer_mod
 
     stdout_file = tmp_path / "stdout.ndjson"
     _write_ndjson_file(stdout_file, {"type": "result", "result": "done"})
@@ -805,8 +805,8 @@ async def test_tail_file_post_result_grace_terminates(tmp_path: Any) -> None:
     proc.wait = AsyncMock(side_effect=fake_wait)
 
     # Use very short grace period for testing
-    original_grace = claude_mod._POST_RESULT_GRACE_SECONDS
-    claude_mod._POST_RESULT_GRACE_SECONDS = 0.1
+    original_grace = tailer_mod._POST_RESULT_GRACE_SECONDS
+    tailer_mod._POST_RESULT_GRACE_SECONDS = 0.1
     try:
         tail_lines, result_line, result_seen = await _tail_file(
             stdout_file, proc,
@@ -814,7 +814,7 @@ async def test_tail_file_post_result_grace_terminates(tmp_path: Any) -> None:
             task_id="t1", stage_num=0,
         )
     finally:
-        claude_mod._POST_RESULT_GRACE_SECONDS = original_grace
+        tailer_mod._POST_RESULT_GRACE_SECONDS = original_grace
 
     assert result_seen is True
     assert result_line is not None
