@@ -69,6 +69,15 @@ if cur.fetchone()[0] is None:
     sys.exit(0)
 
 # Schema exists. Check if consolidated migration is already tracked.
+# Guard: _yoyo_migration may not exist yet (e.g. database bootstrapped from a dump).
+cur.execute("SELECT to_regclass('public._yoyo_migration')")
+if cur.fetchone()[0] is None:
+    # Yoyo tracking table doesn't exist — yoyo will create it on first run.
+    # Nothing to mark; exit cleanly.
+    cur.close()
+    conn.close()
+    sys.exit(0)
+
 cur.execute(
     "SELECT 1 FROM public._yoyo_migration "
     "WHERE migration_id = '000_consolidated_init'"
@@ -80,10 +89,12 @@ if cur.fetchone():
     sys.exit(0)
 
 # Mark the consolidated migration as applied so yoyo skips it.
-migration_hash = hashlib.md5(b"000_consolidated_init").hexdigest()
+# Use SHA-256 to match yoyo-migrations' internal hashing algorithm.
+migration_hash = hashlib.sha256(b"000_consolidated_init").hexdigest()
 cur.execute(
     "INSERT INTO public._yoyo_migration (migration_hash, migration_id, applied_at_utc) "
-    "VALUES (%s, %s, NOW())",
+    "VALUES (%s, %s, NOW()) "
+    "ON CONFLICT (migration_hash) DO NOTHING",
     (migration_hash, "000_consolidated_init")
 )
 print("Marked 000_consolidated_init as applied (existing deployment detected)")
