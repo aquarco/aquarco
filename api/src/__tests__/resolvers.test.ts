@@ -151,6 +151,51 @@ describe('mapStage', () => {
     expect(result.tokensOutput).toBeNull()
     expect(result.errorMessage).toBeNull()
   })
+
+  // ── executionOrder mapping (042_add_execution_order) ───────────────────────
+
+  it('should map execution_order to executionOrder when present', () => {
+    const result = mapStage({ ...baseRow, execution_order: 5 })
+    expect(result.executionOrder).toBe(5)
+  })
+
+  it('should return null for executionOrder when execution_order is null', () => {
+    const result = mapStage({ ...baseRow, execution_order: null })
+    expect(result.executionOrder).toBeNull()
+  })
+
+  it('should return null for executionOrder when execution_order is undefined', () => {
+    const result = mapStage({ ...baseRow, execution_order: undefined })
+    expect(result.executionOrder).toBeNull()
+  })
+
+  it('should handle executionOrder of 0 (first stage)', () => {
+    const result = mapStage({ ...baseRow, execution_order: 0 })
+    // 0 is falsy but should be mapped as 0, not null
+    expect(result.executionOrder).toBe(0)
+  })
+
+  it('should default iteration and run to 1 when null', () => {
+    const result = mapStage({
+      ...baseRow,
+      iteration: null,
+      run: null,
+    })
+    expect(result.iteration).toBe(1)
+    expect(result.run).toBe(1)
+  })
+
+  it('should preserve explicit iteration and run values', () => {
+    const result = mapStage({
+      ...baseRow,
+      iteration: 3,
+      run: 2,
+      execution_order: 7,
+    })
+    expect(result.iteration).toBe(3)
+    expect(result.run).toBe(2)
+    expect(result.executionOrder).toBe(7)
+  })
 })
 
 // ── Query.task ─────────────────────────────────────────────────────────────────
