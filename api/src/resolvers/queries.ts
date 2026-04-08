@@ -1,308 +1,34 @@
+/**
+ * GraphQL Query assembler and shared mapper functions.
+ *
+ * Combines domain-specific query resolvers into a single Query object.
+ * Individual domains live in task-queries.ts and repo-queries.ts.
+ *
+ * Also exports shared mapper functions (mapRepository, mapStage, mapAgentDefinition,
+ * fetchAgentWithOverrides, getDrainStatus) used by mutations and tests.
+ */
+
 import { Pool } from 'pg'
 import { Context } from '../context.js'
-import { mapTask } from './mappers.js'
-
-// GraphQL enum values are UPPER_CASE; DB stores lower_case
-function toDbEnum(value: string | null | undefined): string | null {
-  return value ? value.toLowerCase() : null
-}
+import { taskQueries } from './task-queries.js'
+import { repoQueries } from './repo-queries.js'
 
 export const Query = {
-  async tasks(
-    _: unknown,
-    args: {
-      status?: string | null
-      repository?: string | null
-      limit?: number | null
-      offset?: number | null
-    },
-    ctx: Context
-  ) {
-    const conditions: string[] = []
-    const params: unknown[] = []
-    let idx = 1
+  // Task queries
+  ...taskQueries,
 
-    if (args.status) {
-      conditions.push(`status = $${idx++}`)
-      params.push(toDbEnum(args.status))
-    }
-    if (args.repository) {
-      conditions.push(`repository = $${idx++}`)
-      params.push(args.repository)
-    }
+  // Repository, agent, auth, pipeline queries
+  ...repoQueries,
 
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-
-    const countResult = await ctx.pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM tasks ${where}`,
-      params
-    )
-    const totalCount = parseInt(countResult.rows[0].count, 10)
-
-    const limit = args.limit ?? 50
-    const offset = args.offset ?? 0
-
-    const dataResult = await ctx.pool.query<Record<string, unknown>>(
-      `SELECT * FROM tasks ${where} ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`,
-      [...params, limit, offset]
-    )
-
-    return {
-      nodes: dataResult.rows.map(mapTask),
-      totalCount,
-    }
-  },
-
-  async task(_: unknown, args: { id: string }, ctx: Context) {
-    const result = await ctx.pool.query<Record<string, unknown>>(
-      'SELECT * FROM tasks WHERE id = $1',
-      [args.id]
-    )
-    if (result.rows.length === 0) return null
-    return mapTask(result.rows[0])
-  },
-
-  async repositories(_: unknown, __: unknown, ctx: Context) {
-    const result = await ctx.pool.query<Record<string, unknown>>(
-      'SELECT * FROM repositories ORDER BY name ASC'
-    )
-    return result.rows.map(mapRepository)
-  },
-
-  async repository(_: unknown, args: { name: string }, ctx: Context) {
-    const result = await ctx.pool.query<Record<string, unknown>>(
-      'SELECT * FROM repositories WHERE name = $1',
-      [args.name]
-    )
-    if (result.rows.length === 0) return null
-    return mapRepository(result.rows[0])
-  },
-
-  async agentInstances(_: unknown, __: unknown, ctx: Context) {
-    const result = await ctx.pool.query<Record<string, unknown>>(
-      'SELECT * FROM agent_instances ORDER BY agent_name ASC'
-    )
-    return result.rows.map((row) => ({
-      agentName: row.agent_name,
-      activeCount: row.active_count,
-      totalExecutions: row.total_executions,
-      totalTokensUsed: row.total_tokens_used,
-      lastExecutionAt: row.last_execution_at ?? null,
-    }))
-  },
-
-  async globalAgents(_: unknown, __: unknown, ctx: Context) {
-    const result = await ctx.pool.query<Record<string, unknown>>(
-      `SELECT
-         ad.name, ad.version, ad.description, ad.spec, ad.source,
-         COALESCE(ad.agent_group, 'pipeline') AS agent_group,
-         COALESCE(ao.is_disabled, false) AS is_disabled,
-         ao.modified_spec,
-         COALESCE(ai.active_count, 0) AS active_count,
-         COALESCE(ai.total_executions, 0) AS total_executions,
-         COALESCE(ai.total_tokens_used, 0) AS total_tokens_used,
-         ai.last_execution_at
-       FROM agent_definitions ad
-       LEFT JOIN agent_overrides ao
-         ON ao.agent_name = ad.name AND ao.scope = 'global'
-       LEFT JOIN agent_instances ai
-         ON ai.agent_name = ad.name
-       WHERE ad.is_active = true
-         AND (ad.source = 'default' OR ad.source LIKE 'global:%')
-       ORDER BY ad.name ASC`
-    )
-    return result.rows.map(mapAgentDefinition)
-  },
-
-  async pipelineStatus(_: unknown, args: { taskId: string }, ctx: Context) {
-    const taskResult = await ctx.pool.query<Record<string, unknown>>(
-      'SELECT * FROM tasks WHERE id = $1',
-      [args.taskId]
-    )
-    if (taskResult.rows.length === 0) return null
-    const task = taskResult.rows[0]
-
-    const stageRows = await ctx.loaders.stagesByTaskLoader.load(args.taskId)
-    const stages = stageRows.map((row) =>
-      mapStage(row as unknown as Record<string, unknown>)
-    )
-    const uniqueStageNumbers = new Set(stageRows.map((r) => r.stage_number))
-    const totalStages = uniqueStageNumbers.size
-
-    return {
-      taskId: task.id,
-      pipeline: task.pipeline ?? null,
-      lastCompletedStageId: task.last_completed_stage ?? null,
-      totalStages,
-      stages,
-      status: (task.status as string).toUpperCase(),
-    }
-  },
-
-  async githubAuthStatus() {
-    const { getAuthStatus } = await import('../github-auth.js')
-    return getAuthStatus()
-  },
-
-  async githubRepositories() {
-    const { listUserRepos } = await import('../github-auth.js')
-    return listUserRepos()
-  },
-
-  async githubBranches(_: unknown, args: { owner: string; repo: string }) {
-    const { listRepoBranches } = await import('../github-auth.js')
-    return listRepoBranches(args.owner, args.repo)
-  },
-
-  async claudeAuthStatus() {
-    const { getClaudeAuthStatus } = await import('../claude-auth.js')
-    return getClaudeAuthStatus()
-  },
-
-  async pipelineDefinitions(_: unknown, __: unknown, ctx: Context) {
-    const result = await ctx.pool.query<Record<string, unknown>>(
-      `SELECT name, version, stages, categories
-       FROM pipeline_definitions
-       WHERE is_active = true
-       ORDER BY name ASC`
-    )
-    return result.rows.map((row) => {
-      const rawStages = (row.stages as Array<Record<string, unknown>>) ?? []
-      return {
-        name: row.name,
-        version: row.version,
-        categories: row.categories ?? {},
-        stages: rawStages.map((s) => {
-          const conditions = (s.conditions as Array<Record<string, unknown>>) ?? []
-          return {
-            name: s.name ?? '',
-            category: s.category as string,
-            required: s.required ?? true,
-            conditions: conditions.map((c) => {
-              if (c.simple !== undefined) {
-                return {
-                  type: 'simple',
-                  expression: String(c.simple),
-                  onYes: c.yes !== undefined && c.yes !== null ? String(c.yes) : null,
-                  onNo: c.no !== undefined && c.no !== null ? String(c.no) : null,
-                  maxRepeats: c.maxRepeats !== undefined && c.maxRepeats !== null ? Number(c.maxRepeats) : null,
-                }
-              }
-              if (c.ai !== undefined) {
-                return {
-                  type: 'ai',
-                  expression: String(c.ai),
-                  onYes: c.yes !== undefined && c.yes !== null ? String(c.yes) : null,
-                  onNo: c.no !== undefined && c.no !== null ? String(c.no) : null,
-                  maxRepeats: c.maxRepeats !== undefined && c.maxRepeats !== null ? Number(c.maxRepeats) : null,
-                }
-              }
-              return {
-                type: 'unknown',
-                expression: JSON.stringify(c),
-                onYes: null,
-                onNo: null,
-                maxRepeats: null,
-              }
-            }),
-          }
-        }),
-      }
-    })
-  },
-
-  async dashboardStats(_: unknown, __: unknown, ctx: Context) {
-    const [totals, byPipeline, byRepo, agents, tokens, cost] = await Promise.all([
-      ctx.pool.query<Record<string, unknown>>(`
-        SELECT
-          COUNT(*) FILTER (WHERE TRUE) AS total,
-          COUNT(*) FILTER (WHERE status = 'pending') AS pending,
-          COUNT(*) FILTER (WHERE status = 'executing') AS executing,
-          COUNT(*) FILTER (WHERE status = 'completed') AS completed,
-          COUNT(*) FILTER (WHERE status = 'failed') AS failed,
-          COUNT(*) FILTER (WHERE status = 'blocked') AS blocked
-        FROM tasks
-      `),
-      ctx.pool.query<Record<string, unknown>>(
-        `SELECT COALESCE(pipeline, 'feature-pipeline') AS pipeline, COUNT(*) AS count FROM tasks GROUP BY COALESCE(pipeline, 'feature-pipeline')`
-      ),
-      ctx.pool.query<Record<string, unknown>>(
-        'SELECT repository, COUNT(*) AS count FROM tasks GROUP BY repository'
-      ),
-      ctx.pool.query<{ count: string }>(
-        "SELECT COUNT(*) AS count FROM agent_instances WHERE active_count > 0"
-      ),
-      ctx.pool.query<{ total: string }>(`
-        SELECT COALESCE(SUM(
-          COALESCE(tokens_input, 0) + COALESCE(tokens_output, 0) +
-          COALESCE(cache_read_tokens, 0) + COALESCE(cache_write_tokens, 0)
-        ), 0) AS total
-        FROM stages
-        WHERE started_at >= CURRENT_DATE
-      `),
-      ctx.pool.query<{ total: string }>(`
-        SELECT COALESCE(SUM(cost_usd), 0) AS total
-        FROM stages
-        WHERE started_at >= CURRENT_DATE
-      `),
-    ])
-
-    const t = totals.rows[0]
-    return {
-      totalTasks: parseInt(t.total as string, 10),
-      pendingTasks: parseInt(t.pending as string, 10),
-      executingTasks: parseInt(t.executing as string, 10),
-      completedTasks: parseInt(t.completed as string, 10),
-      failedTasks: parseInt(t.failed as string, 10),
-      blockedTasks: parseInt(t.blocked as string, 10),
-      activeAgents: parseInt(agents.rows[0].count, 10),
-      totalTokensToday: parseInt(tokens.rows[0].total, 10),
-      totalCostToday: parseFloat(cost.rows[0].total),
-      tasksByPipeline: byPipeline.rows.map((r) => ({
-        pipeline: r.pipeline as string,
-        count: parseInt(r.count as string, 10),
-      })),
-      tasksByRepository: byRepo.rows.map((r) => ({
-        repository: r.repository as string,
-        count: parseInt(r.count as string, 10),
-      })),
-    }
-  },
-
-  async tokenUsageByModel(
-    _: unknown,
-    args: { days?: number | null },
-    ctx: Context
-  ) {
-    const days = Math.min(Math.max(args.days ?? 30, 1), 365)
-    const result = await ctx.pool.query<Record<string, unknown>>(
-      `SELECT
-         DATE_TRUNC('day', started_at AT TIME ZONE 'UTC') AS day,
-         COALESCE(model, 'unknown') AS model,
-         COALESCE(SUM(tokens_input), 0)::int AS tokens_input,
-         COALESCE(SUM(tokens_output), 0)::int AS tokens_output,
-         COALESCE(SUM(cache_read_tokens), 0)::int AS cache_read_tokens,
-         COALESCE(SUM(cache_write_tokens), 0)::int AS cache_write_tokens
-       FROM stages
-       WHERE started_at >= NOW() - ($1 || ' days')::INTERVAL
-       GROUP BY 1, 2
-       ORDER BY 1 ASC, 2 ASC`,
-      [String(days)]
-    )
-    return result.rows.map((row) => ({
-      day: (row.day as Date).toISOString(),
-      model: row.model as string,
-      tokensInput: row.tokens_input as number,
-      tokensOutput: row.tokens_output as number,
-      cacheReadTokens: row.cache_read_tokens as number,
-      cacheWriteTokens: row.cache_write_tokens as number,
-    }))
-  },
-
+  // Drain status (cross-domain)
   async drainStatus(_: unknown, __: unknown, ctx: Context) {
     return getDrainStatus(ctx.pool)
   },
 }
+
+// ---------------------------------------------------------------------------
+// Shared mapper functions (exported for use by mutations and tests)
+// ---------------------------------------------------------------------------
 
 function parseAgentSource(source: string): { sourceEnum: string; sourceRepo: string | null } {
   if (source === 'default') return { sourceEnum: 'DEFAULT', sourceRepo: null }
@@ -408,7 +134,7 @@ export function mapStage(row: Record<string, unknown>) {
 
 // ── Drain status helper ──────────────────────────────────────────────────────
 
-async function getDrainStatus(pool: Pool) {
+export async function getDrainStatus(pool: Pool) {
   // Single atomic query for consistent point-in-time reads
   const { rows } = await pool.query(`
     SELECT
@@ -423,5 +149,3 @@ async function getDrainStatus(pool: Pool) {
     activeTasks: row?.active_tasks ?? 0,
   }
 }
-
-export { getDrainStatus }

@@ -18,7 +18,8 @@ from .cli.auth_helper import auth_watch
 from .cli.repo_manager import repo_app
 from .cli.status import status
 from .config import load_config, load_pipelines, load_secrets
-from .config_store import sync_all_agent_definitions_to_db, sync_pipeline_definitions_to_db
+from .agent_store import sync_all_agent_definitions_to_db
+from .pipeline_store import sync_pipeline_definitions_to_db
 from .database import Database
 from .logging import get_logger, setup_logging
 from .models import PipelineConfig, SupervisorConfig, TaskStatus
