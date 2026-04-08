@@ -1083,6 +1083,42 @@ async def test_close_task_resources_fallback_rmtree(
     mock_rmtree.assert_called_once_with(mock_work_dir, ignore_errors=True)
 
 
+@pytest.mark.asyncio
+async def test_close_task_resources_resolve_clone_dir_fails(
+    sample_pipelines: Any, tmp_path: Any
+) -> None:
+    """close_task_resources still cleans up worktree and NDJSON logs when
+    _resolve_clone_dir raises (e.g. repo in error state)."""
+    mock_db = AsyncMock(spec=Database)
+    # _resolve_clone_dir will raise because clone_status != 'ready'
+    mock_db.fetch_one = AsyncMock(
+        return_value={"clone_dir": str(tmp_path / "clone"), "branch": "main", "clone_status": "error"}
+    )
+    mock_tq = AsyncMock(spec=TaskQueue)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+    ) as mock_git, patch(
+        "aquarco_supervisor.pipeline.executor.shutil.rmtree"
+    ) as mock_rmtree, patch(
+        "aquarco_supervisor.pipeline.executor.Path"
+    ) as MockPath:
+        mock_work_dir = MagicMock()
+        mock_work_dir.exists.return_value = True
+        mock_work_dir.__str__ = MagicMock(return_value="/var/lib/aquarco/worktrees/task-1")
+        MockPath.return_value.__truediv__ = MagicMock(return_value=mock_work_dir)
+        MockPath.return_value.glob.return_value = []
+
+        # Should NOT raise even though _resolve_clone_dir fails
+        await executor.close_task_resources("task-1")
+
+    # git worktree remove should NOT have been called (we couldn't resolve clone_dir)
+    mock_git.assert_not_awaited()
+    # But rmtree fallback should have cleaned up the worktree
+    mock_rmtree.assert_called_once_with(mock_work_dir, ignore_errors=True)
+
+
 # ---------------------------------------------------------------------------
 # Fix: existing-PR guard in _create_pipeline_pr
 # ---------------------------------------------------------------------------

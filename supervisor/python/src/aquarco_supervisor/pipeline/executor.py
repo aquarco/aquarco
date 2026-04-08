@@ -1358,26 +1358,42 @@ class PipelineExecutor:
                         )
 
     async def close_task_resources(self, task_id: str) -> None:
-        """Remove worktrees and raw NDJSON output logs for a closed task."""
+        """Remove worktrees and raw NDJSON output logs for a closed task.
+
+        Each cleanup phase is independent so a failure in one (e.g. the
+        repository is in an error state and ``_resolve_clone_dir`` raises)
+        does not prevent the remaining phases from executing.
+        """
         safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)
         worktree_base = Path("/var/lib/aquarco/worktrees")
         work_dir = worktree_base / safe_id
 
+        # Phase 1: remove the main worktree via git (falls back to rmtree).
         if work_dir.exists():
-            clone_dir = await self._resolve_clone_dir(task_id)
             try:
-                await _run_git(
-                    clone_dir, "worktree", "remove", str(work_dir), "--force",
-                )
+                clone_dir = await self._resolve_clone_dir(task_id)
+                try:
+                    await _run_git(
+                        clone_dir, "worktree", "remove", str(work_dir), "--force",
+                    )
+                except Exception:
+                    shutil.rmtree(work_dir, ignore_errors=True)
             except Exception:
+                # _resolve_clone_dir failed (repo not ready / missing) — fall
+                # back to plain rmtree so the directory is still cleaned up.
                 shutil.rmtree(work_dir, ignore_errors=True)
+                log.warning(
+                    "task_worktree_cleanup_fallback",
+                    task_id=task_id,
+                    work_dir=str(work_dir),
+                )
             log.info("task_worktree_cleaned", task_id=task_id, work_dir=str(work_dir))
 
-        # Clean parallel agent worktrees
+        # Phase 2: clean parallel agent worktrees.
         for wt in worktree_base.glob(f"{safe_id}-*"):
             shutil.rmtree(wt, ignore_errors=True)
 
-        # Delete raw NDJSON output files written by execute_claude for this task.
+        # Phase 3: delete raw NDJSON output files written by execute_claude.
         deleted = 0
         for raw_log in _CLAUDE_LOG_DIR.glob(f"claude-raw-{safe_id}-stage*.ndjson"):
             try:

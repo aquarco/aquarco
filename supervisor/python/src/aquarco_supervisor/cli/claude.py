@@ -362,8 +362,10 @@ async def execute_claude(
 
     # Named stdout file in the log directory.  Kept after execute_claude returns
     # so callers can reference it for debugging; deleted when the task is closed
-    # via close_task_resources().
-    stdout_file = LOG_DIR / f"claude-raw-{safe_id}-stage{stage_num}.ndjson"
+    # via close_task_resources().  A monotonic timestamp is appended to avoid
+    # overwriting output from previous retry attempts of the same stage.
+    _ts = int(asyncio.get_running_loop().time() * 1000)
+    stdout_file = LOG_DIR / f"claude-raw-{safe_id}-stage{stage_num}-{_ts}.ndjson"
 
     try:
         with os.fdopen(fd, "w") as f:
