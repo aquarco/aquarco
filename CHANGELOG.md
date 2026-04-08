@@ -1,5 +1,27 @@
 # Changelog
 
+## [2026-04-08] — Add execution_order to stages (#102)
+
+### Added
+- **`execution_order` column on `stages` table** — new nullable integer column recording the actual sequence in which stages were invoked per task, enabling correct sort order when the conditions engine performs stage jumps (forward or backward)
+- **Partial unique index** on `(task_id, execution_order)` WHERE `execution_order IS NOT NULL` ensuring no duplicate values can be assigned
+- **Supervisor execution order tracking** — per-task counter in `pipeline/executor.py` tracks sequential execution, recovered from DB on task resume via `MAX(execution_order)` query
+- **Parallel stage pre-allocation** — execution_order values pre-allocated before `asyncio.gather()` to avoid race conditions in concurrent stage execution
+- **`executionOrder` field on GraphQL `Stage` type** — new nullable integer field exposing the execution_order value to API clients
+- **Database migration 042** — adds nullable `execution_order` column, creates unique partial index, updates `get_task_context()` SQL function to include execution_order and sort by it
+
+### Changed
+- **Stage sort order in task context** — `get_task_context()` now returns stages sorted by `execution_order ASC NULLS LAST` instead of `(stage_number, iteration)`, preserving execution sequence for all queries
+- **Frontend task detail page** — stage history list now sorts by `executionOrder NULLS LAST` with legacy fallback to `(stageNumber, iteration)` for backward compatibility
+- **Stage queries across API** — all stage queries updated to include `execution_order` in result sets and mappings
+
+### Fixed
+- **Stage order display with stage jumps** — stages now display in actual execution order even when conditions engine jumps backward or forward (e.g., retry loops that run stages 0→1→0→2 now show in correct sequence, not deduplicated by stage_number)
+
+### Test Coverage
+- 32 new tests: `test_executor_execution_order.py` covers counter initialization, assignment, parallel pre-allocation, and resume recovery; `test_task_queue_execution_order.py` covers DB updates and NULL handling
+- All 1433 tests passing with 83% coverage
+
 ## [2026-04-07] — Show token usage chart on Dashboard (#83)
 
 ### Added

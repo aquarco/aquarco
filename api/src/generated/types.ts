@@ -430,6 +430,7 @@ export type Stage = {
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   costUsd?: Maybe<Scalars['Float']['output']>;
   errorMessage?: Maybe<Scalars['String']['output']>;
+  executionOrder?: Maybe<Scalars['Int']['output']>;
   id: Scalars['ID']['output'];
   iteration: Scalars['Int']['output'];
   liveOutput?: Maybe<Scalars['String']['output']>;

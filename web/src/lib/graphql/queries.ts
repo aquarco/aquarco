@@ -102,6 +102,7 @@ export const GET_TASK = gql`
         stageNumber
         iteration
         run
+        executionOrder
         category
         agent
         agentVersion

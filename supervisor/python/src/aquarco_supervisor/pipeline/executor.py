@@ -45,6 +45,16 @@ class PipelineExecutor:
         self._tq = task_queue
         self._registry = registry
         self._pipelines = pipelines
+        # Per-task execution_order counters.
+        # Tracks the actual invocation sequence of stages within each task.
+        self._execution_order: dict[str, int] = {}
+
+    def _next_execution_order(self, task_id: str) -> int:
+        """Increment and return the next execution_order value for a task."""
+        current = self._execution_order.get(task_id, 0)
+        next_val = current + 1
+        self._execution_order[task_id] = next_val
+        return next_val
 
     # -----------------------------------------------------------------------
     # Main entry point
@@ -71,6 +81,19 @@ class PipelineExecutor:
             if stage_number is not None:
                 start_stage = stage_number + 1
                 log.info("resuming_pipeline", task_id=task_id, from_stage=start_stage)
+
+        # Initialize per-task execution_order counter.
+        # On resume, recover from existing DB rows to avoid collisions.
+        if start_stage > 0:
+            max_eo = await self._tq.get_max_execution_order(task_id)
+            self._execution_order[task_id] = max_eo
+            log.info(
+                "execution_order_recovered",
+                task_id=task_id,
+                max_execution_order=max_eo,
+            )
+        else:
+            self._execution_order[task_id] = 0
 
         # Pipeline is required; task.pipeline has a default of 'feature-pipeline'.
         if not pipeline_name:
@@ -195,6 +218,8 @@ class PipelineExecutor:
 
         await self._create_pipeline_pr(task_id, branch_name, work_dir, {})
         await self._tq.complete_task(task_id)
+        # Clean up per-task execution_order counter
+        self._execution_order.pop(task_id, None)
         log.info("pipeline_completed", task_id=task_id, pipeline=pipeline_name)
 
     # -----------------------------------------------------------------------
@@ -245,10 +270,12 @@ class PipelineExecutor:
             task_id, -1, "planning", "planner-agent",
             stage_key=planning_stage_key,
         )
+        planning_eo = self._next_execution_order(task_id)
         await self._tq.record_stage_executing(
             task_id, -1, "planning", "planner-agent",
             stage_id=planning_stage_id,
             stage_key=planning_stage_key, iteration=1,
+            execution_order=planning_eo,
         )
 
         try:
@@ -399,11 +426,17 @@ class PipelineExecutor:
 
             try:
                 if parallel and len(agents) > 1:
+                    # Pre-allocate distinct execution_order values for
+                    # parallel agents before asyncio.gather is called.
+                    parallel_eos: dict[str, int] = {}
+                    for a in agents:
+                        parallel_eos[a] = self._next_execution_order(task_id)
                     stage_output = await self._execute_parallel_agents(
                         task_id, stage_num, category, agents,
                         clone_dir, branch_name,
                         pipeline_name=pipeline_name,
                         stage_ids=stage_ids,
+                        execution_orders=parallel_eos,
                     )
                 else:
                     # Sequential execution (single or multiple agents)
@@ -415,12 +448,14 @@ class PipelineExecutor:
                         accumulated = build_accumulated_context(
                             task_context, stage_num,
                         )
+                        eo = self._next_execution_order(task_id)
                         out, sid = await self._execute_planned_stage(
                             task_id, stage_num, category, agent_name,
                             accumulated, iteration=base_iteration,
                             stage_id=stage_ids.get(sk),
                             work_dir=clone_dir,
                             pipeline_name=pipeline_name,
+                            execution_order=eo,
                         )
                         per_agent_output[agent_name] = out
                         current_agent_stage_ids[agent_name] = sid
@@ -463,12 +498,14 @@ class PipelineExecutor:
                             stage_key=cond_stage_key,
                             iteration=_cond_eval_iteration,
                         )
+                        cond_eo = self._next_execution_order(task_id)
                         await self._tq.record_stage_executing(
                             task_id, stage_num,
                             "condition-eval", "condition-evaluator",
                             stage_id=cond_stage_id,
                             stage_key=cond_stage_key,
                             iteration=_cond_eval_iteration,
+                            execution_order=cond_eo,
                         )
 
                         async def _cond_live_cb(tail: str) -> None:
@@ -641,9 +678,11 @@ class PipelineExecutor:
                     for agent_name in agents:
                         sk = f"{stage_num}:{category}:{agent_name}"
                         agent_stage_id = current_agent_stage_ids.get(agent_name)
+                        skip_eo = self._next_execution_order(task_id)
                         await self._tq.record_stage_skipped(
                             task_id, stage_num, category,
                             stage_id=agent_stage_id, stage_key=sk,
+                            execution_order=skip_eo,
                         )
                     current_idx += 1
 
@@ -661,6 +700,7 @@ class PipelineExecutor:
         stage_id: int | None = None,
         work_dir: str | None = None,
         pipeline_name: str = "",
+        execution_order: int | None = None,
     ) -> tuple[dict[str, Any], int | None]:
         """Execute a single planned stage with a specific agent.
 
@@ -700,6 +740,7 @@ class PipelineExecutor:
             stage_id=stage_id,
             stage_key=stage_key, iteration=iteration, run=run,
             input_context=context,
+            execution_order=execution_order,
         )
         await self._registry.increment_agent_instances(agent_name)
 
@@ -766,6 +807,7 @@ class PipelineExecutor:
         *,
         pipeline_name: str = "",
         stage_ids: dict[str, int] | None = None,
+        execution_orders: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         """Run multiple agents in parallel using git worktrees."""
         log.info(
@@ -811,6 +853,7 @@ class PipelineExecutor:
 
             # Run all agents in parallel
             _stage_ids = stage_ids or {}
+            _execution_orders = execution_orders or {}
 
             async def _run_in_worktree(
                 agent_name: str, wt_dir: str
@@ -826,6 +869,7 @@ class PipelineExecutor:
                     stage_id=_stage_ids.get(sk),
                     work_dir=wt_dir,
                     pipeline_name=pipeline_name,
+                    execution_order=_execution_orders.get(agent_name),
                 )
 
             results = await asyncio.gather(

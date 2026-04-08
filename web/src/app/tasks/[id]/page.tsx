@@ -36,6 +36,7 @@ interface Stage {
   stageNumber: number
   iteration: number
   run: number
+  executionOrder: number | null
   category: string
   agent: string | null
   agentVersion: string | null
@@ -645,8 +646,18 @@ export default function TaskDetailPage() {
   const canCancel = status === 'PENDING' || status === 'QUEUED' || status === 'EXECUTING'
   const canUnblock = status === 'BLOCKED'
 
-  // All stage runs sorted chronologically for the history list
+  // All stage runs sorted by execution_order ASC NULLS LAST.
+  // Falls back to (stageNumber, iteration, run) for stages without execution_order
+  // (historical data or PENDING stages).
   const stages = task.stages.slice().sort((a, b) => {
+    const eoA = a.executionOrder
+    const eoB = b.executionOrder
+    // Both have execution_order — sort by it
+    if (eoA != null && eoB != null) return eoA - eoB
+    // NULLS LAST: non-null before null
+    if (eoA != null && eoB == null) return -1
+    if (eoA == null && eoB != null) return 1
+    // Both null — legacy fallback
     if (a.stageNumber !== b.stageNumber) return a.stageNumber - b.stageNumber
     const iterA = a.iteration ?? 1
     const iterB = b.iteration ?? 1
