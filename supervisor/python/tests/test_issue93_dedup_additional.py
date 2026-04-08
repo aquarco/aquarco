@@ -385,11 +385,11 @@ def test_turns_list_includes_all_emissions_even_duplicates() -> None:
 
 
 def test_migration_039_rollback_exists() -> None:
-    """Rollback file must exist and contain DROP COLUMN."""
+    """Rollback file must exist in archive and contain DROP COLUMN."""
     import os
     rollback_path = os.path.join(
         os.path.dirname(__file__),
-        "..", "..", "..", "db", "migrations",
+        "..", "..", "..", "db", "migrations", "archive",
         "039_add_stage_msg_spending_state.rollback.sql",
     )
     rollback_path = os.path.normpath(rollback_path)
@@ -400,11 +400,11 @@ def test_migration_039_rollback_exists() -> None:
 
 
 def test_migration_039_has_if_not_exists() -> None:
-    """Migration must use IF NOT EXISTS for idempotency."""
+    """Migration must use IF NOT EXISTS for idempotency (archived)."""
     import os
     migration_path = os.path.join(
         os.path.dirname(__file__),
-        "..", "..", "..", "db", "migrations",
+        "..", "..", "..", "db", "migrations", "archive",
         "039_add_stage_msg_spending_state.sql",
     )
     migration_path = os.path.normpath(migration_path)
