@@ -61,8 +61,9 @@ def test_setup_logging_clears_previous_handlers() -> None:
     count_after_first = len(logging.getLogger().handlers)
     setup_logging(level="debug")
     count_after_second = len(logging.getLogger().handlers)
-    # handlers.clear() is called each time, so count should be consistent
-    assert count_after_second <= count_after_first + 1
+    # handlers.clear() is called each time; without a log_file, exactly 1 stderr handler remains
+    assert count_after_first == 1
+    assert count_after_second == 1
 
 
 def test_setup_logging_file_handler_writes(tmp_path: Path) -> None:
