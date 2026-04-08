@@ -1,5 +1,35 @@
 # Changelog
 
+## [2026-04-08] — Consolidate migrations (#110)
+
+### Added
+- **Consolidated migration `000_consolidated_init.sql`** — single canonical database init script replacing 44 incremental migrations (000-043), creating the full as-built schema in one atomic operation with all 11 tables, indexes, triggers, functions, and seed data
+- **Archive directory `db/migrations/archive/`** — all 44 previous migration files (and their rollbacks) archived for reference and audit trail, with clear documentation of consolidation rationale
+- **Pre-flight guard in `db/migrate.sh`** — (3 bug fixes):
+  - Changed hashing from MD5 (32 chars) to SHA-256 (64 chars) to match yoyo-migrations' internal algorithm, preventing re-application of consolidated migration on existing databases
+  - Added existence check for `_yoyo_migration` table before querying, preventing UndefinedTable crash when bootstrapping from a dump
+  - Added `ON CONFLICT (migration_hash) DO NOTHING` clause to INSERT statement to prevent unique constraint violations from concurrent migrate.sh processes
+- **Test suite `db/tests/test_consolidation_details.py`** — 121 new tests covering:
+  - Schema structure validation (tables, columns, types, constraints, indexes, triggers)
+  - Foreign key relationships and referential integrity
+  - Archive migration metadata validation
+  - Migration ordering and dependencies
+  - All tests pass with 95% coverage
+
+### Changed
+- **Migration strategy** — all future migrations now apply against the consolidated base in a single atomic operation, eliminating the pre-release incremental migration pattern
+- **Migration test discovery** — test patterns updated to handle archive directory structure and validate both canonical and historical migrations
+
+### Fixed
+- **Migration idempotency** — consolidated init now applies safely to databases at any migration level (from scratch through 043)
+- **Concurrent migration safety** — pre-flight guard now prevents race condition errors from parallel migrate.sh invocations
+- **Database bootstrap reliability** — migrations now handle both fresh databases and database dumps without errors
+
+### Test Coverage
+- 121 new tests in `test_consolidation_details.py` covering schema validation, constraints, and migration integrity
+- 57 existing migration tests updated and passing
+- All 178 migration-related tests passing with 95% coverage
+
 ## [2026-04-08] — Add execution_order to stages (#102)
 
 ### Added
