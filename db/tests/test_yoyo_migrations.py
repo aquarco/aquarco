@@ -64,6 +64,8 @@ EXPECTED_MIGRATIONS = [
     "040_drop_is_config_repo",
     "040_add_stage_model",
     "041_backfill_stage_model",
+    "042_add_execution_order",
+    "043_fix_get_task_context",
 ]
 
 # Build expected dependency map: migration_name -> depends_on_name
