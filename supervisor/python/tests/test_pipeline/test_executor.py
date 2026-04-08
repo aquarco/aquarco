@@ -1119,6 +1119,139 @@ async def test_close_task_resources_resolve_clone_dir_fails(
     mock_rmtree.assert_called_once_with(mock_work_dir, ignore_errors=True)
 
 
+@pytest.mark.asyncio
+async def test_close_task_resources_cleans_parallel_worktrees(
+    sample_pipelines: Any, tmp_path: Any
+) -> None:
+    """Phase 2: parallel agent worktrees matching {safe_id}-* are cleaned up via rmtree."""
+    mock_db = AsyncMock(spec=Database)
+    mock_tq = AsyncMock(spec=TaskQueue)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+    ), patch(
+        "aquarco_supervisor.pipeline.executor.shutil.rmtree"
+    ) as mock_rmtree, patch(
+        "aquarco_supervisor.pipeline.executor.Path"
+    ) as MockPath:
+        # Phase 1: main worktree does NOT exist (skip it)
+        mock_work_dir = MagicMock()
+        mock_work_dir.exists.return_value = False
+        MockPath.return_value.__truediv__ = MagicMock(return_value=mock_work_dir)
+        # Phase 2: glob returns two parallel worktrees
+        parallel_wt1 = MagicMock()
+        parallel_wt2 = MagicMock()
+        MockPath.return_value.glob.return_value = [parallel_wt1, parallel_wt2]
+
+        await executor.close_task_resources("task-1")
+
+    # Both parallel worktrees should be cleaned up
+    assert mock_rmtree.call_count == 2
+    mock_rmtree.assert_any_call(parallel_wt1, ignore_errors=True)
+    mock_rmtree.assert_any_call(parallel_wt2, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_close_task_resources_cleans_ndjson_logs(
+    sample_pipelines: Any, tmp_path: Any
+) -> None:
+    """Phase 3: NDJSON log files matching claude-raw-{safe_id}-stage*.ndjson are deleted.
+
+    Verifies cleanup works with the new timestamp-based filenames
+    (e.g., claude-raw-task--1-stage0-12345.ndjson).
+    """
+    mock_db = AsyncMock(spec=Database)
+    mock_tq = AsyncMock(spec=TaskQueue)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
+
+    # Create fake NDJSON log files in a temp dir that acts as LOG_DIR
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    # re.sub(r"[^a-zA-Z0-9._-]", "-", "task-1") → "task-1"
+    safe_id = "task-1"
+    # Simulate multiple retry attempts with timestamp-based filenames
+    ndjson1 = log_dir / f"claude-raw-{safe_id}-stage0-1000.ndjson"
+    ndjson2 = log_dir / f"claude-raw-{safe_id}-stage0-2000.ndjson"
+    ndjson3 = log_dir / f"claude-raw-{safe_id}-stage1-3000.ndjson"
+    for f in (ndjson1, ndjson2, ndjson3):
+        f.write_text('{"type": "result"}\n')
+    # Also create an unrelated file that should NOT be deleted
+    unrelated = log_dir / "claude-raw-other-task-stage0-9999.ndjson"
+    unrelated.write_text('{"type": "result"}\n')
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+    ), patch(
+        "aquarco_supervisor.pipeline.executor.Path"
+    ) as MockPath, patch(
+        "aquarco_supervisor.pipeline.executor._CLAUDE_LOG_DIR", log_dir
+    ):
+        # Phase 1: main worktree does NOT exist
+        mock_work_dir = MagicMock()
+        mock_work_dir.exists.return_value = False
+        MockPath.return_value.__truediv__ = MagicMock(return_value=mock_work_dir)
+        MockPath.return_value.glob.return_value = []  # no parallel worktrees
+
+        await executor.close_task_resources("task-1")
+
+    # All three NDJSON files for task-1 should be deleted
+    assert not ndjson1.exists()
+    assert not ndjson2.exists()
+    assert not ndjson3.exists()
+    # Unrelated file should still exist
+    assert unrelated.exists()
+
+
+@pytest.mark.asyncio
+async def test_close_task_resources_all_phases_independent(
+    sample_pipelines: Any, tmp_path: Any
+) -> None:
+    """All three cleanup phases execute independently: a failure in Phase 1
+    (resolve_clone_dir raises) does not prevent Phase 2 (parallel worktrees)
+    or Phase 3 (NDJSON logs) from running."""
+    mock_db = AsyncMock(spec=Database)
+    # Phase 1 will fail: clone_status != 'ready'
+    mock_db.fetch_one = AsyncMock(
+        return_value={"clone_dir": str(tmp_path / "clone"), "branch": "main", "clone_status": "error"}
+    )
+    mock_tq = AsyncMock(spec=TaskQueue)
+    executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
+
+    # Set up log dir for Phase 3
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    ndjson_file = log_dir / "claude-raw-task-1-stage0-1000.ndjson"
+    ndjson_file.write_text('{"type": "result"}\n')
+
+    with patch(
+        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+    ) as mock_git, patch(
+        "aquarco_supervisor.pipeline.executor.shutil.rmtree"
+    ) as mock_rmtree, patch(
+        "aquarco_supervisor.pipeline.executor.Path"
+    ) as MockPath, patch(
+        "aquarco_supervisor.pipeline.executor._CLAUDE_LOG_DIR", log_dir
+    ):
+        mock_work_dir = MagicMock()
+        mock_work_dir.exists.return_value = True
+        mock_work_dir.__str__ = MagicMock(return_value="/var/lib/aquarco/worktrees/task-1")
+        MockPath.return_value.__truediv__ = MagicMock(return_value=mock_work_dir)
+        # Phase 2: one parallel worktree
+        parallel_wt = MagicMock()
+        MockPath.return_value.glob.return_value = [parallel_wt]
+
+        # Should NOT raise even though Phase 1 fails
+        await executor.close_task_resources("task-1")
+
+    # Phase 1: _resolve_clone_dir failed → rmtree fallback used
+    mock_rmtree.assert_any_call(mock_work_dir, ignore_errors=True)
+    # Phase 2: parallel worktree cleaned
+    mock_rmtree.assert_any_call(parallel_wt, ignore_errors=True)
+    # Phase 3: NDJSON file cleaned
+    assert not ndjson_file.exists()
+
+
 # ---------------------------------------------------------------------------
 # Fix: existing-PR guard in _create_pipeline_pr
 # ---------------------------------------------------------------------------

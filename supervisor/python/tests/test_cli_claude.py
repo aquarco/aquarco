@@ -15,6 +15,7 @@ from aquarco_supervisor.cli.claude import (
     ClaudeOutput,
     _extract_from_result_message,
     _extract_json,
+    _extract_session_id_from_lines,
     _find_result_message,
     _parse_output,
     _read_file_tail,
@@ -1098,3 +1099,219 @@ def test_scan_rate_limit_event_with_invalid_json_line(tmp_path: Path) -> None:
     assert result is not None
     parsed = json.loads(result)
     assert parsed["type"] == "rate_limit_event"
+
+
+def test_scan_rate_limit_event_remainder_without_trailing_newline(tmp_path: Path) -> None:
+    """Detects rate_limit_event in the last line when there is no trailing newline.
+
+    This exercises the remainder-handling code path (lines 293-301 in claude.py)
+    where the final partial line is checked after the chunk loop ends.
+    """
+    f = tmp_path / "output.ndjson"
+    # No trailing newline — the event sits entirely in the remainder buffer
+    f.write_text(
+        '{"type": "message", "text": "hello"}\n'
+        '{"type": "rate_limit_event", "retry_after": 42}'
+    )
+    result = scan_file_for_rate_limit_event(f)
+    assert result is not None
+    parsed = json.loads(result)
+    assert parsed["type"] == "rate_limit_event"
+    assert parsed["retry_after"] == 42
+
+
+def test_scan_rate_limit_event_false_positive_wrong_type(tmp_path: Path) -> None:
+    """A line containing 'rate_limit_event' as a text value but with a different
+    type field must not be returned as a match."""
+    f = tmp_path / "output.ndjson"
+    f.write_text(
+        '{"type": "message", "text": "discussing rate_limit_event handling"}\n'
+        '{"type": "assistant", "content": "We saw a rate_limit_event earlier"}\n'
+    )
+    result = scan_file_for_rate_limit_event(f)
+    assert result is None
+
+
+def test_scan_rate_limit_event_large_file_crosses_chunk_boundary(tmp_path: Path) -> None:
+    """Finds rate_limit_event even when the file is larger than the 64 KB chunk size.
+
+    This ensures the chunked reading with remainder handling works correctly
+    when the event appears after the first chunk boundary.
+    """
+    f = tmp_path / "output.ndjson"
+    # Each line is ~60 bytes; we need > 64 KB = 65536 bytes → ~1100 lines
+    filler_line = '{"type": "message", "text": "' + "x" * 30 + '"}\n'
+    num_filler = (65536 // len(filler_line)) + 10  # ensure > 1 chunk
+    with open(f, "w") as fh:
+        for _ in range(num_filler):
+            fh.write(filler_line)
+        fh.write('{"type": "rate_limit_event", "retry_after": 99}\n')
+
+    result = scan_file_for_rate_limit_event(f)
+    assert result is not None
+    parsed = json.loads(result)
+    assert parsed["type"] == "rate_limit_event"
+    assert parsed["retry_after"] == 99
+
+
+# ===========================================================================
+# _extract_session_id_from_lines tests
+# ===========================================================================
+
+
+def test_extract_session_id_found() -> None:
+    """Returns the session_id from a result event line."""
+    lines = [
+        json.dumps({"type": "system", "subtype": "init"}),
+        json.dumps({"type": "result", "session_id": "sess-abc-123"}),
+    ]
+    assert _extract_session_id_from_lines(lines) == "sess-abc-123"
+
+
+def test_extract_session_id_not_found() -> None:
+    """Returns None when no line contains session_id."""
+    lines = [
+        json.dumps({"type": "system", "subtype": "init"}),
+        json.dumps({"type": "result", "result": "done"}),
+    ]
+    assert _extract_session_id_from_lines(lines) is None
+
+
+def test_extract_session_id_returns_last() -> None:
+    """When multiple lines have session_id, returns the last one (reversed scan)."""
+    lines = [
+        json.dumps({"type": "system", "session_id": "sess-old"}),
+        json.dumps({"type": "result", "session_id": "sess-new"}),
+    ]
+    assert _extract_session_id_from_lines(lines) == "sess-new"
+
+
+def test_extract_session_id_skips_invalid_json() -> None:
+    """Invalid JSON lines are silently skipped without error."""
+    lines = [
+        "not valid json at all",
+        json.dumps({"type": "result", "session_id": "sess-ok"}),
+    ]
+    assert _extract_session_id_from_lines(lines) == "sess-ok"
+
+
+def test_extract_session_id_empty_list() -> None:
+    """Returns None for an empty line list."""
+    assert _extract_session_id_from_lines([]) is None
+
+
+# ===========================================================================
+# _tail_file: deque(maxlen=50) + result_line preservation
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_tail_file_deque_caps_at_50_but_preserves_result_line(tmp_path: Path) -> None:
+    """When more than 50 lines are written, tail_lines contains only the last 50,
+    but result_line is still captured even if it was pushed out of the deque.
+
+    This validates the bounded deque(maxlen=50) + dedicated result_line capture.
+    """
+    stdout_file = tmp_path / "stdout.ndjson"
+    with open(stdout_file, "w") as f:
+        # Write result event as line 1 (will be pushed out of the 50-line deque)
+        f.write(json.dumps({"type": "result", "result": "early_result"}) + "\n")
+        # Write 60 more filler lines to push result out of the deque
+        for i in range(60):
+            f.write(json.dumps({"type": "assistant", "seq": i}) + "\n")
+
+    proc = _make_proc_mock(returncode=0)
+    tail_lines, result_line, result_seen = await _tail_file(
+        stdout_file, proc,
+        timeout_seconds=5.0, task_id="t1", stage_num=0,
+    )
+
+    # Deque is capped at 50
+    assert len(tail_lines) == 50
+    # Result line is preserved despite being pushed out of the deque window
+    assert result_seen is True
+    assert result_line is not None
+    parsed_result = json.loads(result_line)
+    assert parsed_result["type"] == "result"
+    assert parsed_result["result"] == "early_result"
+    # The result line should NOT be in tail_lines (it was pushed out)
+    result_in_tail = any("early_result" in line for line in tail_lines)
+    assert not result_in_tail, "result_line should have been pushed out of the 50-line deque"
+
+
+# ===========================================================================
+# _read_file_tail: exact boundary
+# ===========================================================================
+
+
+def test_read_file_tail_exact_max_bytes(tmp_path: Path) -> None:
+    """When file size equals max_bytes, returns the entire file content."""
+    max_bytes = 100
+    content = "A" * max_bytes
+    f = tmp_path / "exact.ndjson"
+    f.write_text(content)
+    result = _read_file_tail(f, max_bytes=max_bytes)
+    assert result == content
+    assert len(result) == max_bytes
+
+
+def test_read_file_tail_one_byte_over(tmp_path: Path) -> None:
+    """When file size is max_bytes + 1, the first byte is skipped."""
+    max_bytes = 100
+    content = "X" + "B" * max_bytes  # 101 bytes total
+    f = tmp_path / "over.ndjson"
+    f.write_text(content)
+    result = _read_file_tail(f, max_bytes=max_bytes)
+    # Should read from offset 1 → all 'B' characters
+    assert len(result) == max_bytes
+    assert result == "B" * max_bytes
+
+
+# ===========================================================================
+# execute_claude: NDJSON filename includes timestamp
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_execute_claude_output_path_contains_timestamp(tmp_path: Path) -> None:
+    """The raw_output_path should contain a monotonic timestamp to distinguish
+    retry attempts of the same stage (avoids overwriting previous attempt's output).
+    """
+    prompt_file = tmp_path / "system.md"
+    prompt_file.write_text("You are a test agent.")
+
+    result_event = {"type": "result", "result": json.dumps({"status": "ok"})}
+    result_line = json.dumps(result_event)
+
+    mock_proc = _make_proc_mock(returncode=0)
+
+    async def fake_tail(path, proc, **kwargs):
+        return [result_line], result_line, True
+
+    with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
+         patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+         patch("tempfile.mkstemp") as mock_mkstemp, \
+         patch("pathlib.Path.mkdir"):
+        ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
+
+        result = await execute_claude(
+            prompt_file=prompt_file,
+            context={"task_id": "t1"},
+            work_dir=str(tmp_path),
+            task_id="task-123",
+            stage_num=2,
+        )
+
+    assert result.raw_output_path is not None
+    path = result.raw_output_path
+    # Should match pattern: claude-raw-{safe_id}-stage{num}-{timestamp}.ndjson
+    assert "claude-raw-task-123-stage2-" in path
+    assert path.endswith(".ndjson")
+    # Extract timestamp portion and verify it's numeric
+    # Format: ...stage2-{timestamp}.ndjson
+    import re
+    match = re.search(r"stage2-(\d+)\.ndjson$", path)
+    assert match is not None, f"Expected timestamp in filename, got: {path}"
+    ts = int(match.group(1))
+    assert ts > 0
