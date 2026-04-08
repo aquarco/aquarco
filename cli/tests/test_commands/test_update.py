@@ -623,6 +623,23 @@ class TestBackupCredentials:
         result = _backup_credentials(mock_vagrant)
         assert result is None
 
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_backup_runs_as_agent_user(self, mock_cls):
+        """backup-credentials.sh must run via sudo -u agent HOME=/home/agent."""
+        from aquarco_cli.commands.update import _backup_credentials
+
+        mock_vagrant = MagicMock()
+        mock_result = MagicMock()
+        mock_result.stdout = "/var/lib/aquarco/backups/20260408T120000\n"
+        mock_vagrant.ssh.return_value = mock_result
+
+        _backup_credentials(mock_vagrant)
+
+        cmd = mock_vagrant.ssh.call_args[0][0]
+        assert "sudo -u agent" in cmd
+        assert "HOME=/home/agent" in cmd
+        assert "backup-credentials.sh" in cmd
+
 
 class TestBuildTypeConstant:
     """Tests for the _build.py module."""

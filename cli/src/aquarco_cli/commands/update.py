@@ -40,7 +40,7 @@ def _backup_credentials(vagrant: VagrantHelper) -> str | None:
     """
     try:
         result = vagrant.ssh(
-            "bash /home/agent/aquarco/vagrant/scripts/backup-credentials.sh",
+            "sudo -u agent HOME=/home/agent bash /home/agent/aquarco/vagrant/scripts/backup-credentials.sh",
             stream=False,
         )
         # The script prints the backup dir on the last line of stdout

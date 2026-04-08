@@ -154,6 +154,7 @@ mkdir -p \
   "${DATA_DIR}/triggers" \
   "${DATA_DIR}/triggers/processed" \
   "${DATA_DIR}/blobs" \
+  "${DATA_DIR}/backups" \
   "${LOG_DIR}" \
   "${LOG_DIR}/agents" \
   "/var/log/aquarco-export" \
@@ -178,6 +179,7 @@ chown -R "${AGENT_USER}:${AGENT_USER}" \
   "${AGENT_HOME}/.claude"
 
 chmod 755 "${DATA_DIR}" "${LOG_DIR}"
+chmod 700 "${DATA_DIR}/backups"
 chmod 700 "/etc/aquarco"
 chmod 700 "${AGENT_HOME}/.claude"
 
