@@ -972,3 +972,228 @@ class TestProductionGuardEdgeCases:
         mock_vagrant.is_running.return_value = False
         result = runner.invoke(app, ["update"])
         assert "brew upgrade" not in result.output.lower()
+
+
+class TestIssue108RegressionSuite:
+    """Regression tests for GitHub issue #108 — credential backup and rollback
+    must run as the ``agent`` user with ``HOME=/home/agent``.
+
+    These tests validate all facets of the fix: full SSH command format,
+    stream mode, exception handling, and end-to-end integration through the
+    update command.
+    """
+
+    # ── Backup: full command format ──────────────────────────────────────
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_backup_full_ssh_command_format(self, mock_cls):
+        """The backup SSH command must be: sudo -u agent HOME=/home/agent bash <script>."""
+        from aquarco_cli.commands.update import _backup_credentials
+
+        mock_vagrant = MagicMock()
+        mock_result = MagicMock()
+        mock_result.stdout = "/var/lib/aquarco/backups/20260408T100000\n"
+        mock_vagrant.ssh.return_value = mock_result
+
+        _backup_credentials(mock_vagrant)
+
+        cmd = mock_vagrant.ssh.call_args[0][0]
+        expected = (
+            "sudo -u agent HOME=/home/agent bash "
+            "/home/agent/aquarco/vagrant/scripts/backup-credentials.sh"
+        )
+        assert cmd == expected, f"Expected exact command:\n  {expected}\nGot:\n  {cmd}"
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_backup_uses_stream_false(self, mock_cls):
+        """_backup_credentials must use stream=False to capture stdout for the backup dir."""
+        from aquarco_cli.commands.update import _backup_credentials
+
+        mock_vagrant = MagicMock()
+        mock_result = MagicMock()
+        mock_result.stdout = "/var/lib/aquarco/backups/20260408T100000\n"
+        mock_vagrant.ssh.return_value = mock_result
+
+        _backup_credentials(mock_vagrant)
+
+        _, kwargs = mock_vagrant.ssh.call_args
+        assert kwargs.get("stream") is False, (
+            "backup must use stream=False so stdout is captured and the backup dir can be parsed"
+        )
+
+    # ── Rollback: full command format ────────────────────────────────────
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_rollback_full_ssh_command_format(self, mock_cls):
+        """The rollback SSH command must be: sudo -u agent HOME=/home/agent bash <script> --backup-dir <dir>."""
+        from aquarco_cli.commands.update import _run_rollback
+
+        mock_vagrant = MagicMock()
+        backup_dir = "/var/lib/aquarco/backups/20260408T100000"
+        _run_rollback(mock_vagrant, backup_dir)
+
+        cmd = mock_vagrant.ssh.call_args[0][0]
+        expected = (
+            "sudo -u agent HOME=/home/agent bash "
+            "/home/agent/aquarco/vagrant/scripts/rollback.sh "
+            f"--backup-dir {backup_dir}"
+        )
+        assert cmd == expected, f"Expected exact command:\n  {expected}\nGot:\n  {cmd}"
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_rollback_uses_stream_true(self, mock_cls):
+        """_run_rollback must use stream=True for real-time output during rollback."""
+        from aquarco_cli.commands.update import _run_rollback
+
+        mock_vagrant = MagicMock()
+        _run_rollback(mock_vagrant, "/var/lib/aquarco/backups/test")
+
+        _, kwargs = mock_vagrant.ssh.call_args
+        assert kwargs.get("stream") is True, (
+            "rollback must use stream=True so the user sees real-time rollback output"
+        )
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_rollback_catches_subprocess_called_process_error(self, mock_cls):
+        """_run_rollback must not raise on subprocess.CalledProcessError."""
+        import subprocess
+        from aquarco_cli.commands.update import _run_rollback
+
+        mock_vagrant = MagicMock()
+        mock_vagrant.ssh.side_effect = subprocess.CalledProcessError(1, "vagrant ssh")
+        # Should not raise
+        _run_rollback(mock_vagrant, "/var/lib/aquarco/backups/test")
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_rollback_command_includes_bash_interpreter(self, mock_cls):
+        """The rollback command must explicitly invoke bash before the script path."""
+        from aquarco_cli.commands.update import _run_rollback
+
+        mock_vagrant = MagicMock()
+        _run_rollback(mock_vagrant, "/var/lib/aquarco/backups/test")
+
+        cmd = mock_vagrant.ssh.call_args[0][0]
+        assert "bash /home/agent/aquarco/vagrant/scripts/rollback.sh" in cmd
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_backup_command_includes_bash_interpreter(self, mock_cls):
+        """The backup command must explicitly invoke bash before the script path."""
+        from aquarco_cli.commands.update import _backup_credentials
+
+        mock_vagrant = MagicMock()
+        mock_result = MagicMock()
+        mock_result.stdout = "/var/lib/aquarco/backups/20260408T100000\n"
+        mock_vagrant.ssh.return_value = mock_result
+
+        _backup_credentials(mock_vagrant)
+
+        cmd = mock_vagrant.ssh.call_args[0][0]
+        assert "bash /home/agent/aquarco/vagrant/scripts/backup-credentials.sh" in cmd
+
+    # ── Integration: full update flow verifies SSH command format ────────
+
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_full_update_backup_ssh_contains_sudo_agent(self, mock_cls, mock_health, mock_drain):
+        """End-to-end: the backup SSH call during update must use sudo -u agent."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_result = MagicMock()
+        mock_result.stdout = "/var/lib/aquarco/backups/20260408T100000\n"
+        mock_vagrant.ssh.return_value = mock_result
+
+        result = runner.invoke(app, ["update"])
+        assert result.exit_code == 0
+
+        # First SSH call is the backup command
+        first_call_cmd = mock_vagrant.ssh.call_args_list[0][0][0]
+        assert "sudo -u agent" in first_call_cmd
+        assert "HOME=/home/agent" in first_call_cmd
+        assert "backup-credentials.sh" in first_call_cmd
+
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_full_update_rollback_ssh_contains_sudo_agent(self, mock_cls, mock_health, mock_drain):
+        """End-to-end: rollback SSH during update failure must use sudo -u agent."""
+        from aquarco_cli.vagrant import VagrantError
+
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+
+        call_count = [0]
+
+        def ssh_side_effect(cmd, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call: backup-credentials.sh succeeds
+                result = MagicMock()
+                result.stdout = "/var/lib/aquarco/backups/20260408T100000\n"
+                return result
+            elif "rollback.sh" in cmd:
+                # Rollback call — capture the command, then succeed
+                return MagicMock()
+            else:
+                # Step call — fail to trigger rollback
+                raise VagrantError("step failed")
+
+        mock_vagrant.ssh.side_effect = ssh_side_effect
+
+        result = runner.invoke(app, ["update"])
+        assert result.exit_code == 1
+
+        # Find the rollback SSH call
+        rollback_calls = [
+            call[0][0]
+            for call in mock_vagrant.ssh.call_args_list
+            if "rollback.sh" in call[0][0]
+        ]
+        assert len(rollback_calls) == 1, f"Expected exactly one rollback call, got: {rollback_calls}"
+        rollback_cmd = rollback_calls[0]
+        assert "sudo -u agent" in rollback_cmd, f"Rollback must use sudo -u agent. Got: {rollback_cmd}"
+        assert "HOME=/home/agent" in rollback_cmd, f"Rollback must set HOME=/home/agent. Got: {rollback_cmd}"
+
+    # ── Output messages ──────────────────────────────────────────────────
+
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_backup_success_prints_backup_dir(self, mock_cls, mock_health, mock_drain):
+        """Successful backup prints the backup directory path in the output."""
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_result = MagicMock()
+        mock_result.stdout = "/var/lib/aquarco/backups/20260408T100000\n"
+        mock_vagrant.ssh.return_value = mock_result
+
+        result = runner.invoke(app, ["update"])
+        assert "backed up" in result.output.lower()
+        assert "/var/lib/aquarco/backups/20260408T100000" in result.output
+
+    @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
+    @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_backup_failure_prints_warning_and_continues(self, mock_cls, mock_health, mock_drain):
+        """Failed backup prints a warning and the update continues."""
+        from aquarco_cli.vagrant import VagrantError
+
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+
+        call_count = [0]
+
+        def ssh_side_effect(cmd, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # Backup call fails
+                raise VagrantError("backup failed")
+            # All other calls succeed
+            return MagicMock()
+
+        mock_vagrant.ssh.side_effect = ssh_side_effect
+
+        result = runner.invoke(app, ["update"])
+        assert result.exit_code == 0
+        assert "backup failed" in result.output.lower() or "credential backup failed" in result.output.lower()
+        assert "successfully" in result.output.lower()
