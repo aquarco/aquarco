@@ -22,6 +22,7 @@ from typing import Any
 from ..cli.claude import execute_claude
 from ..exceptions import RetryableError
 from ..logging import get_logger
+from ..models import Complexity
 
 log = get_logger("conditions")
 
@@ -552,3 +553,87 @@ async def evaluate_ai_condition(
         message=message[:200],
     )
     return output
+
+
+# ---------------------------------------------------------------------------
+# Legacy condition bridge (sync)
+# ---------------------------------------------------------------------------
+
+
+def check_conditions(
+    conditions: list[str] | list[dict[str, Any]], previous_output: dict[str, Any]
+) -> bool:
+    """Evaluate stage conditions against previous output (sync bridge).
+
+    Supports both legacy string format ("field operator value") and
+    new structured format (list of condition dicts with simple/ai keys).
+
+    Note: ai: conditions are skipped in this sync bridge. Use
+    evaluate_conditions() directly for full async AI support.
+    """
+    if not conditions:
+        return True
+
+    # Detect format: if first item is a dict, use new structured evaluation
+    if conditions and isinstance(conditions[0], dict):
+        context = _build_eval_context({}, previous_output)
+        for cond in conditions:
+            if not isinstance(cond, dict):
+                continue
+            if "simple" in cond:
+                raw = cond["simple"]
+                val = raw if isinstance(raw, bool) else evaluate_simple_expression(str(raw), context)
+                jump = cond.get("yes" if val else "no") or cond.get(True if val else False)
+                if jump is not None:
+                    return False  # jump means "don't proceed linearly"
+        return True
+
+    # Legacy string-based format
+    for condition in conditions:
+        if not isinstance(condition, str):
+            continue
+        parts = condition.split()
+        if len(parts) < 3:
+            continue
+
+        field = parts[0]
+        operator = parts[1]
+        expected = " ".join(parts[2:])
+
+        # Resolve field value via dot notation
+        actual = _resolve_field(previous_output, field)
+        if actual is None:
+            return False
+
+        actual_str = str(actual)
+
+        if operator in ("==", "="):
+            if actual_str != expected:
+                return False
+        elif operator == "!=":
+            if actual_str == expected:
+                return False
+        elif operator in (">=", ">", "<=", "<"):
+            if not _compare_complexity(actual_str, operator, expected):
+                return False
+
+    return True
+
+
+def _compare_complexity(actual: str, operator: str, expected: str) -> bool:
+    """Compare complexity values using ordered scale."""
+    try:
+        a = Complexity(actual.lower())
+        b = Complexity(expected.lower())
+    except ValueError:
+        return False
+
+    if operator == ">=":
+        return a >= b
+    elif operator == ">":
+        return a > b
+    elif operator == "<=":
+        return a <= b
+    elif operator == "<":
+        return a < b
+    return False

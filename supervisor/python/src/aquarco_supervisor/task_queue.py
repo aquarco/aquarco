@@ -8,13 +8,11 @@ state, spending aggregation, and backward-compatible re-exports.
 from __future__ import annotations
 
 import json
-import warnings
 from typing import Any
 
 from .database import Database
 from .logging import get_logger
 from .models import Task, TaskStatus
-from .spending import parse_ndjson_spending
 
 # Backward-compatible re-exports so existing callers don't break.
 from .stage_manager import StageManager  # noqa: F401
@@ -26,68 +24,22 @@ log = get_logger("task-queue")
 class TaskQueue:
     """Manages task lifecycle and poll state in PostgreSQL.
 
-    Stage-specific methods have been moved to StageManager.  This class
-    retains backward-compatible delegation properties so existing callers
-    (including tests) continue to work via ``tq.<stage_method>(...)``.
+    Stage-specific methods live on StageManager.  This class delegates
+    attribute lookups for those methods so existing callers keep working.
     New code should use StageManager directly.
     """
 
     def __init__(self, db: Database, max_retries: int = 3) -> None:
         self._db = db
         self._max_retries = max_retries
-        # Internal StageManager for backward-compatible delegation
         self._sm = StageManager(db)
 
-    # --- Backward-compatible stage method delegations ---
-    # These allow existing callers to keep using tq.method() syntax.
-
-    async def store_stage_output(self, *a: Any, **kw: Any) -> None:
-        return await self._sm.store_stage_output(*a, **kw)
-
-    async def get_task_context(self, *a: Any, **kw: Any) -> dict[str, Any] | None:
-        return await self._sm.get_task_context(*a, **kw)
-
-    async def update_checkpoint(self, *a: Any, **kw: Any) -> None:
-        return await self._sm.update_checkpoint(*a, **kw)
-
-    async def create_system_stage(self, *a: Any, **kw: Any) -> int | None:
-        return await self._sm.create_system_stage(*a, **kw)
-
-    async def record_stage_executing(self, *a: Any, **kw: Any) -> None:
-        return await self._sm.record_stage_executing(*a, **kw)
-
-    async def record_stage_failed(self, *a: Any, **kw: Any) -> None:
-        return await self._sm.record_stage_failed(*a, **kw)
-
-    async def record_stage_skipped(self, *a: Any, **kw: Any) -> None:
-        return await self._sm.record_stage_skipped(*a, **kw)
-
-    async def create_pending_stages(self, *a: Any, **kw: Any) -> None:
-        return await self._sm.create_pending_stages(*a, **kw)
-
-    async def create_planned_pending_stages(self, *a: Any, **kw: Any) -> dict[str, int]:
-        return await self._sm.create_planned_pending_stages(*a, **kw)
-
-    async def create_iteration_stage(self, *a: Any, **kw: Any) -> tuple[str, int | None]:
-        return await self._sm.create_iteration_stage(*a, **kw)
-
-    async def update_stage_live_output(self, *a: Any, **kw: Any) -> None:
-        return await self._sm.update_stage_live_output(*a, **kw)
-
-    async def get_latest_stage_run(self, *a: Any, **kw: Any) -> dict[str, Any] | None:
-        return await self._sm.get_latest_stage_run(*a, **kw)
-
-    async def create_rerun_stage(self, *a: Any, **kw: Any) -> int:
-        return await self._sm.create_rerun_stage(*a, **kw)
-
-    async def get_max_iteration(self, *a: Any, **kw: Any) -> int:
-        return await self._sm.get_max_iteration(*a, **kw)
-
-    async def get_stage_number_for_id(self, *a: Any, **kw: Any) -> int | None:
-        return await self._sm.get_stage_number_for_id(*a, **kw)
-
-    async def get_max_execution_order(self, *a: Any, **kw: Any) -> int:
-        return await self._sm.get_max_execution_order(*a, **kw)
+    def __getattr__(self, name: str) -> Any:
+        """Delegate stage methods to StageManager for backward compat."""
+        try:
+            return getattr(self._sm, name)
+        except AttributeError:
+            raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'") from None
 
     async def create_task(
         self,
@@ -271,34 +223,15 @@ class TaskQueue:
             "SELECT status, rate_limit_count FROM tasks WHERE id = %(id)s",
             {"id": task_id},
         )
-        if row and row["status"] == "failed":
-            log.warning(
-                "task_postpone_exhausted",
-                task_id=task_id,
-                rate_limit_count=row["rate_limit_count"],
-            )
-        else:
-            log.warning(
-                "task_postponed",
-                task_id=task_id,
-                cooldown_minutes=cooldown_minutes,
-                rate_limit_count=row["rate_limit_count"] if row else 0,
-            )
+        count = row["rate_limit_count"] if row else 0
+        event = "task_postpone_exhausted" if row and row["status"] == "failed" else "task_postponed"
+        log.warning(event, task_id=task_id, cooldown_minutes=cooldown_minutes, rate_limit_count=count)
 
     async def rate_limit_task(
         self, task_id: str, error_message: str, *, max_rate_limit_retries: int = 24,
     ) -> None:
-        """Mark task as rate-limited, or fail it if retries exhausted.
-
-        Delegates to :meth:`postpone_task` with a 60-minute cooldown.
-        Kept for backward compatibility.
-        """
-        await self.postpone_task(
-            task_id,
-            error_message,
-            cooldown_minutes=60,
-            max_retries=max_rate_limit_retries,
-        )
+        """Backward-compat alias for postpone_task with 60-min cooldown."""
+        await self.postpone_task(task_id, error_message, cooldown_minutes=60, max_retries=max_rate_limit_retries)
 
     async def get_postponed_tasks(self) -> list[str]:
         """Return task IDs whose per-row cooldown has elapsed and are ready to resume."""
@@ -312,19 +245,8 @@ class TaskQueue:
         )
         return [r["id"] for r in rows]
 
+    # Deprecated alias — prefer get_postponed_tasks().
     async def get_rate_limited_tasks(self, cooldown_minutes: int = 60) -> list[str]:
-        """Return task IDs that have been rate-limited for longer than cooldown.
-
-        .. deprecated::
-            Use :meth:`get_postponed_tasks` which applies the per-row cooldown.
-            This alias ignores *cooldown_minutes* and delegates to get_postponed_tasks().
-        """
-        warnings.warn(
-            "get_rate_limited_tasks() is deprecated and ignores cooldown_minutes; "
-            "use get_postponed_tasks() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         return await self.get_postponed_tasks()
 
     async def resume_rate_limited_task(self, task_id: str) -> None:
