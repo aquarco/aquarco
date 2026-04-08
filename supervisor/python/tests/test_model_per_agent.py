@@ -387,7 +387,7 @@ async def test_execute_claude_resume_without_model(tmp_path: Path) -> None:
 async def test_executor_passes_model_from_registry(sample_pipelines: Any) -> None:
     """_execute_agent resolves model from registry and passes to execute_claude."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "clone_status": "ready", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
 
     mock_registry = MagicMock()
@@ -410,7 +410,10 @@ async def test_executor_passes_model_from_registry(sample_pipelines: Any) -> Non
         new_callable=AsyncMock,
         return_value=claude_output,
     ) as mock_execute, patch("aquarco_supervisor.pipeline.executor.Path"):
-        await executor._execute_agent("impl-agent", "task-1", {}, 0)
+        await executor._invoker.execute_agent(
+            "impl-agent", "task-1", {}, 0,
+            resolve_clone_dir=executor._resolve_clone_dir,
+        )
 
     mock_registry.get_agent_model.assert_called_once_with("impl-agent")
     call_kwargs = mock_execute.call_args.kwargs
@@ -421,7 +424,7 @@ async def test_executor_passes_model_from_registry(sample_pipelines: Any) -> Non
 async def test_executor_passes_none_model_when_not_set(sample_pipelines: Any) -> None:
     """_execute_agent passes model=None when registry returns None."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "clone_status": "ready", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
 
     mock_registry = MagicMock()
@@ -444,7 +447,10 @@ async def test_executor_passes_none_model_when_not_set(sample_pipelines: Any) ->
         new_callable=AsyncMock,
         return_value=claude_output,
     ) as mock_execute, patch("aquarco_supervisor.pipeline.executor.Path"):
-        await executor._execute_agent("docs-agent", "task-1", {}, 0)
+        await executor._invoker.execute_agent(
+            "docs-agent", "task-1", {}, 0,
+            resolve_clone_dir=executor._resolve_clone_dir,
+        )
 
     call_kwargs = mock_execute.call_args.kwargs
     assert call_kwargs["model"] is None
@@ -454,7 +460,7 @@ async def test_executor_passes_none_model_when_not_set(sample_pipelines: Any) ->
 async def test_executor_uses_registry_model(sample_pipelines: Any) -> None:
     """_execute_agent uses registry.get_agent_model for model selection."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "clone_status": "ready", "branch": "main"})
     mock_tq = AsyncMock(spec=TaskQueue)
 
     mock_registry = MagicMock()
@@ -477,8 +483,9 @@ async def test_executor_uses_registry_model(sample_pipelines: Any) -> None:
         new_callable=AsyncMock,
         return_value=claude_output,
     ) as mock_execute, patch("aquarco_supervisor.pipeline.executor.Path"):
-        await executor._execute_agent(
+        await executor._invoker.execute_agent(
             "cond-agent", "task-1", {}, 0,
+            resolve_clone_dir=executor._resolve_clone_dir,
         )
 
     mock_registry.get_agent_model.assert_called_once_with("cond-agent")
