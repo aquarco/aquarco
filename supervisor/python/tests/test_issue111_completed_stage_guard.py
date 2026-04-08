@@ -614,3 +614,565 @@ class TestGetLatestStageRun:
 
         params = mock_db.fetch_one.call_args[0][1]
         assert params["iteration"] == 1
+
+
+# ===========================================================================
+# AC7 — Non-completed status fall-through (executing, max_turns)
+# ===========================================================================
+
+
+class TestNonCompletedStatusFallThrough:
+    """Verify that 'executing' and 'max_turns' statuses are NOT blocked by
+    the completed-stage guard.
+
+    These statuses fall through the if/elif chain to the default run=1 path,
+    which is correct pre-existing behavior documented in the code review.
+    The guard must only block 'completed', never these intermediate statuses.
+    """
+
+    @pytest.mark.asyncio
+    async def test_executing_status_proceeds_normally(self) -> None:
+        """A stage stuck in 'executing' (e.g., from a previous crash) should
+        proceed with run=1, not be blocked by the completed guard."""
+        executor = _make_executor()
+
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 150, "status": "executing", "run": 1,
+            "error_message": None, "session_id": "sess-crash",
+        })
+        executor._tq.record_stage_executing = AsyncMock()
+        executor._registry.increment_agent_instances = AsyncMock()
+        executor._registry.decrement_agent_instances = AsyncMock()
+        executor._execute_agent = AsyncMock(return_value={
+            "_subtype": "success", "_is_error": False,
+        })
+        executor._tq.store_stage_output = AsyncMock()
+
+        output, stage_id = await executor._execute_planned_stage(
+            "task-crash", 0, "implement", "impl-agent",
+            {"crash": "recovery"}, iteration=1,
+        )
+
+        # Should NOT be blocked — execution proceeds
+        executor._tq.record_stage_executing.assert_called_once()
+        executor._registry.increment_agent_instances.assert_called_once()
+        executor._tq.get_stage_structured_output.assert_not_called()
+        assert output["_subtype"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_max_turns_status_proceeds_normally(self) -> None:
+        """A stage that hit max_turns should proceed with run=1, not blocked."""
+        executor = _make_executor()
+
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 160, "status": "max_turns", "run": 1,
+            "error_message": "max turns exceeded", "session_id": "sess-mt",
+        })
+        executor._tq.record_stage_executing = AsyncMock()
+        executor._registry.increment_agent_instances = AsyncMock()
+        executor._registry.decrement_agent_instances = AsyncMock()
+        executor._execute_agent = AsyncMock(return_value={
+            "_subtype": "success", "_is_error": False,
+        })
+        executor._tq.store_stage_output = AsyncMock()
+
+        output, stage_id = await executor._execute_planned_stage(
+            "task-mt", 1, "review", "review-agent",
+            {"max_turns": "recovery"}, iteration=1,
+        )
+
+        # Should NOT be blocked
+        executor._tq.record_stage_executing.assert_called_once()
+        executor._registry.increment_agent_instances.assert_called_once()
+        executor._tq.get_stage_structured_output.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_executing_status_at_higher_iteration_proceeds(self) -> None:
+        """An 'executing' status at iteration > 1 still proceeds (not blocked)."""
+        executor = _make_executor()
+
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 170, "status": "executing", "run": 2,
+            "error_message": None, "session_id": None,
+        })
+        executor._tq.record_stage_executing = AsyncMock()
+        executor._registry.increment_agent_instances = AsyncMock()
+        executor._registry.decrement_agent_instances = AsyncMock()
+        executor._execute_agent = AsyncMock(return_value={
+            "_subtype": "success", "_is_error": False,
+        })
+        executor._tq.store_stage_output = AsyncMock()
+
+        output, stage_id = await executor._execute_planned_stage(
+            "task-ex-iter", 0, "analyze", "analyze-agent",
+            {"ctx": "iter3"}, iteration=3,
+        )
+
+        executor._tq.record_stage_executing.assert_called_once()
+        executor._registry.increment_agent_instances.assert_called_once()
+
+
+# ===========================================================================
+# AC8 — Guard does not set resume_session_id for completed stages
+# ===========================================================================
+
+
+class TestCompletedStageNoResume:
+    """Ensure completed stages do NOT propagate session_id for resumption.
+
+    When the guard fires, execution returns immediately. The resume_session_id
+    must never be set from a completed stage, because there is no agent call
+    to resume.
+    """
+
+    @pytest.mark.asyncio
+    async def test_completed_stage_with_session_id_does_not_resume(self) -> None:
+        """Even if the completed stage has a session_id, the guard returns
+        without attempting to resume the conversation."""
+        executor = _make_executor()
+
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 180, "status": "completed", "run": 2,
+            "error_message": None, "session_id": "sess-completed-old",
+        })
+        executor._tq.get_stage_structured_output = AsyncMock(return_value={
+            "summary": "already done",
+        })
+
+        output, stage_id = await executor._execute_planned_stage(
+            "task-nosess", 0, "analyze", "analyze-agent",
+            {"ctx": "check-session"}, iteration=1,
+        )
+
+        # Guard fired: no execution, no session resume
+        assert stage_id == 180
+        assert output["summary"] == "already done"
+        executor._tq.record_stage_executing.assert_not_called()
+        executor._execute_agent = AsyncMock()  # should not have been called
+        executor._registry.increment_agent_instances.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_completed_guard_does_not_create_rerun(self) -> None:
+        """Completed stages never trigger create_rerun_stage (unlike failed)."""
+        executor = _make_executor()
+
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 190, "status": "completed", "run": 3,
+            "error_message": None, "session_id": None,
+        })
+        executor._tq.get_stage_structured_output = AsyncMock(return_value={
+            "_subtype": "success",
+        })
+
+        output, stage_id = await executor._execute_planned_stage(
+            "task-norerun", 1, "implement", "impl-agent",
+            {"ctx": "norerun"}, iteration=2,
+        )
+
+        assert stage_id == 190
+        executor._tq.create_rerun_stage.assert_not_called()
+        executor._tq.record_stage_executing.assert_not_called()
+
+
+# ===========================================================================
+# AC9 — Exact bug reproduction from GitHub #111
+# ===========================================================================
+
+
+class TestGitHubIssue111BugReproduction:
+    """End-to-end simulation of the exact bug described in GitHub #111.
+
+    Scenario from the issue:
+      1. IMPLEMENT stage completes successfully
+      2. REVIEW stage runs (next stage in pipeline)
+      3. BUG: IMPLEMENT stage re-executes instead of creating a new one
+
+    Expected after fix:
+      1. REVIEW (stage 0) → completes
+      2. IMPLEMENT (stage 1) → completes
+      3. REVIEW rerun (stage 2) → completes
+      4. Condition jumps back to IMPLEMENT (stage 1)
+      5. Guard fires: IMPLEMENT returns cached output, NOT re-executed
+    """
+
+    @pytest.mark.asyncio
+    async def test_implement_stage_not_rerun_after_review_completes(self) -> None:
+        """The exact scenario: IMPLEMENT completed, condition jumps back,
+        guard prevents re-execution and returns cached output."""
+        executor = _make_executor()
+
+        # Step 1: IMPLEMENT stage already completed with output
+        implement_output = {
+            "_subtype": "success",
+            "_is_error": False,
+            "summary": "Fixed the bug in pipeline executor",
+            "files_changed": [
+                "supervisor/python/src/aquarco_supervisor/pipeline/executor.py",
+                "supervisor/python/src/aquarco_supervisor/task_queue.py",
+            ],
+        }
+
+        # Step 2: Condition jumps back to IMPLEMENT (stage 1)
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 42, "status": "completed", "run": 1,
+            "error_message": None, "session_id": "sess-impl-done",
+        })
+        executor._tq.get_stage_structured_output = AsyncMock(
+            return_value=implement_output,
+        )
+
+        # Step 3: Execute the stage — guard should fire
+        output, stage_id = await executor._execute_planned_stage(
+            "github-issue-aquarco-111", 1, "implement", "implementation-agent",
+            {"review_feedback": "looks good, approve"}, iteration=1,
+        )
+
+        # Assertions: guard returned cached output
+        assert stage_id == 42
+        assert output["summary"] == "Fixed the bug in pipeline executor"
+        assert output["files_changed"] == implement_output["files_changed"]
+
+        # Agent was NEVER called
+        executor._tq.record_stage_executing.assert_not_called()
+        executor._registry.increment_agent_instances.assert_not_called()
+        executor._tq.create_rerun_stage.assert_not_called()
+        executor._tq.store_stage_output.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_new_iteration_after_completed_still_runs(self) -> None:
+        """When a new iteration is correctly created (iteration=2) for
+        a stage that completed at iteration=1, the new iteration runs.
+
+        This is the EXPECTED behavior for proper condition loops:
+        iteration 1 completed → new iteration 2 is a fresh execution.
+        """
+        executor = _make_executor()
+
+        # iteration=2 has never run — get_latest_stage_run returns None
+        executor._tq.get_latest_stage_run = AsyncMock(return_value=None)
+        executor._tq.record_stage_executing = AsyncMock()
+        executor._registry.increment_agent_instances = AsyncMock()
+        executor._registry.decrement_agent_instances = AsyncMock()
+        executor._execute_agent = AsyncMock(return_value={
+            "_subtype": "success", "_is_error": False,
+            "summary": "Re-implemented after review feedback",
+            "files_changed": ["executor.py"],
+        })
+        executor._tq.store_stage_output = AsyncMock()
+
+        output, stage_id = await executor._execute_planned_stage(
+            "github-issue-aquarco-111", 1, "implement", "implementation-agent",
+            {"review_feedback": "needs changes"}, iteration=2,
+        )
+
+        # New iteration executes normally
+        assert output["summary"] == "Re-implemented after review feedback"
+        executor._tq.record_stage_executing.assert_called_once()
+        executor._registry.increment_agent_instances.assert_called_once()
+        executor._execute_agent.assert_called_once()
+
+
+# ===========================================================================
+# AC10 — get_stage_structured_output type safety edge cases
+# ===========================================================================
+
+
+class TestGetStageStructuredOutputTypeSafety:
+    """Additional type safety tests for get_stage_structured_output.
+
+    The function signature says it returns dict | None, but json.loads
+    can return non-dict types (list, str, int, bool). These tests
+    document the actual behavior for each case.
+    """
+
+    @pytest.mark.asyncio
+    async def test_json_list_string_returns_list_not_none(self) -> None:
+        """A JSON string encoding a list parses to a list.
+
+        Note: This is a type-safety gap — the return type says dict|None
+        but json.loads('[1,2,3]') returns a list. The primary guard
+        prevents this from being reached in practice since structured_output
+        is always a JSON object.
+        """
+        tq, mock_db = _make_task_queue()
+        mock_db.fetch_val = AsyncMock(return_value='[1, 2, 3]')
+
+        result = await tq.get_stage_structured_output(10)
+        # json.loads('[1,2,3]') returns [1,2,3] — a list, not None
+        assert result == [1, 2, 3]
+
+    @pytest.mark.asyncio
+    async def test_json_string_string_returns_string(self) -> None:
+        """A JSON string encoding a string returns a string.
+
+        Another type-safety gap: json.loads('"hello"') returns 'hello'.
+        """
+        tq, mock_db = _make_task_queue()
+        mock_db.fetch_val = AsyncMock(return_value='"hello world"')
+
+        result = await tq.get_stage_structured_output(11)
+        assert result == "hello world"
+
+    @pytest.mark.asyncio
+    async def test_json_null_string_returns_none(self) -> None:
+        """A JSON string 'null' parses to None, which is returned as None
+        because json.loads('null') returns None, which the function catches."""
+        tq, mock_db = _make_task_queue()
+        mock_db.fetch_val = AsyncMock(return_value='null')
+
+        result = await tq.get_stage_structured_output(12)
+        # json.loads('null') returns None; but the None check is at the top,
+        # for the raw value. Since raw='null' is not None, it falls through
+        # to json.loads which returns Python None.
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_json_boolean_string_returns_bool(self) -> None:
+        """json.loads('true') returns True — another type gap."""
+        tq, mock_db = _make_task_queue()
+        mock_db.fetch_val = AsyncMock(return_value='true')
+
+        result = await tq.get_stage_structured_output(13)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_boolean_raw_value_returns_none(self) -> None:
+        """A raw boolean (not a string) hits the json.loads path, which
+        raises TypeError, returning None."""
+        tq, mock_db = _make_task_queue()
+        mock_db.fetch_val = AsyncMock(return_value=True)
+
+        result = await tq.get_stage_structured_output(14)
+        # True is not dict, not None; json.loads(True) raises TypeError → None
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_float_raw_value_returns_none(self) -> None:
+        """A raw float hits json.loads which raises TypeError → None."""
+        tq, mock_db = _make_task_queue()
+        mock_db.fetch_val = AsyncMock(return_value=3.14)
+
+        result = await tq.get_stage_structured_output(15)
+        assert result is None
+
+
+# ===========================================================================
+# AC11 — record_stage_executing parameter validation
+# ===========================================================================
+
+
+class TestRecordStageExecutingParamValidation:
+    """Validate parameter handling in all three paths of record_stage_executing."""
+
+    @pytest.mark.asyncio
+    async def test_stage_key_path_passes_all_params(self) -> None:
+        """stage_key path passes iteration, run, and stage_key params."""
+        tq, mock_db = _make_task_queue()
+        await tq.record_stage_executing(
+            "task-3", 2, "test", "test-agent",
+            stage_key="2:test:test-agent",
+            iteration=3, run=2,
+            input_context={"test": "context"},
+            execution_order=7,
+        )
+
+        params = mock_db.execute.call_args[0][1]
+        assert params["task_id"] == "task-3"
+        assert params["stage_key"] == "2:test:test-agent"
+        assert params["iteration"] == 3
+        assert params["run"] == 2
+        assert params["agent"] == "test-agent"
+        assert params["eo"] == 7
+        assert json.loads(params["input"]) == {"test": "context"}
+
+    @pytest.mark.asyncio
+    async def test_legacy_path_passes_correct_params(self) -> None:
+        """Legacy path (no stage_id, no stage_key) passes task_id and stage_num."""
+        tq, mock_db = _make_task_queue()
+        await tq.record_stage_executing(
+            "task-legacy", 0, "analyze", "analyze-agent",
+            execution_order=1,
+        )
+
+        params = mock_db.execute.call_args[0][1]
+        assert params["task_id"] == "task-legacy"
+        assert params["stage"] == 0
+        assert params["category"] == "analyze"
+        assert params["agent"] == "analyze-agent"
+        assert params["eo"] == 1
+
+    @pytest.mark.asyncio
+    async def test_stage_id_path_null_input_context(self) -> None:
+        """stage_id path with no input_context passes None for input."""
+        tq, mock_db = _make_task_queue()
+        await tq.record_stage_executing(
+            "task-null", 0, "implement", "impl-agent",
+            stage_id=50, stage_key="0:implement:impl-agent",
+        )
+
+        params = mock_db.execute.call_args[0][1]
+        assert params["input"] is None
+
+    @pytest.mark.asyncio
+    async def test_legacy_path_uses_on_conflict(self) -> None:
+        """Legacy path uses INSERT ... ON CONFLICT DO UPDATE."""
+        tq, mock_db = _make_task_queue()
+        await tq.record_stage_executing(
+            "task-legacy", 0, "review", "review-agent",
+        )
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "INSERT INTO stages" in sql
+        assert "ON CONFLICT (task_id, stage_number) DO UPDATE" in sql
+
+    @pytest.mark.asyncio
+    async def test_stage_id_path_uses_update(self) -> None:
+        """stage_id path uses a plain UPDATE (not INSERT ON CONFLICT)."""
+        tq, mock_db = _make_task_queue()
+        await tq.record_stage_executing(
+            "task-upd", 0, "implement", "impl-agent",
+            stage_id=99, stage_key="0:implement:impl-agent",
+        )
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "UPDATE stages" in sql
+        assert "INSERT" not in sql
+
+
+# ===========================================================================
+# AC12 — Guard with execution_order parameter
+# ===========================================================================
+
+
+class TestCompletedGuardWithExecutionOrder:
+    """Verify the guard works correctly when execution_order is provided.
+
+    The execution_order parameter is used for parallel stages. The guard
+    should still fire regardless of execution_order value.
+    """
+
+    @pytest.mark.asyncio
+    async def test_guard_fires_with_execution_order(self) -> None:
+        """Completed guard fires even when execution_order is set."""
+        executor = _make_executor()
+
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 200, "status": "completed", "run": 1,
+            "error_message": None, "session_id": None,
+        })
+        executor._tq.get_stage_structured_output = AsyncMock(return_value={
+            "summary": "parallel stage done",
+        })
+
+        output, stage_id = await executor._execute_planned_stage(
+            "task-eo", 0, "analyze", "analyze-agent",
+            {"ctx": "parallel"}, iteration=1,
+            execution_order=5,
+        )
+
+        assert stage_id == 200
+        assert output["summary"] == "parallel stage done"
+        executor._tq.record_stage_executing.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_guard_fires_with_all_optional_params(self) -> None:
+        """Completed guard fires with all optional params (stage_id, work_dir,
+        pipeline_name, execution_order)."""
+        executor = _make_executor()
+
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 210, "status": "completed", "run": 2,
+            "error_message": None, "session_id": "sess-all",
+        })
+        executor._tq.get_stage_structured_output = AsyncMock(return_value={
+            "result": "comprehensive",
+        })
+
+        output, stage_id = await executor._execute_planned_stage(
+            "task-all-params", 3, "test", "test-agent",
+            {"ctx": "full"}, iteration=4,
+            stage_id=210,
+            work_dir="/tmp/worktree",
+            pipeline_name="bugfix-pipeline",
+            execution_order=10,
+        )
+
+        assert stage_id == 210
+        assert output["result"] == "comprehensive"
+        executor._tq.record_stage_executing.assert_not_called()
+        executor._registry.increment_agent_instances.assert_not_called()
+
+
+# ===========================================================================
+# AC13 — Guard return value contract
+# ===========================================================================
+
+
+class TestGuardReturnValueContract:
+    """Verify the guard's return value contract: (output_dict, stage_id).
+
+    The guard must always return a tuple of (dict, int|None). The dict
+    is either the existing structured output or {} if no output exists.
+    """
+
+    @pytest.mark.asyncio
+    async def test_guard_returns_tuple_with_output_and_id(self) -> None:
+        """Guard returns (output_dict, stage_id) matching the method signature."""
+        executor = _make_executor()
+
+        expected_output = {"k": "v", "n": 42}
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 300, "status": "completed", "run": 1,
+            "error_message": None, "session_id": None,
+        })
+        executor._tq.get_stage_structured_output = AsyncMock(
+            return_value=expected_output,
+        )
+
+        result = await executor._execute_planned_stage(
+            "task-contract", 0, "analyze", "agent", {}, iteration=1,
+        )
+
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        output, sid = result
+        assert isinstance(output, dict)
+        assert output == expected_output
+        assert sid == 300
+
+    @pytest.mark.asyncio
+    async def test_guard_returns_empty_dict_when_output_is_none(self) -> None:
+        """When get_stage_structured_output returns None, guard returns {}."""
+        executor = _make_executor()
+
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 310, "status": "completed", "run": 1,
+            "error_message": None, "session_id": None,
+        })
+        executor._tq.get_stage_structured_output = AsyncMock(return_value=None)
+
+        output, sid = await executor._execute_planned_stage(
+            "task-empty", 0, "analyze", "agent", {}, iteration=1,
+        )
+
+        assert output == {}
+        assert sid == 310
+
+    @pytest.mark.asyncio
+    async def test_guard_returns_stage_id_from_latest_run(self) -> None:
+        """Guard uses latest run's id, not the stage_id parameter."""
+        executor = _make_executor()
+
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 999, "status": "completed", "run": 5,
+            "error_message": None, "session_id": None,
+        })
+        executor._tq.get_stage_structured_output = AsyncMock(return_value={"ok": True})
+
+        # Pass a different stage_id — guard should use latest's id
+        output, sid = await executor._execute_planned_stage(
+            "task-id", 0, "analyze", "agent", {},
+            iteration=1, stage_id=1,  # this should be ignored
+        )
+
+        assert sid == 999  # from latest, not from parameter
