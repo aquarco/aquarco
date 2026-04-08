@@ -155,7 +155,7 @@ describe('Mutation.setAgentDisabled', () => {
 // ── modifyAgent ────────────────────────────────────────────────────────────────
 
 describe('Mutation.modifyAgent', () => {
-  const newSpec = { timeout: 600, maxTurns: 100 }
+  const newSpec = { categories: ['review'], promptFile: 'agents/review.md' }
 
   it('should return agent with isModified=true after modification', async () => {
     const pool = mockPool([
