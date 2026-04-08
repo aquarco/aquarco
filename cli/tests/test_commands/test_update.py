@@ -555,6 +555,19 @@ class TestRunRollback:
         assert "dir with spaces" in call_cmd
 
     @patch("aquarco_cli.commands.update.VagrantHelper")
+    def test_rollback_runs_as_agent_user(self, mock_cls):
+        """rollback.sh must run via sudo -u agent HOME=/home/agent."""
+        from aquarco_cli.commands.update import _run_rollback
+
+        mock_vagrant = MagicMock()
+        _run_rollback(mock_vagrant, "/var/lib/aquarco/backups/20260408T120000")
+
+        cmd = mock_vagrant.ssh.call_args[0][0]
+        assert "sudo -u agent" in cmd
+        assert "HOME=/home/agent" in cmd
+        assert "rollback.sh" in cmd
+
+    @patch("aquarco_cli.commands.update.VagrantHelper")
     def test_rollback_failure_does_not_raise(self, mock_cls):
         """_run_rollback must not raise when the rollback SSH call fails."""
         from aquarco_cli.vagrant import VagrantError

@@ -57,7 +57,7 @@ def _run_rollback(vagrant: VagrantHelper, backup_dir: str) -> None:
     print_warning("Rolling back update...")
     try:
         vagrant.ssh(
-            f"bash /home/agent/aquarco/vagrant/scripts/rollback.sh --backup-dir {shlex.quote(backup_dir)}",
+            f"sudo -u agent HOME=/home/agent bash /home/agent/aquarco/vagrant/scripts/rollback.sh --backup-dir {shlex.quote(backup_dir)}",
             stream=True,
         )
         print_info("Rollback completed.")
