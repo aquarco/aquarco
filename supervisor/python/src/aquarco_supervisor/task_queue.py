@@ -681,7 +681,13 @@ class TaskQueue:
         input_context: dict[str, Any] | None = None,
         execution_order: int | None = None,
     ) -> None:
-        """Record that a stage is now executing."""
+        """Record that a stage is now executing.
+
+        Guard: refuses to overwrite a stage that has already completed.
+        The ``AND status != 'completed'`` clause on every UPDATE path
+        ensures completed stages are never corrupted, even if the caller
+        erroneously passes a stage_id/stage_key that points to a finished row.
+        """
         if stage_id is not None:
             await self._db.execute(
                 """
@@ -692,6 +698,7 @@ class TaskQueue:
                     cache_read_tokens = 0, cache_write_tokens = 0,
                     execution_order = %(eo)s
                 WHERE id = %(id)s
+                      AND status != 'completed'
                 """,
                 {
                     "id": stage_id,
@@ -712,6 +719,7 @@ class TaskQueue:
                     execution_order = %(eo)s
                 WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
                       AND iteration = %(iteration)s AND run = %(run)s
+                      AND status != 'completed'
                 """,
                 {
                     "task_id": task_id,
@@ -739,6 +747,7 @@ class TaskQueue:
                     cost_usd = 0, tokens_input = 0, tokens_output = 0,
                     cache_read_tokens = 0, cache_write_tokens = 0,
                     execution_order = %(eo)s
+                WHERE stages.status != 'completed'
                 """,
                 {
                     "task_id": task_id,
@@ -1143,6 +1152,27 @@ class TaskQueue:
             """,
             {"task_id": task_id, "stage_key": stage_key, "iteration": iteration},
         )
+
+    async def get_stage_structured_output(
+        self,
+        stage_id: int,
+    ) -> dict[str, Any] | None:
+        """Return the structured_output JSON for a stage by its id.
+
+        Returns ``None`` when the stage has no output or does not exist.
+        """
+        raw = await self._db.fetch_val(
+            "SELECT structured_output FROM stages WHERE id = %(id)s",
+            {"id": stage_id},
+        )
+        if raw is None:
+            return None
+        if isinstance(raw, dict):
+            return raw
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return None
 
     async def create_rerun_stage(
         self,

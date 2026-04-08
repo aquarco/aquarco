@@ -253,3 +253,135 @@ class TestStageIterationsFirstTimeJump:
             stage_iterations[target_name] = next_iter
 
         assert stage_iterations["test"] == 4
+
+
+# ---------------------------------------------------------------------------
+# Completed-stage guard in _execute_planned_stage (#111)
+# ---------------------------------------------------------------------------
+
+
+class TestCompletedStageGuard:
+    """Regression tests for the completed-stage rerun bug (GitHub #111).
+
+    When _execute_planned_stage encounters a stage whose latest run
+    has status='completed', it must refuse to re-execute and return
+    the existing output instead of overwriting the completed row.
+    """
+
+    def _make_executor(self) -> PipelineExecutor:
+        mock_db = AsyncMock(spec=Database)
+        mock_tq = AsyncMock(spec=TaskQueue)
+        mock_registry = MagicMock()
+        executor = PipelineExecutor.__new__(PipelineExecutor)
+        executor._db = mock_db
+        executor._tq = mock_tq
+        executor._registry = mock_registry
+        executor._pipelines = []
+        executor._execution_order = {}
+        return executor
+
+    @pytest.mark.asyncio
+    async def test_completed_stage_returns_existing_output(self) -> None:
+        """A completed stage returns its existing output without re-executing."""
+        executor = self._make_executor()
+
+        # Mock get_latest_stage_run returning a completed stage
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 42, "status": "completed", "run": 1,
+            "error_message": None, "session_id": None,
+        })
+        # Mock get_stage_structured_output returning existing output
+        executor._tq.get_stage_structured_output = AsyncMock(return_value={
+            "summary": "Already implemented", "files_changed": ["a.py"],
+        })
+
+        output, stage_id = await executor._execute_planned_stage(
+            "task-1", 1, "implement", "impl-agent",
+            {"some": "context"}, iteration=1,
+        )
+
+        assert stage_id == 42
+        assert output["summary"] == "Already implemented"
+        # Must NOT have called record_stage_executing
+        executor._tq.record_stage_executing.assert_not_called()
+        # Must NOT have called the agent
+        executor._registry.increment_agent_instances.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_completed_stage_returns_empty_dict_when_no_output(self) -> None:
+        """Completed stage with no stored output returns empty dict."""
+        executor = self._make_executor()
+
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 99, "status": "completed", "run": 1,
+            "error_message": None, "session_id": None,
+        })
+        executor._tq.get_stage_structured_output = AsyncMock(return_value=None)
+
+        output, stage_id = await executor._execute_planned_stage(
+            "task-1", 2, "review", "review-agent",
+            {"some": "context"}, iteration=1,
+        )
+
+        assert stage_id == 99
+        assert output == {}
+        executor._tq.record_stage_executing.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failed_stage_still_creates_rerun(self) -> None:
+        """A failed stage still creates a retry run (existing behavior preserved)."""
+        executor = self._make_executor()
+
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 50, "status": "failed", "run": 1,
+            "error_message": "boom", "session_id": "sess-1",
+        })
+        executor._tq.create_rerun_stage = AsyncMock(return_value=60)
+        executor._tq.record_stage_executing = AsyncMock()
+        executor._registry.increment_agent_instances = AsyncMock()
+        executor._registry.decrement_agent_instances = AsyncMock()
+
+        # Mock _execute_agent to return success output
+        executor._execute_agent = AsyncMock(return_value={
+            "_subtype": "success", "_is_error": False,
+        })
+        executor._tq.store_stage_output = AsyncMock()
+
+        output, stage_id = await executor._execute_planned_stage(
+            "task-1", 0, "analyze", "analyze-agent",
+            {"some": "context"}, iteration=1,
+        )
+
+        # create_rerun_stage should have been called with run=2
+        executor._tq.create_rerun_stage.assert_called_once()
+        call_kwargs = executor._tq.create_rerun_stage.call_args
+        assert call_kwargs[0][6] == 2  # run=2
+        # record_stage_executing should be called (not blocked)
+        executor._tq.record_stage_executing.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_pending_stage_uses_existing_row(self) -> None:
+        """A pending stage reuses the existing row (existing behavior preserved)."""
+        executor = self._make_executor()
+
+        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+            "id": 70, "status": "pending", "run": 1,
+            "error_message": None, "session_id": None,
+        })
+        executor._tq.record_stage_executing = AsyncMock()
+        executor._registry.increment_agent_instances = AsyncMock()
+        executor._registry.decrement_agent_instances = AsyncMock()
+        executor._execute_agent = AsyncMock(return_value={
+            "_subtype": "success", "_is_error": False,
+        })
+        executor._tq.store_stage_output = AsyncMock()
+
+        output, stage_id = await executor._execute_planned_stage(
+            "task-1", 0, "analyze", "analyze-agent",
+            {"some": "context"}, iteration=1, stage_id=70,
+        )
+
+        # record_stage_executing should be called with the pending row's id
+        executor._tq.record_stage_executing.assert_called_once()
+        call_kwargs = executor._tq.record_stage_executing.call_args
+        assert call_kwargs[1].get("stage_id") or call_kwargs[0][4] is not None

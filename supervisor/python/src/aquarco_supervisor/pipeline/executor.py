@@ -716,7 +716,22 @@ class PipelineExecutor:
         run = 1
         resume_session_id: str | None = None
         latest = await self._tq.get_latest_stage_run(task_id, stage_key, iteration)
-        if latest and latest["status"] in ("failed", "rate_limited"):
+        if latest and latest["status"] == "completed":
+            # Guard: COMPLETED stages must NEVER be re-executed.
+            # This can happen when a condition-driven loop revisits a stage
+            # index whose iteration row was not properly created (ON CONFLICT),
+            # leaving stage_id pointing at the old completed row.
+            log.warning(
+                "completed_stage_guard",
+                task_id=task_id,
+                stage_key=stage_key,
+                iteration=iteration,
+                stage_id=latest.get("id"),
+                msg="Refusing to re-execute a completed stage; returning existing output",
+            )
+            existing = await self._tq.get_stage_structured_output(latest["id"])
+            return existing or {}, latest.get("id")
+        elif latest and latest["status"] in ("failed", "rate_limited"):
             run = latest["run"] + 1
             resume_session_id = latest.get("session_id")
             stage_id = await self._tq.create_rerun_stage(
