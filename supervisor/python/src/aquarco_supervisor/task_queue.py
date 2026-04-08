@@ -679,6 +679,7 @@ class TaskQueue:
         iteration: int = 1,
         run: int = 1,
         input_context: dict[str, Any] | None = None,
+        execution_order: int | None = None,
     ) -> None:
         """Record that a stage is now executing."""
         if stage_id is not None:
@@ -688,13 +689,15 @@ class TaskQueue:
                 SET agent = %(agent)s, status = 'executing', started_at = NOW(),
                     input = %(input)s::jsonb, live_output = NULL, raw_output = NULL,
                     cost_usd = 0, tokens_input = 0, tokens_output = 0,
-                    cache_read_tokens = 0, cache_write_tokens = 0
+                    cache_read_tokens = 0, cache_write_tokens = 0,
+                    execution_order = %(eo)s
                 WHERE id = %(id)s
                 """,
                 {
                     "id": stage_id,
                     "agent": agent,
                     "input": json.dumps(input_context) if input_context else None,
+                    "eo": execution_order,
                 },
             )
         elif stage_key:
@@ -705,7 +708,8 @@ class TaskQueue:
                 SET agent = %(agent)s, status = 'executing', started_at = NOW(),
                     input = %(input)s::jsonb, live_output = NULL, raw_output = NULL,
                     cost_usd = 0, tokens_input = 0, tokens_output = 0,
-                    cache_read_tokens = 0, cache_write_tokens = 0
+                    cache_read_tokens = 0, cache_write_tokens = 0,
+                    execution_order = %(eo)s
                 WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
                       AND iteration = %(iteration)s AND run = %(run)s
                 """,
@@ -716,6 +720,7 @@ class TaskQueue:
                     "run": run,
                     "agent": agent,
                     "input": json.dumps(input_context) if input_context else None,
+                    "eo": execution_order,
                 },
             )
         else:
@@ -724,20 +729,23 @@ class TaskQueue:
                 """
                 INSERT INTO stages (task_id, stage_number, category, agent, status, started_at,
                                    cost_usd, tokens_input, tokens_output,
-                                   cache_read_tokens, cache_write_tokens)
+                                   cache_read_tokens, cache_write_tokens,
+                                   execution_order)
                 VALUES (%(task_id)s, %(stage)s, %(category)s, %(agent)s, 'executing', NOW(),
-                        0, 0, 0, 0, 0)
+                        0, 0, 0, 0, 0, %(eo)s)
                 ON CONFLICT (task_id, stage_number) DO UPDATE
                 SET agent = %(agent)s, status = 'executing', started_at = NOW(),
                     live_output = NULL, raw_output = NULL,
                     cost_usd = 0, tokens_input = 0, tokens_output = 0,
-                    cache_read_tokens = 0, cache_write_tokens = 0
+                    cache_read_tokens = 0, cache_write_tokens = 0,
+                    execution_order = %(eo)s
                 """,
                 {
                     "task_id": task_id,
                     "stage": stage_num,
                     "category": category,
                     "agent": agent,
+                    "eo": execution_order,
                 },
             )
 
@@ -810,6 +818,7 @@ class TaskQueue:
         *,
         stage_id: int | None = None,
         stage_key: str | None = None,
+        execution_order: int | None = None,
     ) -> None:
         """Record that a stage was skipped.
 
@@ -821,32 +830,38 @@ class TaskQueue:
             await self._db.execute(
                 """
                 UPDATE stages
-                SET status = 'skipped', completed_at = NOW()
+                SET status = 'skipped', completed_at = NOW(),
+                    execution_order = %(eo)s
                 WHERE id = %(id)s
                       AND status NOT IN ('completed', 'failed')
                 """,
-                {"id": stage_id},
+                {"id": stage_id, "eo": execution_order},
             )
         elif stage_key:
             await self._db.execute(
                 """
                 UPDATE stages
-                SET status = 'skipped', completed_at = NOW()
+                SET status = 'skipped', completed_at = NOW(),
+                    execution_order = %(eo)s
                 WHERE task_id = %(task_id)s AND stage_key = %(stage_key)s
                       AND status NOT IN ('completed', 'failed')
                 """,
-                {"task_id": task_id, "stage_key": stage_key},
+                {"task_id": task_id, "stage_key": stage_key, "eo": execution_order},
             )
         else:
             await self._db.execute(
                 """
-                INSERT INTO stages (task_id, stage_number, category, status, started_at, completed_at)
-                VALUES (%(task_id)s, %(stage)s, %(category)s, 'skipped', NOW(), NOW())
+                INSERT INTO stages (task_id, stage_number, category, status,
+                                   started_at, completed_at, execution_order)
+                VALUES (%(task_id)s, %(stage)s, %(category)s, 'skipped',
+                        NOW(), NOW(), %(eo)s)
                 ON CONFLICT (task_id, stage_number) DO UPDATE
-                SET status = 'skipped', completed_at = NOW()
+                SET status = 'skipped', completed_at = NOW(),
+                    execution_order = %(eo)s
                 WHERE stages.status NOT IN ('completed', 'failed')
                 """,
-                {"task_id": task_id, "stage": stage_num, "category": category},
+                {"task_id": task_id, "stage": stage_num, "category": category,
+                 "eo": execution_order},
             )
 
     async def create_pending_stages(
@@ -1287,3 +1302,15 @@ class TaskQueue:
             {"id": stage_id},
         )
         return int(result) if result is not None else None
+
+    async def get_max_execution_order(self, task_id: str) -> int:
+        """Return the current maximum execution_order for a task, or 0 if none set."""
+        result = await self._db.fetch_val(
+            """
+            SELECT COALESCE(MAX(execution_order), 0)
+            FROM stages
+            WHERE task_id = %(task_id)s AND execution_order IS NOT NULL
+            """,
+            {"task_id": task_id},
+        )
+        return int(result) if result else 0

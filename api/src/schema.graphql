@@ -121,6 +121,7 @@ type Stage {
   stageNumber: Int!
   iteration: Int!
   run: Int!
+  executionOrder: Int
   category: String!
   agent: String
   agentVersion: String

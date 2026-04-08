@@ -385,6 +385,7 @@ export function mapStage(row: Record<string, unknown>) {
     stageNumber: row.stage_number,
     iteration: (row.iteration as number | null) ?? 1,
     run: (row.run as number | null) ?? 1,
+    executionOrder: (row.execution_order as number | null) ?? null,
     category: (row.category as string).toUpperCase(),
     agent: row.agent ?? null,
     agentVersion: row.agent_version ?? null,
