@@ -3,7 +3,7 @@
  */
 
 import { Context } from '../context.js'
-import { mapAgentDefinition, fetchAgentWithOverrides } from './queries.js'
+import { mapAgentDefinition, fetchAgentWithOverrides } from './mappers.js'
 import { agentErrorPayload, prErrorPayload, validateScope, validateSpec } from './helpers.js'
 
 export const agentMutations = {

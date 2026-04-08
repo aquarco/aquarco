@@ -16,6 +16,8 @@ export interface Stage {
   costUsd: number | null
   cacheReadTokens: number | null
   cacheWriteTokens: number | null
+  model: string | null
+  rawOutput: string | null
   errorMessage: string | null
   retryCount: number
   liveOutput: string | null

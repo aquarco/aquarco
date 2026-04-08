@@ -69,11 +69,11 @@ class PipelineExecutor:
         # Delegate to focused submodules
         self._invoker = AgentInvoker(db, registry, pipelines)
         self._planner = PipelinePlanner(
-            task_queue, stage_manager, registry,
+            task_queue, self._sm, registry,
             self._invoker, self._next_execution_order,
         )
         self._runner = StageRunner(
-            db, task_queue, stage_manager, registry,
+            db, task_queue, self._sm, registry,
             self._invoker, self._next_execution_order,
         )
 

@@ -6,8 +6,10 @@
 import { mapTask } from './mappers.js'
 
 // GraphQL enum values are UPPER_CASE; DB stores lower_case
-export function toDbEnum(value: string): string {
-  return value.toLowerCase()
+export function toDbEnum(value: string): string
+export function toDbEnum(value: string | null | undefined): string | null
+export function toDbEnum(value: string | null | undefined): string | null {
+  return value ? value.toLowerCase() : null
 }
 
 export function taskPayload(task: Record<string, unknown>) {

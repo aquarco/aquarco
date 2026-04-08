@@ -1,11 +1,11 @@
+'use client'
+
 /**
  * Task action buttons and unblock dialog for the task detail page.
  *
  * Provides Retry, Rerun, Close, Cancel, and Unblock actions based on
  * the current task status.
  */
-
-'use client'
 
 import React, { useState } from 'react'
 import { useMutation } from '@apollo/client'

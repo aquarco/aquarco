@@ -3,7 +3,7 @@
  */
 
 import { Context, requireInternalAuth } from '../context.js'
-import { mapRepository, getDrainStatus } from './queries.js'
+import { mapRepository, getDrainStatus } from './mappers.js'
 import { repoErrorPayload } from './helpers.js'
 
 export const repoMutations = {

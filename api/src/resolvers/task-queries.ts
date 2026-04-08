@@ -3,13 +3,8 @@
  */
 
 import { Context } from '../context.js'
-import { mapTask } from './mappers.js'
-import { mapStage } from './queries.js'
-
-// GraphQL enum values are UPPER_CASE; DB stores lower_case
-function toDbEnum(value: string | null | undefined): string | null {
-  return value ? value.toLowerCase() : null
-}
+import { mapTask, mapStage } from './mappers.js'
+import { toDbEnum } from './helpers.js'
 
 export const taskQueries = {
   async tasks(

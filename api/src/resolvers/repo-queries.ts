@@ -3,7 +3,7 @@
  */
 
 import { Context } from '../context.js'
-import { mapRepository, mapAgentDefinition } from './queries.js'
+import { mapRepository, mapAgentDefinition } from './mappers.js'
 
 export const repoQueries = {
   async repositories(_: unknown, __: unknown, ctx: Context) {

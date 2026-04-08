@@ -655,7 +655,7 @@ class StageRunner:
         finally:
             for wt_dir, sub_branch in zip(worktree_dirs, sub_branches):
                 try:
-                    await _run_git(clone_dir, "worktree", "remove", wt_dir, "--force")
+                    await self._exec._run_git(clone_dir, "worktree", "remove", wt_dir, "--force")
                 except Exception:
                     shutil.rmtree(wt_dir, ignore_errors=True)
                 try:
