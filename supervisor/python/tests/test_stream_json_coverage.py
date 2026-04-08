@@ -131,7 +131,7 @@ async def test_execute_claude_failed_exit_reads_log_files(tmp_path: Path) -> Non
     mock_proc = _make_proc(returncode=1)
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     read_text_calls: list[str] = []
     original_read_text = Path.read_text
@@ -148,8 +148,7 @@ async def test_execute_claude_failed_exit_reads_log_files(tmp_path: Path) -> Non
          patch("pathlib.Path.mkdir"), \
          patch.object(Path, "read_text", patched_read_text):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         with pytest.raises(AgentExecutionError):
             await execute_claude(
@@ -175,7 +174,7 @@ async def test_tail_file_on_live_output_exception_suppressed(tmp_path: Path) -> 
         raise RuntimeError("callback failed")
 
     proc = _make_proc(returncode=0)
-    lines, result_seen = await _tail_file(
+    lines, _, result_seen = await _tail_file(
         stdout_file, proc,
         on_live_output=bad_callback,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
@@ -196,7 +195,7 @@ async def test_tail_file_empty_file_exited_process(tmp_path: Path) -> None:
     stdout_file.write_text("")
 
     proc = _make_proc(returncode=0)
-    lines, result_seen = await _tail_file(
+    lines, _, result_seen = await _tail_file(
         stdout_file, proc,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
     )

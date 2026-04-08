@@ -12,6 +12,7 @@ import json
 import os
 import re
 import tempfile
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,7 @@ class ClaudeOutput:
 
     structured: dict[str, Any] = field(default_factory=dict)
     raw: str = ""
+    raw_output_path: str | None = None
 
 
 log = get_logger("claude-cli")
@@ -39,6 +41,12 @@ _TAIL_POLL_INTERVAL = 0.5
 
 # Directory for debug/stderr logs (overridable in tests).
 _LOG_DIR = Path("/var/log/aquarco")
+
+# Maximum bytes to read from the NDJSON stdout file for raw_output (128 KB).
+_RAW_OUTPUT_MAX_BYTES = 131072
+
+# Chunk size for stream-scanning the NDJSON file (64 KB).
+_RATE_LIMIT_SCAN_CHUNK = 65536
 
 
 # ---------------------------------------------------------------------------
@@ -53,10 +61,15 @@ async def _tail_file(
     timeout_seconds: float,
     task_id: str = "",
     stage_num: int = 0,
-) -> tuple[list[str], bool]:
+) -> tuple[list[str], str | None, bool]:
     """Tail an NDJSON file written by Claude CLI until the process exits.
 
-    Returns (lines, result_seen).
+    Returns (tail_lines, result_line, result_seen).
+
+    tail_lines is the last 50 lines seen (for error reporting and output
+    parsing).  result_line is the exact raw JSON string of the first
+    ``{type: "result"}`` event, captured when first seen so it is always
+    available even if later lines push it out of the tail window.
 
     The loop runs until one of:
     1. The process exits (``proc.returncode is not None``).
@@ -64,7 +77,8 @@ async def _tail_file(
     3. The result event is seen and the process doesn't exit within
        ``_POST_RESULT_GRACE_SECONDS`` → process is terminated then killed.
     """
-    lines: list[str] = []
+    tail: deque[str] = deque(maxlen=50)
+    result_line: str | None = None
     offset = 0
     result_seen = False
     result_seen_at: float | None = None
@@ -137,7 +151,7 @@ async def _tail_file(
                     line = raw_line.rstrip("\r")
                     if not line.strip():
                         continue
-                    lines.append(line)
+                    tail.append(line)
 
                     # Check for result event
                     if not result_seen:
@@ -146,6 +160,7 @@ async def _tail_file(
                             if isinstance(msg, dict) and msg.get("type") == "result":
                                 result_seen = True
                                 result_seen_at = loop.time()
+                                result_line = line
                                 log.info(
                                     "claude_result_event_seen",
                                     task_id=task_id,
@@ -177,12 +192,13 @@ async def _tail_file(
                 line = raw_line.rstrip("\r")
                 if not line.strip():
                     continue
-                lines.append(line)
+                tail.append(line)
                 if not result_seen:
                     try:
                         msg = json.loads(line)
                         if isinstance(msg, dict) and msg.get("type") == "result":
                             result_seen = True
+                            result_line = line
                     except json.JSONDecodeError:
                         pass
                 if on_live_output is not None:
@@ -192,17 +208,18 @@ async def _tail_file(
                         pass
         elif partial.strip():
             # Flush any remaining partial line
-            lines.append(partial.rstrip("\r"))
+            line = partial.rstrip("\r")
+            tail.append(line)
             if on_live_output is not None:
                 try:
-                    await on_live_output(partial.rstrip("\r"))
+                    await on_live_output(line)
                 except Exception:
                     pass
 
     finally:
         tail_fh.close()
 
-    return lines, result_seen
+    return list(tail), result_line, result_seen
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +238,70 @@ def _format_schema_prompt(schema: dict[str, Any]) -> str:
         "```",
     ]
     return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Raw output file helpers
+# ---------------------------------------------------------------------------
+
+
+def _read_file_tail(path: Path, max_bytes: int = _RAW_OUTPUT_MAX_BYTES) -> str:
+    """Read the last *max_bytes* of *path* and return as a UTF-8 string.
+
+    Used to populate ClaudeOutput.raw without loading the full file into
+    memory.  Returns an empty string if the file is missing or empty.
+    """
+    try:
+        size = path.stat().st_size
+        if size == 0:
+            return ""
+        read_from = max(0, size - max_bytes)
+        with open(path, "rb") as fh:
+            if read_from > 0:
+                fh.seek(read_from)
+            return fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _scan_file_for_rate_limit_event(path: Path) -> str | None:
+    """Stream-scan *path* in 64 KB chunks for a ``rate_limit_event`` NDJSON line.
+
+    Returns the raw JSON line string if found, ``None`` otherwise.  Avoids
+    loading the full file into memory when searching for a single event type.
+    """
+    try:
+        remainder = ""
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            while True:
+                chunk = fh.read(_RATE_LIMIT_SCAN_CHUNK)
+                if not chunk:
+                    break
+                text = remainder + chunk
+                lines = text.split("\n")
+                remainder = lines.pop()  # incomplete last line
+                for line in lines:
+                    line = line.strip()
+                    if not line or "rate_limit_event" not in line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                        if isinstance(msg, dict) and msg.get("type") == "rate_limit_event":
+                            return line
+                    except json.JSONDecodeError:
+                        continue
+        # Check any remaining partial line
+        remainder = remainder.strip()
+        if remainder and "rate_limit_event" in remainder:
+            try:
+                msg = json.loads(remainder)
+                if isinstance(msg, dict) and msg.get("type") == "rate_limit_event":
+                    return remainder
+            except json.JSONDecodeError:
+                pass
+    except OSError:
+        pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -271,15 +352,18 @@ async def execute_claude(
     if not resume_session_id and not prompt_file.exists():
         raise AgentExecutionError(f"Prompt file not found: {prompt_file}")
 
+    # Compute safe_id early — used for both the context temp file name and the
+    # named stdout file path.
+    safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)
+
     # Write context to temp file (use mkstemp for security)
     fd, context_path = tempfile.mkstemp(suffix=".json", prefix="claude-ctx-")
     context_file = Path(context_path)
 
-    # Stdout capture file – we open the fd immediately via os.fdopen so that
-    # if an exception occurs before the subprocess is launched the fd is
-    # properly closed by the context manager (no leak).
-    stdout_fd, stdout_path = tempfile.mkstemp(suffix=".ndjson", prefix="claude-out-")
-    stdout_file = Path(stdout_path)
+    # Named stdout file in the log directory.  Kept after execute_claude returns
+    # so callers can reference it for debugging; deleted when the task is closed
+    # via close_task_resources().
+    stdout_file = _LOG_DIR / f"claude-raw-{safe_id}-stage{stage_num}.ndjson"
 
     try:
         with os.fdopen(fd, "w") as f:
@@ -337,7 +421,6 @@ async def execute_claude(
                 args.extend(["--append-system-prompt", _format_schema_prompt(output_schema)])
                 args.extend(["--json-schema", json.dumps(output_schema)])
 
-        safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)
         debug_log = _LOG_DIR / f"claude-{safe_id}-stage{stage_num}.log"
         debug_log.parent.mkdir(parents=True, exist_ok=True)
 
@@ -358,13 +441,12 @@ async def execute_claude(
         if extra_env:
             proc_env = {**os.environ, **extra_env}
 
-        # Wrap stdout_fd early so it is always cleaned up.  The subprocess
-        # inherits the fd at fork time and gets its own copy, so closing the
-        # supervisor's copy here is safe – the child keeps writing to its fd
-        # independently.  _tail_file reads the *file on disk*, not the fd.
+        # The subprocess writes its stdout to stdout_file on disk.  Close the
+        # supervisor's file handle after fork so the child owns the only writer.
+        # _tail_file reads the file on disk (not via fd) so closing here is safe.
         with (
             open(context_file) as stdin_f,
-            os.fdopen(stdout_fd, "w") as stdout_f,
+            open(stdout_file, "w") as stdout_f,
             open(stderr_log, "w") as stderr_f,
         ):
             proc = await asyncio.create_subprocess_exec(
@@ -377,7 +459,7 @@ async def execute_claude(
                 start_new_session=True,
             )
 
-            lines, result_seen = await _tail_file(
+            tail_lines, result_line, result_seen = await _tail_file(
                 stdout_file,
                 proc,
                 on_live_output=on_live_output,
@@ -386,12 +468,17 @@ async def execute_claude(
                 stage_num=stage_num,
             )
 
-        raw_output = "\n".join(lines)
+        # Read the last 128 KB of the stdout file for raw_output.  The full file
+        # is kept on disk at stdout_file and cleaned up on task close.
+        raw_output = _read_file_tail(stdout_file)
+        # Build parse_lines: result event first (always available even if pushed
+        # out of the tail window), then the last 50 lines for fallback parsing.
+        parse_lines = ([result_line] if result_line else []) + tail_lines
 
         # If we got a result event, treat it as success regardless of
         # returncode (we may have killed the process after the grace period).
         if result_seen:
-            structured = _parse_ndjson_output(lines, task_id, stage_num)
+            structured = _parse_ndjson_output(parse_lines, task_id, stage_num)
             if proc.returncode not in (0, None):
                 log.info(
                     "claude_exited_after_result",
@@ -399,11 +486,15 @@ async def execute_claude(
                     stage=stage_num,
                     returncode=proc.returncode,
                 )
-            return ClaudeOutput(structured=structured, raw=raw_output)
+            return ClaudeOutput(
+                structured=structured,
+                raw=raw_output,
+                raw_output_path=str(stdout_file),
+            )
 
         # No result event — check for errors
         if proc.returncode != 0:
-            raw_stdout = "\n".join(lines[:5]) if lines else ""
+            raw_stdout = "\n".join(tail_lines[:5]) if tail_lines else ""
             raw_stderr = ""
             for log_file in (stderr_log, debug_log):
                 try:
@@ -424,9 +515,9 @@ async def execute_claude(
 
             # Try to salvage session_id from NDJSON lines so the executor
             # can resume the conversation on retry instead of starting fresh.
-            _sid = _extract_session_id_from_lines(lines)
+            _sid = _extract_session_id_from_lines(parse_lines)
 
-            if _is_rate_limited_in_lines(lines) or _is_rate_limited(debug_log):
+            if _is_rate_limited_in_lines(tail_lines) or _is_rate_limited(debug_log):
                 raise RateLimitError(
                     f"Claude API rate limited (429) "
                     f"(task={task_id}, stage={stage_num})",
@@ -434,7 +525,7 @@ async def execute_claude(
                 )
 
             # Detect internal server errors (500)
-            if _is_server_error_in_lines(lines) or _is_server_error(debug_log):
+            if _is_server_error_in_lines(tail_lines) or _is_server_error(debug_log):
                 raise ServerError(
                     f"Claude API internal server error (500) "
                     f"(task={task_id}, stage={stage_num})",
@@ -442,7 +533,7 @@ async def execute_claude(
                 )
 
             # Detect platform overload errors (529)
-            if _is_overloaded_in_lines(lines) or _is_overloaded(debug_log):
+            if _is_overloaded_in_lines(tail_lines) or _is_overloaded(debug_log):
                 raise OverloadedError(
                     f"Claude API overloaded (529) "
                     f"(task={task_id}, stage={stage_num})",
@@ -455,12 +546,17 @@ async def execute_claude(
             )
 
         # Process exited 0 but no result event (unlikely but handle it)
-        structured = _parse_ndjson_output(lines, task_id, stage_num)
-        return ClaudeOutput(structured=structured, raw=raw_output)
+        structured = _parse_ndjson_output(parse_lines, task_id, stage_num)
+        return ClaudeOutput(
+            structured=structured,
+            raw=raw_output,
+            raw_output_path=str(stdout_file),
+        )
 
     finally:
         context_file.unlink(missing_ok=True)
-        stdout_file.unlink(missing_ok=True)
+        # stdout_file is intentionally kept on disk for post-mortem debugging.
+        # It is deleted when the task is closed via close_task_resources().
 
 
 # ---------------------------------------------------------------------------

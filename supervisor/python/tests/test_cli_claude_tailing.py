@@ -77,15 +77,16 @@ async def test_tail_file_handles_partial_lines(tmp_path: Path) -> None:
         f.write(json.dumps({"type": "result", "result": "done"}))  # no trailing \n
 
     proc = _make_proc_mock(returncode=0)
-    lines, result_seen = await _tail_file(
+    tail_lines, result_line, result_seen = await _tail_file(
         stdout_file, proc,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
     )
 
-    assert len(lines) == 2
+    assert len(tail_lines) == 2
     assert result_seen is True
+    assert result_line is not None
     # Verify partial was flushed
-    parsed_last = json.loads(lines[1])
+    parsed_last = json.loads(tail_lines[1])
     assert parsed_last["type"] == "result"
 
 
@@ -98,15 +99,15 @@ async def test_tail_file_handles_cr_lf_lines(tmp_path: Path) -> None:
         f.write((line + "\r\n").encode("utf-8"))
 
     proc = _make_proc_mock(returncode=0)
-    lines, result_seen = await _tail_file(
+    tail_lines, result_line, result_seen = await _tail_file(
         stdout_file, proc,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
     )
 
-    assert len(lines) == 1
+    assert len(tail_lines) == 1
     assert result_seen is True
     # Ensure no \r in the stored line
-    assert "\r" not in lines[0]
+    assert "\r" not in tail_lines[0]
 
 
 @pytest.mark.asyncio
@@ -116,12 +117,13 @@ async def test_tail_file_empty_file_returns_nothing(tmp_path: Path) -> None:
     stdout_file.write_text("")
 
     proc = _make_proc_mock(returncode=0)
-    lines, result_seen = await _tail_file(
+    tail_lines, result_line, result_seen = await _tail_file(
         stdout_file, proc,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
     )
 
-    assert lines == []
+    assert tail_lines == []
+    assert result_line is None
     assert result_seen is False
 
 
@@ -135,14 +137,14 @@ async def test_tail_file_live_output_error_does_not_break(tmp_path: Path) -> Non
         raise ValueError("callback crash")
 
     proc = _make_proc_mock(returncode=0)
-    lines, result_seen = await _tail_file(
+    tail_lines, result_line, result_seen = await _tail_file(
         stdout_file, proc,
         on_live_output=bad_callback,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
     )
 
     # Should still succeed despite callback errors
-    assert len(lines) == 1
+    assert len(tail_lines) == 1
     assert result_seen is True
 
 
@@ -155,14 +157,14 @@ async def test_tail_file_invalid_json_lines_still_collected(tmp_path: Path) -> N
         f.write(json.dumps({"type": "result", "result": "done"}) + "\n")
 
     proc = _make_proc_mock(returncode=0)
-    lines, result_seen = await _tail_file(
+    tail_lines, result_line, result_seen = await _tail_file(
         stdout_file, proc,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
     )
 
-    assert len(lines) == 2
+    assert len(tail_lines) == 2
     assert result_seen is True
-    assert lines[0] == "not json at all"
+    assert tail_lines[0] == "not json at all"
 
 
 # ---------------------------------------------------------------------------
@@ -297,8 +299,8 @@ async def test_execute_claude_dry_run_uses_script(tmp_path: Path) -> None:
         captured_args.extend(args)
         return mock_proc
 
-    async def fake_tail(path: Path, proc: Any, **kwargs: Any) -> tuple[list[str], bool]:
-        return [], False
+    async def fake_tail(path: Path, proc: Any, **kwargs: Any) -> tuple[list[str], str | None, bool]:
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("aquarco_supervisor.cli.claude.asyncio.create_subprocess_exec", side_effect=fake_exec), \
@@ -306,8 +308,7 @@ async def test_execute_claude_dry_run_uses_script(tmp_path: Path) -> None:
          patch("pathlib.Path.mkdir"), \
          patch.dict(os.environ, {"CLAUDE_DRY_RUN": "1"}):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         await execute_claude(
             prompt_file=prompt_file,
@@ -339,7 +340,7 @@ async def test_execute_claude_no_dry_run_uses_claude_binary(tmp_path: Path) -> N
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
@@ -349,8 +350,7 @@ async def test_execute_claude_no_dry_run_uses_claude_binary(tmp_path: Path) -> N
         # Ensure CLAUDE_DRY_RUN is NOT set
         os.environ.pop("CLAUDE_DRY_RUN", None)
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         result = await execute_claude(
             prompt_file=prompt_file,

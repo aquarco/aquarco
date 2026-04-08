@@ -211,7 +211,7 @@ async def test_tail_file_returns_all_non_empty_lines(tmp_path: Path) -> None:
     _write_ndjson_file(stdout_file, init, result_evt)
 
     proc = _make_proc(returncode=0)
-    lines, result_seen = await _tail_file(
+    lines, _, result_seen = await _tail_file(
         stdout_file, proc,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
     )
@@ -229,7 +229,7 @@ async def test_tail_file_sets_result_seen_event(tmp_path: Path) -> None:
     _write_ndjson_file(stdout_file, {"type": "result", "subtype": "success"})
 
     proc = _make_proc(returncode=0)
-    _, result_seen = await _tail_file(
+    _, _, result_seen = await _tail_file(
         stdout_file, proc,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
     )
@@ -243,7 +243,7 @@ async def test_tail_file_does_not_set_result_seen_without_result_line(tmp_path: 
     _write_ndjson_file(stdout_file, {"type": "system"})
 
     proc = _make_proc(returncode=0)
-    _, result_seen = await _tail_file(
+    _, _, result_seen = await _tail_file(
         stdout_file, proc,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
     )
@@ -287,7 +287,7 @@ async def test_tail_file_skips_empty_lines(tmp_path: Path) -> None:
         f.write("  \n")
 
     proc = _make_proc(returncode=0)
-    lines, _ = await _tail_file(
+    lines, _, _ = await _tail_file(
         stdout_file, proc,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
     )
@@ -303,7 +303,7 @@ async def test_tail_file_handles_invalid_json_gracefully(tmp_path: Path) -> None
         f.write(json.dumps({"type": "assistant"}) + "\n")
 
     proc = _make_proc(returncode=0)
-    lines, result_seen = await _tail_file(
+    lines, _, result_seen = await _tail_file(
         stdout_file, proc,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
     )
@@ -320,7 +320,7 @@ async def test_tail_file_non_dict_json_does_not_set_result_seen(tmp_path: Path) 
         f.write('"just a string"\n')
 
     proc = _make_proc(returncode=0)
-    lines, result_seen = await _tail_file(
+    lines, _, result_seen = await _tail_file(
         stdout_file, proc,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
     )
@@ -335,7 +335,7 @@ async def test_tail_file_no_callback_when_none(tmp_path: Path) -> None:
     _write_ndjson_file(stdout_file, {"type": "result", "result": "ok"})
 
     proc = _make_proc(returncode=0)
-    lines, _ = await _tail_file(
+    lines, _, _ = await _tail_file(
         stdout_file, proc,
         on_live_output=None,
         timeout_seconds=5.0, task_id="t1", stage_num=0,
@@ -362,15 +362,14 @@ async def test_execute_claude_uses_stream_json_format(tmp_path: Path) -> None:
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         await execute_claude(
             prompt_file=prompt_file, context={},
@@ -396,15 +395,14 @@ async def test_execute_claude_resume_uses_stream_json_format(tmp_path: Path) -> 
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         await execute_claude(
             prompt_file=prompt_file, context={},
@@ -428,7 +426,7 @@ async def test_execute_claude_rate_limit_from_stdout_lines(tmp_path: Path) -> No
     rate_limit_line = '{"error": "rate_limit_error: too many requests"}'
 
     async def fake_tail(path, proc, **kwargs):
-        return [rate_limit_line], False
+        return [rate_limit_line], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
@@ -436,8 +434,7 @@ async def test_execute_claude_rate_limit_from_stdout_lines(tmp_path: Path) -> No
          patch("pathlib.Path.mkdir"), \
          patch("aquarco_supervisor.cli.claude._is_rate_limited", return_value=False):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         with pytest.raises(RateLimitError):
             await execute_claude(
@@ -455,7 +452,7 @@ async def test_execute_claude_rate_limit_from_debug_log_fallback(tmp_path: Path)
     mock_proc = _make_proc(returncode=1)
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
@@ -463,8 +460,7 @@ async def test_execute_claude_rate_limit_from_debug_log_fallback(tmp_path: Path)
          patch("pathlib.Path.mkdir"), \
          patch("aquarco_supervisor.cli.claude._is_rate_limited", return_value=True):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         with pytest.raises(RateLimitError):
             await execute_claude(
@@ -475,7 +471,7 @@ async def test_execute_claude_rate_limit_from_debug_log_fallback(tmp_path: Path)
 
 @pytest.mark.asyncio
 async def test_execute_claude_raw_output_is_joined_ndjson_lines(tmp_path: Path) -> None:
-    """raw field of ClaudeOutput is the NDJSON lines joined by newlines."""
+    """raw field of ClaudeOutput is the last 128 KB of the stdout file content."""
     prompt_file = tmp_path / "system.md"
     prompt_file.write_text("You are a test agent.")
 
@@ -485,22 +481,28 @@ async def test_execute_claude_raw_output_is_joined_ndjson_lines(tmp_path: Path) 
     mock_proc = _make_proc(returncode=0)
 
     async def fake_tail(path, proc, **kwargs):
-        return [init_line, result_line], True
+        # Write content to the stdout file so _read_file_tail can read it
+        with open(path, "w") as f:
+            f.write(init_line + "\n")
+            f.write(result_line + "\n")
+        return [init_line, result_line], result_line, True
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         output = await execute_claude(
             prompt_file=prompt_file, context={},
             work_dir=str(tmp_path), task_id="t1", stage_num=0,
         )
 
-    assert output.raw == f"{init_line}\n{result_line}"
+    assert output.raw is not None
+    assert output.raw_output_path is not None
+    assert init_line in output.raw
+    assert result_line in output.raw
 
 
 @pytest.mark.asyncio
@@ -513,15 +515,14 @@ async def test_execute_claude_result_seen_ignores_bad_returncode(tmp_path: Path)
     mock_proc = _make_proc(returncode=-9)
 
     async def fake_tail(path, proc, **kwargs):
-        return [result_line], True
+        return [result_line], result_line, True
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         output = await execute_claude(
             prompt_file=prompt_file, context={},

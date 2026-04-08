@@ -240,15 +240,14 @@ async def test_execute_claude_raises_server_error_on_api_error_stdout(tmp_path: 
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return ndjson_lines, False
+        return ndjson_lines, None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
         with pytest.raises(ServerError):
             await execute_claude(
                 prompt_file=prompt_file,
@@ -272,15 +271,14 @@ async def test_execute_claude_raises_overloaded_error_on_overloaded_stdout(tmp_p
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return ndjson_lines, False
+        return ndjson_lines, None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
         with pytest.raises(OverloadedError):
             await execute_claude(
                 prompt_file=prompt_file,
@@ -304,15 +302,14 @@ async def test_execute_claude_raises_rate_limit_error_regression(tmp_path: Any) 
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return ndjson_lines, False
+        return ndjson_lines, None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
         with pytest.raises(RateLimitError):
             await execute_claude(
                 prompt_file=prompt_file,
@@ -336,15 +333,14 @@ async def test_execute_claude_raises_agent_execution_error_on_unknown_failure(tm
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return ndjson_lines, False
+        return ndjson_lines, None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
         with pytest.raises(AgentExecutionError) as exc_info:
             await execute_claude(
                 prompt_file=prompt_file,

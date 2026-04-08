@@ -300,15 +300,14 @@ async def test_model_flag_placed_before_tool_flags(tmp_path: Path) -> None:
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         await execute_claude(
             prompt_file=prompt_file,
@@ -342,15 +341,14 @@ async def test_model_flag_with_denied_tools(tmp_path: Path) -> None:
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         await execute_claude(
             prompt_file=prompt_file,
@@ -387,15 +385,14 @@ async def test_resume_mode_skips_tool_restrictions(tmp_path: Path) -> None:
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         await execute_claude(
             prompt_file=prompt_file,
@@ -433,15 +430,14 @@ async def test_resume_mode_skips_output_schema(tmp_path: Path) -> None:
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         await execute_claude(
             prompt_file=prompt_file,

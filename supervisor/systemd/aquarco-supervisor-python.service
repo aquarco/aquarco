@@ -32,8 +32,8 @@ Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/etc/aquarco/secrets.env
 
 # Resource constraints. Python uses slightly less memory than shell+subprocesses.
-MemoryMax=2G
-TasksMax=64
+MemoryMax=4G
+TasksMax=128
 
 # Security hardening.
 NoNewPrivileges=true

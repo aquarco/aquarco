@@ -196,15 +196,14 @@ async def test_execute_claude_model_flag_value(tmp_path: Path) -> None:
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         await execute_claude(
             prompt_file=prompt_file,
@@ -235,15 +234,14 @@ async def test_execute_claude_no_model_when_none(tmp_path: Path) -> None:
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         await execute_claude(
             prompt_file=prompt_file,
@@ -272,15 +270,14 @@ async def test_execute_claude_no_model_when_empty_string(tmp_path: Path) -> None
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         await execute_claude(
             prompt_file=prompt_file,
@@ -313,15 +310,14 @@ async def test_execute_claude_resume_with_model(tmp_path: Path) -> None:
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         await execute_claude(
             prompt_file=prompt_file,
@@ -358,15 +354,14 @@ async def test_execute_claude_resume_without_model(tmp_path: Path) -> None:
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         await execute_claude(
             prompt_file=prompt_file,
@@ -569,15 +564,14 @@ async def test_execute_claude_model_param_optional(tmp_path: Path) -> None:
         return mock_proc
 
     async def fake_tail(path, proc, **kwargs):
-        return [], False
+        return [], None, False
 
     with patch("aquarco_supervisor.cli.claude._tail_file", side_effect=fake_tail), \
          patch("asyncio.create_subprocess_exec", side_effect=fake_exec), \
          patch("tempfile.mkstemp") as mock_mkstemp, \
          patch("pathlib.Path.mkdir"):
         ctx_fd, ctx_path = _make_temp_file(tmp_path / "ctx.json")
-        out_fd, out_path = _make_temp_file(tmp_path / "out.ndjson")
-        mock_mkstemp.side_effect = [(ctx_fd, ctx_path), (out_fd, out_path)]
+        mock_mkstemp.side_effect = [(ctx_fd, ctx_path)]
 
         # Call without model parameter at all
         result = await execute_claude(

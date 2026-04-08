@@ -24,10 +24,10 @@ spec:
   globalLimits:
     # Intentionally conservative: single-agent execution and limited retries
     # to control cost during early development. Increase for production use.
-    maxConcurrentAgents: 1
+    maxConcurrentAgents: 3
     maxTokensPerHour: 1000000
     cooldownBetweenTasksSeconds: 5
-    maxRetries: 1
+    maxRetries: 3
     retryDelaySeconds: 60
 
   configReload:

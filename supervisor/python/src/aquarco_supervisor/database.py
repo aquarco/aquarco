@@ -41,7 +41,7 @@ class Database:
                 kwargs={"row_factory": dict_row, "autocommit": True},
                 configure=self._configure_connection,
             )
-            await self._pool.open()
+            await self._pool.open(wait=True, timeout=30)
             # Verify connectivity
             async with self.acquire() as conn:
                 await conn.execute("SELECT 1")

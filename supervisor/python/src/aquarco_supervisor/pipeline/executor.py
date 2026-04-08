@@ -10,7 +10,8 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from ..cli.claude import execute_claude
+from ..cli.claude import _LOG_DIR as _CLAUDE_LOG_DIR
+from ..cli.claude import _scan_file_for_rate_limit_event, execute_claude
 from ..config import get_pipeline_categories, get_pipeline_config
 from .conditions import ConditionResult, evaluate_ai_condition, evaluate_conditions
 from ..database import Database
@@ -1146,23 +1147,36 @@ class PipelineExecutor:
         # Without raising here the executor loop would continue and mark every
         # subsequent stage rate_limited before the task is ever postponed.
         if output.get("_is_error"):
-            raw = claude_output.raw or ""
             resets_at: str | None = None
-            for _line in raw.splitlines():
+            # Fast path: check raw tail (last 128 KB) first.
+            rate_event_line: str | None = None
+            for _line in (claude_output.raw or "").splitlines():
                 _line = _line.strip()
                 if not _line:
                     continue
                 try:
                     _msg = json.loads(_line)
                     if isinstance(_msg, dict) and _msg.get("type") == "rate_limit_event":
-                        resets_at = (_msg.get("rate_limit_info") or {}).get("resetsAt")
-                        raise RateLimitError(
-                            f"Claude API rate limited (rate_limit_event); resetsAt={resets_at} "
-                            f"(task={task_id}, stage={stage_num})",
-                            session_id=output.get("_session_id"),
-                        )
+                        rate_event_line = _line
+                        break
                 except json.JSONDecodeError:
                     continue
+            # Slow path: stream-scan the full file if not found in tail.
+            if rate_event_line is None and claude_output.raw_output_path:
+                rate_event_line = _scan_file_for_rate_limit_event(
+                    Path(claude_output.raw_output_path)
+                )
+            if rate_event_line:
+                try:
+                    _msg = json.loads(rate_event_line)
+                    resets_at = (_msg.get("rate_limit_info") or {}).get("resetsAt")
+                except json.JSONDecodeError:
+                    pass
+                raise RateLimitError(
+                    f"Claude API rate limited (rate_limit_event); resetsAt={resets_at} "
+                    f"(task={task_id}, stage={stage_num})",
+                    session_id=output.get("_session_id"),
+                )
 
         # Carry raw NDJSON log so store_stage_output persists it to raw_output column
         output["_raw_output"] = claude_output.raw
@@ -1183,7 +1197,7 @@ class PipelineExecutor:
         """Get the clone directory for a task's repository."""
         row = await self._db.fetch_one(
             """
-            SELECT r.clone_dir FROM tasks t
+            SELECT r.clone_dir, r.clone_status FROM tasks t
             JOIN repositories r ON r.name = t.repository
             WHERE t.id = %(id)s
             """,
@@ -1192,6 +1206,15 @@ class PipelineExecutor:
         if not row:
             raise PipelineError(f"No clone_dir found for task {task_id}")
         clone_dir: str = row["clone_dir"]
+        clone_status: str = row["clone_status"]
+        if clone_status != "ready":
+            raise PipelineError(
+                f"Repository not ready for task {task_id}: clone_status={clone_status}"
+            )
+        if not Path(clone_dir).exists():
+            raise PipelineError(
+                f"Clone directory missing for task {task_id}: {clone_dir}"
+            )
         return clone_dir
 
     async def _setup_branch(
@@ -1335,7 +1358,7 @@ class PipelineExecutor:
                         )
 
     async def close_task_resources(self, task_id: str) -> None:
-        """Remove worktrees for a closed task."""
+        """Remove worktrees and raw NDJSON output logs for a closed task."""
         safe_id = re.sub(r"[^a-zA-Z0-9._-]", "-", task_id)
         worktree_base = Path("/var/lib/aquarco/worktrees")
         work_dir = worktree_base / safe_id
@@ -1353,6 +1376,17 @@ class PipelineExecutor:
         # Clean parallel agent worktrees
         for wt in worktree_base.glob(f"{safe_id}-*"):
             shutil.rmtree(wt, ignore_errors=True)
+
+        # Delete raw NDJSON output files written by execute_claude for this task.
+        deleted = 0
+        for raw_log in _CLAUDE_LOG_DIR.glob(f"claude-raw-{safe_id}-stage*.ndjson"):
+            try:
+                raw_log.unlink()
+                deleted += 1
+            except OSError:
+                pass
+        if deleted:
+            log.info("task_raw_logs_cleaned", task_id=task_id, count=deleted)
 
     async def _get_repo_slug(self, task_id: str) -> str | None:
         """Get the owner/repo slug for a task's repository."""
