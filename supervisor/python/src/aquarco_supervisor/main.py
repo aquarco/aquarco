@@ -73,6 +73,8 @@ class Supervisor:
         self._poller_last_run: dict[str, float] = {}
         self._last_health_report: float = 0
         self._in_flight: set[asyncio.Task[None]] = set()
+        # Maps task_id → asyncio.Task so timed-out tasks can be cancelled
+        self._in_flight_by_task: dict[str, asyncio.Task[None]] = {}
 
     async def start(self, config_file: str) -> None:
         """Initialize components and start the main loop."""
@@ -271,6 +273,8 @@ class Supervisor:
             coro = self._run_task(task.id, task.pipeline or "", task.initial_context or {})
             t = asyncio.create_task(coro)
             self._in_flight.add(t)
+            self._in_flight_by_task[task.id] = t
+            t.add_done_callback(lambda _t, tid=task.id: self._in_flight_by_task.pop(tid, None))
 
     async def _run_task(
         self, task_id: str, pipeline: str, initial_context: dict[str, Any]
@@ -311,6 +315,14 @@ class Supervisor:
         timed_out = await self._tq.get_timed_out_tasks(timeout_minutes=90)
         for task_id in timed_out:
             log.warning("task_timed_out", task_id=task_id)
+            # Cancel the in-flight asyncio coroutine before resetting DB state.
+            # Without this, the old coroutine keeps running while a new one is
+            # dispatched on the next loop tick, causing two coroutines to execute
+            # the same task concurrently and marking multiple stages EXECUTING.
+            in_flight_task = self._in_flight_by_task.pop(task_id, None)
+            if in_flight_task and not in_flight_task.done():
+                in_flight_task.cancel()
+                log.info("task_timed_out_cancelled", task_id=task_id)
             await self._tq.fail_task(task_id, "Task execution timed out (90 min)")
 
     async def _resume_rate_limited_tasks(self) -> None:

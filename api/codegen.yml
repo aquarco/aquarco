@@ -29,6 +29,7 @@ generates:
           FAILED: failed
           SKIPPED: skipped
           RATE_LIMITED: rate_limited
+          MAX_TURNS: max_turns
         CloneStatus:
           PENDING: pending
           CLONING: cloning
