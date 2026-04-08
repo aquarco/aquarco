@@ -47,6 +47,51 @@ cur.close()
 conn.close()
 PYEOF
 
+# ── Pre-flight: mark consolidated migration on existing deployments ──
+# Databases built via the old incremental migrations (000–043) already have
+# the full schema. If we detect aquarco.tasks exists but yoyo has no record
+# of 000_consolidated_init, we INSERT a tracking row so yoyo skips it.
+python3 - "$DATABASE_URL" <<'PYEOF'
+import sys, os, psycopg2, hashlib
+
+url = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("DATABASE_URL", "")
+
+conn = psycopg2.connect(url)
+conn.autocommit = True
+cur = conn.cursor()
+
+# Check if aquarco.tasks exists (proxy for "schema was built by old migrations")
+cur.execute("SELECT to_regclass('aquarco.tasks')")
+if cur.fetchone()[0] is None:
+    # Fresh database — let the consolidated init run normally
+    cur.close()
+    conn.close()
+    sys.exit(0)
+
+# Schema exists. Check if consolidated migration is already tracked.
+cur.execute(
+    "SELECT 1 FROM public._yoyo_migration "
+    "WHERE migration_id = '000_consolidated_init'"
+)
+if cur.fetchone():
+    # Already marked — nothing to do
+    cur.close()
+    conn.close()
+    sys.exit(0)
+
+# Mark the consolidated migration as applied so yoyo skips it.
+migration_hash = hashlib.md5(b"000_consolidated_init").hexdigest()
+cur.execute(
+    "INSERT INTO public._yoyo_migration (migration_hash, migration_id, applied_at_utc) "
+    "VALUES (%s, %s, NOW())",
+    (migration_hash, "000_consolidated_init")
+)
+print("Marked 000_consolidated_init as applied (existing deployment detected)")
+
+cur.close()
+conn.close()
+PYEOF
+
 COMMAND="${1:-apply}"
 shift 2>/dev/null || true
 

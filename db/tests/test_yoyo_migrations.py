@@ -1,6 +1,7 @@
 """Tests for yoyo migration format, rollback files, and infrastructure.
 
-Validates acceptance criteria from the yoyo-migrations conversion (issue #22).
+Validates acceptance criteria from the yoyo-migrations conversion (issue #22)
+and the migration consolidation (issue #110).
 """
 
 from __future__ import annotations
@@ -14,71 +15,21 @@ from pathlib import Path
 import pytest
 import yaml
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
+# -- Paths --------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parent.parent.parent  # repo root
 DB_DIR = ROOT / "db"
 MIGRATIONS_DIR = DB_DIR / "migrations"
 DOCKER_COMPOSE = ROOT / "docker" / "compose.yml"
 TEMPLATE_COMPOSE = ROOT / "supervisor" / "templates" / "docker-compose.repo.yml.tmpl"
 
-# Expected linear dependency chain (migration name without .sql)
+# After consolidation there is a single canonical migration.
 EXPECTED_MIGRATIONS = [
-    "000_init",
-    "001_create_repositories",
-    "002_create_tasks",
-    "003_create_stages",
-    "004_create_context",
-    "005_create_poll_state",
-    "006_create_agent_instances",
-    "007_create_pipeline_checkpoints",
-    "008_create_functions",
-    "009_add_repo_error_message",
-    "010_add_repo_deploy_key",
-    "011_add_repo_original_url",
-    "012_fix_null_agent_instance",
-    "013_create_agent_and_pipeline_definitions",
-    "014_pipeline_redesign",
-    "015_remove_task_category",
-    "016_add_is_config_repo",
-    "017_allow_null_branch",
-    "018_rename_schema",
-    "019_agent_overrides_and_source",
-    "022_fix_agent_overrides_schema",
-    "023_drop_input_from_context",
-    "024_add_rate_limited_status",
-    "025_add_stage_run",
-    "026_add_live_output",
-    "027_task_lifecycle",
-    "028_repo_agent_scans",
-    "029_add_pipeline_categories",
-    "030_add_agent_group",
-    "031_add_postpone_cooldown",
-    "032_add_stage_spending",
-    "033_add_stage_session_id",
-    "034_checkpoint_stage_fk",
-    "035_simplify_tasks",
-    "036_supervisor_state",
-    "037_add_max_turns_stage_status",
-    "038_drop_repo_agent_scans",
-    "039_add_stage_msg_spending_state",
-    "040_drop_is_config_repo",
-    "040_add_stage_model",
-    "041_backfill_stage_model",
-    "042_add_execution_order",
-    "043_fix_get_task_context",
+    "000_consolidated_init",
 ]
-
-# Build expected dependency map: migration_name -> depends_on_name
-EXPECTED_DEPENDS: dict[str, str] = {}
-for i, name in enumerate(EXPECTED_MIGRATIONS):
-    if i == 0:
-        EXPECTED_DEPENDS[name] = ""  # 000_init has empty depends
-    else:
-        EXPECTED_DEPENDS[name] = EXPECTED_MIGRATIONS[i - 1]
 
 
 def _migration_files() -> list[Path]:
-    """Return all forward migration .sql files (excluding rollbacks)."""
+    """Return all forward migration .sql files (excluding rollbacks and archive/)."""
     return sorted(
         p for p in MIGRATIONS_DIR.glob("*.sql")
         if not p.name.endswith(".rollback.sql")
@@ -86,11 +37,11 @@ def _migration_files() -> list[Path]:
 
 
 def _rollback_files() -> list[Path]:
-    """Return all .rollback.sql files."""
+    """Return all .rollback.sql files (excluding archive/)."""
     return sorted(MIGRATIONS_DIR.glob("*.rollback.sql"))
 
 
-# ── AC: Every migration .sql starts with '-- depends:' header ──────────────────
+# -- AC: Every migration .sql starts with '-- depends:' header ----------------
 
 class TestMigrationDependsHeaders:
     """Validate the -- depends: header on every migration file."""
@@ -102,42 +53,18 @@ class TestMigrationDependsHeaders:
     def test_first_content_line_is_depends(self, migration_file: Path) -> None:
         """AC: Every migration .sql file starts with a '-- depends:' header as first non-empty line."""
         lines = migration_file.read_text().splitlines()
-        # Find first non-empty line
         first_content = next((l for l in lines if l.strip()), "")
         assert first_content.startswith("-- depends:"), (
             f"{migration_file.name}: first content line must start with '-- depends:'"
         )
 
-    def test_000_init_has_empty_depends(self) -> None:
-        """AC: 000_init.sql has '-- depends:' (empty dependency)."""
-        init_file = MIGRATIONS_DIR / "000_init.sql"
+    def test_consolidated_init_has_empty_depends(self) -> None:
+        """AC: 000_consolidated_init.sql has '-- depends:' (empty dependency)."""
+        init_file = MIGRATIONS_DIR / "000_consolidated_init.sql"
         first_line = init_file.read_text().splitlines()[0]
         assert first_line.strip() == "-- depends:", (
-            "000_init.sql must have empty depends header"
+            "000_consolidated_init.sql must have empty depends header"
         )
-
-    def test_each_migration_depends_on_predecessor(self, migration_file: Path) -> None:
-        """AC: Each subsequent migration references the immediately preceding migration."""
-        name = migration_file.stem
-        if name not in EXPECTED_DEPENDS:
-            pytest.skip(f"Unknown migration: {name}")
-
-        first_line = migration_file.read_text().splitlines()[0]
-        expected_dep = EXPECTED_DEPENDS[name]
-        if expected_dep:
-            assert first_line.strip() == f"-- depends: {expected_dep}", (
-                f"{name}: expected depends on '{expected_dep}', got '{first_line.strip()}'"
-            )
-        else:
-            assert first_line.strip() == "-- depends:", (
-                f"{name}: expected empty depends header"
-            )
-
-    def test_022_depends_on_019(self) -> None:
-        """AC: Migration 022 depends on 019 (skipping missing 020/021)."""
-        m = MIGRATIONS_DIR / "022_fix_agent_overrides_schema.sql"
-        first_line = m.read_text().splitlines()[0]
-        assert "019_agent_overrides_and_source" in first_line
 
 
 class TestNoUpDownMarkers:
@@ -149,7 +76,6 @@ class TestNoUpDownMarkers:
 
     def test_no_up_marker(self, migration_file: Path) -> None:
         content = migration_file.read_text()
-        # Match "-- up" as a standalone comment marker (not part of UPDATE etc.)
         for line in content.splitlines():
             stripped = line.strip()
             assert stripped != "-- up", f"{migration_file.name}: contains '-- up' marker"
@@ -171,19 +97,18 @@ class TestNoCommentedOutRollbackSQL:
     def test_no_commented_rollback_block(self, migration_file: Path) -> None:
         """Check there's no multi-line commented-out DROP/ALTER block after a '-- down' marker."""
         content = migration_file.read_text()
-        # Pattern: a line that is exactly "-- down" followed by commented SQL
         assert not re.search(
             r"^--\s*down\s*$", content, re.MULTILINE | re.IGNORECASE
         ), f"{migration_file.name}: contains a down section marker"
 
 
-# ── AC: Rollback files ─────────────────────────────────────────────────────────
+# -- AC: Rollback files -------------------------------------------------------
 
 class TestRollbackFiles:
     """Validate companion .rollback.sql files exist and are well-formed."""
 
     def test_rollback_file_exists_for_each_migration(self) -> None:
-        """AC: A .rollback.sql companion file exists for each of the 26 migration .sql files."""
+        """AC: A .rollback.sql companion file exists for each migration .sql file."""
         for m in _migration_files():
             rollback = MIGRATIONS_DIR / f"{m.stem}.rollback.sql"
             assert rollback.exists(), f"Missing rollback file for {m.name}"
@@ -200,7 +125,6 @@ class TestRollbackFiles:
         """AC: Each .rollback.sql file contains valid SQL that reverses the forward migration."""
         content = rollback_file.read_text().strip()
         assert len(content) > 0, f"{rollback_file.name}: rollback file is empty"
-        # Should contain at least one SQL keyword
         has_sql = any(
             kw in content.upper()
             for kw in ["DROP", "ALTER", "DELETE", "UPDATE", "SET", "CREATE", "DO"]
@@ -215,7 +139,7 @@ class TestRollbackFiles:
         )
 
 
-# ── AC: Dockerfile ──────────────────────────────────────────────────────────────
+# -- AC: Dockerfile ------------------------------------------------------------
 
 class TestDockerfile:
     """Validate db/Dockerfile for the migration container."""
@@ -236,7 +160,7 @@ class TestDockerfile:
         assert "postgres" in content
 
 
-# ── AC: yoyo.ini ────────────────────────────────────────────────────────────────
+# -- AC: yoyo.ini -------------------------------------------------------------
 
 class TestYoyoIni:
     """Validate db/yoyo.ini configuration."""
@@ -258,7 +182,7 @@ class TestYoyoIni:
         assert "DATABASE_URL" in config.get("DEFAULT", "database")
 
 
-# ── AC: migrate.sh ──────────────────────────────────────────────────────────────
+# -- AC: migrate.sh ------------------------------------------------------------
 
 class TestMigrateScript:
     """Validate db/migrate.sh helper script."""
@@ -278,8 +202,15 @@ class TestMigrateScript:
         content = (DB_DIR / "migrate.sh").read_text()
         assert subcommand in content, f"migrate.sh missing '{subcommand}' subcommand"
 
+    def test_has_consolidated_guard(self) -> None:
+        """AC: migrate.sh contains a pre-flight guard for existing deployments."""
+        content = (DB_DIR / "migrate.sh").read_text()
+        assert "000_consolidated_init" in content, (
+            "migrate.sh must contain a guard referencing 000_consolidated_init"
+        )
 
-# ── AC: docker/compose.yml ──────────────────────────────────────────────────────
+
+# -- AC: docker/compose.yml ---------------------------------------------------
 
 class TestDockerCompose:
     """Validate docker/compose.yml changes."""
@@ -339,7 +270,7 @@ class TestDockerCompose:
             assert deps["migrations"].get("condition") == "service_completed_successfully"
 
 
-# ── AC: supervisor template ─────────────────────────────────────────────────────
+# -- AC: supervisor template ---------------------------------------------------
 
 class TestSupervisorTemplate:
     """Validate supervisor/templates/docker-compose.repo.yml.tmpl has equivalent changes."""
@@ -354,11 +285,10 @@ class TestSupervisorTemplate:
 
     def test_template_api_depends_on_migrations(self, template_content: str) -> None:
         """AC: Template api depends on migrations."""
-        # Check that migrations appears in depends_on context for api
         assert "service_completed_successfully" in template_content
 
 
-# ── Migration count ─────────────────────────────────────────────────────────────
+# -- Migration count -----------------------------------------------------------
 
 class TestMigrationCount:
     """Ensure all expected migrations are present."""
@@ -367,6 +297,7 @@ class TestMigrationCount:
         """All expected migrations exist as .sql files."""
         files = _migration_files()
         names = {f.stem for f in files}
+        assert len(names) == 1, f"Expected 1 migration, found {len(names)}: {names}"
         for expected in EXPECTED_MIGRATIONS:
             assert expected in names, f"Missing migration: {expected}.sql"
 
@@ -379,23 +310,19 @@ class TestMigrationCount:
         assert not unexpected, f"Unexpected migration files: {unexpected}"
 
 
-# ── Dependency chain integrity ──────────────────────────────────────────────────
+# -- Dependency chain integrity ------------------------------------------------
 
 class TestDependencyChain:
     """Validate the full dependency chain forms a valid DAG."""
 
-    def test_linear_chain_is_unbroken(self) -> None:
-        """Each migration (except 000) depends on exactly one predecessor that exists."""
-        files = {f.stem: f for f in _migration_files()}
-        for name, dep in EXPECTED_DEPENDS.items():
-            if name not in files:
-                continue
-            first_line = files[name].read_text().splitlines()[0]
-            if dep:
-                assert dep in first_line, (
-                    f"{name}: expected dep '{dep}' in '{first_line}'"
-                )
-                assert dep in files, f"{name}: depends on {dep} which doesn't exist"
+    def test_single_root_migration(self) -> None:
+        """With a single consolidated migration, the chain is trivially valid."""
+        files = _migration_files()
+        assert len(files) == 1
+        first_line = files[0].read_text().splitlines()[0]
+        assert first_line.strip() == "-- depends:", (
+            "Root migration must have empty depends"
+        )
 
     def test_no_circular_dependencies(self) -> None:
         """The dependency chain has no cycles."""
@@ -407,7 +334,6 @@ class TestDependencyChain:
                 dep = match.group(1).strip()
                 deps[f.stem] = dep
 
-        # Walk from each node to root; if we visit more nodes than exist, there's a cycle
         for start in deps:
             visited: set[str] = set()
             current = start
@@ -416,3 +342,104 @@ class TestDependencyChain:
                     pytest.fail(f"Circular dependency detected involving {current}")
                 visited.add(current)
                 current = deps.get(current, "")
+
+
+# -- Archive integrity ---------------------------------------------------------
+
+class TestArchive:
+    """Validate that old migrations are preserved in the archive directory."""
+
+    ARCHIVE_DIR = MIGRATIONS_DIR / "archive"
+
+    def test_archive_directory_exists(self) -> None:
+        """AC: db/migrations/archive/ exists."""
+        assert self.ARCHIVE_DIR.is_dir()
+
+    def test_archive_contains_old_migrations(self) -> None:
+        """AC: All 88 files (44 forward + 44 rollback) exist under archive/."""
+        files = list(self.ARCHIVE_DIR.glob("*.sql"))
+        assert len(files) == 86, (
+            f"Expected 86 archived files (44+2 dups share prefix 040), found {len(files)}"
+        )
+
+    def test_archive_has_init_and_last(self) -> None:
+        """AC: Archive contains both the first and last original migrations."""
+        assert (self.ARCHIVE_DIR / "000_init.sql").exists()
+        assert (self.ARCHIVE_DIR / "043_fix_get_task_context.sql").exists()
+        assert (self.ARCHIVE_DIR / "000_init.rollback.sql").exists()
+        assert (self.ARCHIVE_DIR / "043_fix_get_task_context.rollback.sql").exists()
+
+    def test_archive_not_discovered_by_glob(self) -> None:
+        """AC: Archive files are not discovered by MIGRATIONS_DIR.glob('*.sql')."""
+        root_files = {p.name for p in MIGRATIONS_DIR.glob("*.sql")}
+        assert "000_init.sql" not in root_files, (
+            "000_init.sql should be in archive/, not in migrations root"
+        )
+
+
+# -- Consolidated init content -------------------------------------------------
+
+class TestConsolidatedInitContent:
+    """Validate the consolidated init script creates the expected schema objects."""
+
+    @pytest.fixture
+    def init_content(self) -> str:
+        return (MIGRATIONS_DIR / "000_consolidated_init.sql").read_text()
+
+    EXPECTED_TABLES = [
+        "repositories",
+        "tasks",
+        "stages",
+        "context",
+        "poll_state",
+        "agent_instances",
+        "agent_definitions",
+        "pipeline_definitions",
+        "agent_overrides",
+        "validation_items",
+        "supervisor_state",
+    ]
+
+    @pytest.mark.parametrize("table", EXPECTED_TABLES)
+    def test_creates_table(self, init_content: str, table: str) -> None:
+        """AC: The consolidated init creates all 11 living tables."""
+        assert f"CREATE TABLE {table}" in init_content, (
+            f"Missing CREATE TABLE for {table}"
+        )
+
+    def test_creates_aquarco_schema(self, init_content: str) -> None:
+        """AC: Creates the aquarco schema."""
+        assert "CREATE SCHEMA" in init_content
+        assert "aquarco" in init_content
+
+    def test_creates_pgcrypto(self, init_content: str) -> None:
+        """AC: Enables pgcrypto extension."""
+        assert "pgcrypto" in init_content
+
+    def test_creates_get_task_context(self, init_content: str) -> None:
+        """AC: Creates get_task_context() function."""
+        assert "CREATE OR REPLACE FUNCTION get_task_context" in init_content
+
+    def test_creates_update_updated_at(self, init_content: str) -> None:
+        """AC: Creates update_updated_at() trigger function."""
+        assert "CREATE OR REPLACE FUNCTION update_updated_at" in init_content
+
+    def test_seeds_supervisor_state(self, init_content: str) -> None:
+        """AC: Seeds drain_mode row in supervisor_state."""
+        assert "drain_mode" in init_content
+        assert "INSERT INTO supervisor_state" in init_content
+
+    def test_no_dropped_tables(self, init_content: str) -> None:
+        """AC: Does not create pipeline_checkpoints or repo_agent_scans (net-zero tables)."""
+        assert "pipeline_checkpoints" not in init_content
+        assert "repo_agent_scans" not in init_content
+
+    def test_no_dropped_columns(self, init_content: str) -> None:
+        """AC: get_task_context() does not reference dropped columns."""
+        # These columns were dropped in migration 035
+        fn_start = init_content.index("CREATE OR REPLACE FUNCTION get_task_context")
+        fn_section = init_content[fn_start:]
+        assert "t.phase" not in fn_section
+        assert "t.current_stage" not in fn_section
+        assert "t.assigned_agent" not in fn_section
+        assert "t.category" not in fn_section
