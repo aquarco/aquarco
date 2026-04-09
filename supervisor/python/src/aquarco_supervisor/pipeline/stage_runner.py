@@ -502,6 +502,13 @@ class StageRunner:
             )
             raise
         except asyncio.CancelledError:
+            # Task was cancelled (e.g. by _check_timed_out_tasks). Mark the
+            # stage as failed so it doesn't stay stuck in 'executing' state.
+            await self._sm.record_stage_failed(
+                task_id, stage_num, "Stage cancelled (task timed out)",
+                stage_id=stage_id,
+                stage_key=stage_key, iteration=iteration, run=run,
+            )
             raise
         except Exception as e:
             await self._sm.record_stage_failed(
@@ -687,6 +694,9 @@ class StageRunner:
         except StageError:
             raise
         except asyncio.CancelledError:
+            # Task was cancelled (e.g. by _check_timed_out_tasks). Mark the
+            # stage as failed so it doesn't stay stuck in 'executing' state.
+            await self._sm.record_stage_failed(task_id, stage_num, "Stage cancelled (task timed out)")
             raise
         except Exception as e:
             await self._sm.record_stage_failed(task_id, stage_num, str(e))
