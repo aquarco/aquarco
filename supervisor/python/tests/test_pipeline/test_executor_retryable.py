@@ -2,8 +2,8 @@
 
 Covers:
   - _cooldown_for_error() dispatch for OverloadedError, ServerError, RateLimitError
-  - _execute_running_phase() catches RetryableError subclasses and routes to postpone_task
-  - _execute_running_phase() does NOT route non-retryable StageError to postpone_task
+  - execute_running_phase() catches RetryableError subclasses and routes to postpone_task
+  - execute_running_phase() does NOT route non-retryable StageError to postpone_task
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ def test_cooldown_server_has_fewer_max_retries_than_others() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Helpers for _execute_running_phase tests
+# Helpers for execute_running_phase tests
 # ---------------------------------------------------------------------------
 
 
@@ -77,20 +77,28 @@ def _make_executor(
     sample_pipelines: list[Any],
     *,
     execute_claude_side_effect: Any = None,
-) -> tuple[PipelineExecutor, AsyncMock, AsyncMock]:
-    """Build a PipelineExecutor with minimal mocks for running-phase tests."""
+) -> tuple[PipelineExecutor, AsyncMock, AsyncMock, AsyncMock]:
+    """Build a PipelineExecutor with minimal mocks for running-phase tests.
+
+    Returns (executor, mock_tq, mock_db, mock_sm).
+    """
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "clone_status": "ready", "branch": "main"})
     mock_db.execute = AsyncMock()
 
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_task_context = AsyncMock(return_value={})
-    mock_tq.update_checkpoint = AsyncMock()
     mock_tq.postpone_task = AsyncMock()
     mock_tq.fail_task = AsyncMock()
     mock_tq.update_task_status = AsyncMock()
-    mock_tq.store_stage_output = AsyncMock()
-    mock_tq.create_stage = AsyncMock()
+
+    mock_sm = AsyncMock()
+    mock_sm.get_task_context = AsyncMock(return_value={})
+    mock_sm.update_checkpoint = AsyncMock()
+    mock_sm.store_stage_output = AsyncMock()
+    mock_sm.get_latest_stage_run = AsyncMock(return_value=None)
+    mock_sm.record_stage_executing = AsyncMock()
+    mock_sm.record_stage_failed = AsyncMock()
+    mock_sm.record_stage_skipped = AsyncMock()
 
     mock_registry = MagicMock()
     mock_registry.select_agent = AsyncMock(return_value="impl-agent")
@@ -100,10 +108,12 @@ def _make_executor(
     mock_registry.get_denied_tools = MagicMock(return_value=[])
     mock_registry.get_agent_environment = MagicMock(return_value={})
     mock_registry.get_agent_output_schema = MagicMock(return_value=None)
+    mock_registry.increment_agent_instances = AsyncMock()
+    mock_registry.decrement_agent_instances = AsyncMock()
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines, stage_manager=mock_sm)
 
-    return executor, mock_tq, mock_db
+    return executor, mock_tq, mock_db, mock_sm
 
 
 def _minimal_planned_stages(category: str = "implement") -> list[dict[str, Any]]:
@@ -117,7 +127,7 @@ def _minimal_stage_defs(category: str = "implement") -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# _execute_running_phase retryable routing
+# execute_running_phase retryable routing
 # ---------------------------------------------------------------------------
 
 
@@ -125,21 +135,21 @@ def _minimal_stage_defs(category: str = "implement") -> list[dict[str, Any]]:
 async def test_running_phase_routes_server_error_to_postpone(
     sample_pipelines: Any,
 ) -> None:
-    """When _execute_planned_stage raises ServerError, postpone_task is called."""
-    executor, mock_tq, _ = _make_executor(sample_pipelines)
+    """When execute_planned_stage raises ServerError, postpone_task is called."""
+    executor, mock_tq, _, mock_sm = _make_executor(sample_pipelines)
 
     planned = _minimal_planned_stages()
     stage_defs = _minimal_stage_defs()
 
-    with patch(
-        "aquarco_supervisor.pipeline.executor.PipelineExecutor._execute_planned_stage",
+    with patch.object(
+        executor._runner, "execute_planned_stage",
         new_callable=AsyncMock,
         side_effect=ServerError("API 500"),
     ), patch(
         "aquarco_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,
     ):
-        failed = await executor._execute_running_phase(
+        failed = await executor._runner.execute_running_phase(
             "task-500", planned, stage_defs, "/repos/test", "branch-x"
         )
 
@@ -154,21 +164,21 @@ async def test_running_phase_routes_server_error_to_postpone(
 async def test_running_phase_routes_overloaded_error_to_postpone(
     sample_pipelines: Any,
 ) -> None:
-    """When _execute_planned_stage raises OverloadedError, postpone_task is called."""
-    executor, mock_tq, _ = _make_executor(sample_pipelines)
+    """When execute_planned_stage raises OverloadedError, postpone_task is called."""
+    executor, mock_tq, _, mock_sm = _make_executor(sample_pipelines)
 
     planned = _minimal_planned_stages()
     stage_defs = _minimal_stage_defs()
 
-    with patch(
-        "aquarco_supervisor.pipeline.executor.PipelineExecutor._execute_planned_stage",
+    with patch.object(
+        executor._runner, "execute_planned_stage",
         new_callable=AsyncMock,
         side_effect=OverloadedError("API 529"),
     ), patch(
         "aquarco_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,
     ):
-        failed = await executor._execute_running_phase(
+        failed = await executor._runner.execute_running_phase(
             "task-529", planned, stage_defs, "/repos/test", "branch-x"
         )
 
@@ -183,21 +193,21 @@ async def test_running_phase_routes_overloaded_error_to_postpone(
 async def test_running_phase_routes_rate_limit_error_to_postpone(
     sample_pipelines: Any,
 ) -> None:
-    """When _execute_planned_stage raises RateLimitError, postpone_task is called."""
-    executor, mock_tq, _ = _make_executor(sample_pipelines)
+    """When execute_planned_stage raises RateLimitError, postpone_task is called."""
+    executor, mock_tq, _, mock_sm = _make_executor(sample_pipelines)
 
     planned = _minimal_planned_stages()
     stage_defs = _minimal_stage_defs()
 
-    with patch(
-        "aquarco_supervisor.pipeline.executor.PipelineExecutor._execute_planned_stage",
+    with patch.object(
+        executor._runner, "execute_planned_stage",
         new_callable=AsyncMock,
         side_effect=RateLimitError("API 429"),
     ), patch(
         "aquarco_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,
     ):
-        failed = await executor._execute_running_phase(
+        failed = await executor._runner.execute_running_phase(
             "task-429", planned, stage_defs, "/repos/test", "branch-x"
         )
 
@@ -213,20 +223,20 @@ async def test_running_phase_retryable_does_not_call_fail_task(
     sample_pipelines: Any,
 ) -> None:
     """A retryable error postpones the task — it must NOT call fail_task."""
-    executor, mock_tq, _ = _make_executor(sample_pipelines)
+    executor, mock_tq, _, mock_sm = _make_executor(sample_pipelines)
 
     planned = _minimal_planned_stages()
     stage_defs = _minimal_stage_defs()
 
-    with patch(
-        "aquarco_supervisor.pipeline.executor.PipelineExecutor._execute_planned_stage",
+    with patch.object(
+        executor._runner, "execute_planned_stage",
         new_callable=AsyncMock,
         side_effect=ServerError("500"),
     ), patch(
         "aquarco_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,
     ):
-        await executor._execute_running_phase(
+        await executor._runner.execute_running_phase(
             "task-500", planned, stage_defs, "/repos/test", "branch-x"
         )
 
@@ -238,27 +248,27 @@ async def test_running_phase_stage_error_postpones_for_retry(
     sample_pipelines: Any,
 ) -> None:
     """A non-retryable StageError on a required stage postpones for retry."""
-    executor, mock_tq, _ = _make_executor(sample_pipelines)
+    executor, mock_tq, _, mock_sm = _make_executor(sample_pipelines)
 
     planned = _minimal_planned_stages()
     stage_defs = _minimal_stage_defs()
 
-    with patch(
-        "aquarco_supervisor.pipeline.executor.PipelineExecutor._execute_planned_stage",
+    with patch.object(
+        executor._runner, "execute_planned_stage",
         new_callable=AsyncMock,
         side_effect=StageError("stage failed"),
     ), patch(
         "aquarco_supervisor.pipeline.executor._git_checkout",
         new_callable=AsyncMock,
     ):
-        failed = await executor._execute_running_phase(
+        failed = await executor._runner.execute_running_phase(
             "task-stage-err", planned, stage_defs, "/repos/test", "branch-x"
         )
 
     assert failed is True
     mock_tq.postpone_task.assert_awaited_once()
     # No checkpoint when the first stage fails — no prior completed stage to reference
-    mock_tq.update_checkpoint.assert_not_awaited()
+    mock_sm.update_checkpoint.assert_not_awaited()
     mock_tq.fail_task.assert_not_awaited()
 
 
@@ -268,7 +278,7 @@ async def test_running_phase_retryable_checkpoints_before_postpone(
 ) -> None:
     """update_checkpoint is called before postpone_task on retryable errors
     when there is a previously completed stage."""
-    executor, mock_tq, _ = _make_executor(sample_pipelines)
+    executor, mock_tq, _, mock_sm = _make_executor(sample_pipelines)
 
     # Two stages: first succeeds, second hits retryable error
     planned = [
@@ -290,11 +300,11 @@ async def test_running_phase_retryable_checkpoints_before_postpone(
         raise OverloadedError("529")
 
     call_order: list[str] = []
-    mock_tq.update_checkpoint.side_effect = lambda *a, **kw: call_order.append("checkpoint") or None
+    mock_sm.update_checkpoint.side_effect = lambda *a, **kw: call_order.append("checkpoint") or None
     mock_tq.postpone_task.side_effect = lambda *a, **kw: call_order.append("postpone") or None
 
-    with patch(
-        "aquarco_supervisor.pipeline.executor.PipelineExecutor._execute_planned_stage",
+    with patch.object(
+        executor._runner, "execute_planned_stage",
         new_callable=AsyncMock,
         side_effect=_stage_side_effect,
     ), patch(
@@ -304,7 +314,7 @@ async def test_running_phase_retryable_checkpoints_before_postpone(
         "aquarco_supervisor.pipeline.executor._auto_commit",
         new_callable=AsyncMock,
     ):
-        await executor._execute_running_phase(
+        await executor._runner.execute_running_phase(
             "task-order", planned, stage_defs, "/repos/test", "branch-x"
         )
 
@@ -320,13 +330,13 @@ async def test_running_phase_success_does_not_postpone(
     sample_pipelines: Any,
 ) -> None:
     """A successful stage run never calls postpone_task."""
-    executor, mock_tq, _ = _make_executor(sample_pipelines)
+    executor, mock_tq, _, mock_sm = _make_executor(sample_pipelines)
 
     planned = _minimal_planned_stages()
     stage_defs = _minimal_stage_defs()
 
-    with patch(
-        "aquarco_supervisor.pipeline.executor.PipelineExecutor._execute_planned_stage",
+    with patch.object(
+        executor._runner, "execute_planned_stage",
         new_callable=AsyncMock,
         return_value=({"result": "ok"}, 99),
     ), patch(
@@ -336,11 +346,11 @@ async def test_running_phase_success_does_not_postpone(
         "aquarco_supervisor.pipeline.executor._auto_commit",
         new_callable=AsyncMock,
     ), patch(
-        "aquarco_supervisor.pipeline.executor.evaluate_conditions",
+        "aquarco_supervisor.pipeline.stage_runner.evaluate_conditions",
         new_callable=AsyncMock,
         return_value=MagicMock(jump_to=None),
     ):
-        failed = await executor._execute_running_phase(
+        failed = await executor._runner.execute_running_phase(
             "task-ok", planned, stage_defs, "/repos/test", "branch-x"
         )
 

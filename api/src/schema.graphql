@@ -283,6 +283,7 @@ enum StageStatus {
   FAILED
   SKIPPED
   RATE_LIMITED
+  MAX_TURNS
 }
 
 # --- GitHub Auth ---

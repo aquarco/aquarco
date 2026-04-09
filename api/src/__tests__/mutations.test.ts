@@ -8,7 +8,7 @@
  *   - Timestamp side effects: status transitions set the right timestamp columns
  */
 
-import { jest, describe, it, expect } from '@jest/globals'
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals'
 import { Mutation } from '../resolvers/mutations.js'
 import type { Context } from '../context.js'
 
@@ -394,11 +394,25 @@ describe('Mutation.cancelTask', () => {
 // ── registerRepository ─────────────────────────────────────────────────────────
 
 describe('Mutation.registerRepository', () => {
+  const originalReposBase = process.env.REPOS_BASE
+
+  beforeEach(() => {
+    process.env.REPOS_BASE = '/repos'
+  })
+
+  afterEach(() => {
+    if (originalReposBase !== undefined) {
+      process.env.REPOS_BASE = originalReposBase
+    } else {
+      delete process.env.REPOS_BASE
+    }
+  })
+
   const validInput = {
     name: 'new-repo',
     url: 'https://github.com/org/new-repo',
     branch: 'main',
-    cloneDir: '/repos/new-repo',
+    cloneDir: 'new-repo',
     pollers: ['github-issues'],
   }
 
@@ -422,7 +436,8 @@ describe('Mutation.registerRepository', () => {
     }, ctx)
 
     const params = pool.query.mock.calls[0][1] as unknown[]
-    expect(params[2]).toBe('main')
+    // params: [name, url, original_url, branch, cloneDir, pollers]
+    expect(params[3]).toBeNull()
   })
 
   it('should default pollers to empty array when not provided', async () => {
@@ -434,7 +449,8 @@ describe('Mutation.registerRepository', () => {
     }, ctx)
 
     const params = pool.query.mock.calls[0][1] as unknown[]
-    expect(params[4]).toEqual([])
+    // params: [name, url, original_url, branch, cloneDir, pollers]
+    expect(params[5]).toEqual([])
   })
 
   it('should return duplicate error when name already exists', async () => {

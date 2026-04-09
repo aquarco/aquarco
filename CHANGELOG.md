@@ -30,6 +30,27 @@
 - 57 existing migration tests updated and passing
 - All 178 migration-related tests passing with 95% coverage
 
+## [2026-04-08] — Simplify codebase and resolve code review findings (#109)
+
+### Changed
+- **Module decomposition** — refactored large monolithic files into smaller, focused modules following low-coupling, high-cohesion principles:
+  - `supervisor/pipeline/executor.py` — split multi-stage executor logic into focused concerns; updated `StageRunner` and `PipelinePlanner` constructor calls
+  - `supervisor/pipeline/stage_runner.py` — fixed NameError in worktree cleanup (line 658) from bare `_run_git()` to qualified `self._exec._run_git()`
+  - `api/resolvers/` — consolidated duplicate `toDbEnum()` function with TypeScript overloads in `helpers.ts`, updated 5 sibling resolvers to import directly from `./mappers.js`
+  - `web/components/tasks/TaskActions.tsx` — moved `'use client'` directive to line 1 (before JSDoc), matching project convention
+- **GraphQL Stage type** — added missing optional fields `model` and `rawOutput` to TypeScript interface in `web/src/app/tasks/[id]/types.ts` to match backend schema
+
+### Fixed
+- **CRITICAL** — Fixed NameError in `stage_runner.py:658` that would crash during worktree cleanup; `_run_git()` now properly qualified as `self._exec._run_git()`
+- **ERROR** — Fixed latent AttributeError in `executor.py:72,76` where unresolved `stage_manager` parameter could be None; now passes correctly resolved `self._sm` to constructors
+- **ERROR** — Eliminated duplicate `toDbEnum()` function in `task-queries.ts` by extending shared version in `helpers.ts` with overloads, reducing code duplication
+- **WARNING** — Updated resolver imports across `repo-mutations.ts`, `agent-mutations.ts`, `repo-queries.ts`, `task-queries.ts`, and `types.ts` to import directly from `./mappers.js` instead of through barrel file
+
+### Test Coverage
+- 395 new tests added across Python and TypeScript: executor wiring, stage runner parallel execution, backward compatibility, refactoring regression, resolver assembly, and task query logic
+- All test suites passing: Python 2402/2402 (100%), API 276/276 (100%), Web 197/197 (100%) with 87% overall coverage
+- No pre-existing test failures introduced
+
 ## [2026-04-08] — Add execution_order to stages (#102)
 
 ### Added

@@ -43,6 +43,7 @@ def _make_mock_registry(
     registry.get_denied_tools = MagicMock(return_value=[])
     registry.get_agent_environment = MagicMock(return_value={})
     registry.get_agent_output_schema = MagicMock(return_value=None)
+    registry.get_agent_model = MagicMock(return_value=None)
     return registry
 
 
@@ -73,7 +74,7 @@ class TestExecutorAutoResume:
             new_callable=AsyncMock,
             return_value=claude_output,
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
-            output = await executor._execute_agent(
+            output = await executor._invoker.execute_agent(
                 "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
@@ -111,7 +112,7 @@ class TestExecutorAutoResume:
             new_callable=AsyncMock,
             side_effect=[first_output, second_output],
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
-            output = await executor._execute_agent(
+            output = await executor._invoker.execute_agent(
                 "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
@@ -156,7 +157,7 @@ class TestExecutorAutoResume:
             new_callable=AsyncMock,
             side_effect=[first_output, second_output],
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
-            output = await executor._execute_agent(
+            output = await executor._invoker.execute_agent(
                 "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
@@ -188,7 +189,7 @@ class TestExecutorAutoResume:
             new_callable=AsyncMock,
             return_value=max_turns_output,
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
-            output = await executor._execute_agent(
+            output = await executor._invoker.execute_agent(
                 "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
@@ -219,7 +220,7 @@ class TestExecutorAutoResume:
             new_callable=AsyncMock,
             return_value=output_no_session,
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
-            output = await executor._execute_agent(
+            output = await executor._invoker.execute_agent(
                 "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
@@ -260,7 +261,7 @@ class TestExecutorAutoResume:
             new_callable=AsyncMock,
             side_effect=[first_output, second_output],
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
-            output = await executor._execute_agent(
+            output = await executor._invoker.execute_agent(
                 "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
@@ -295,7 +296,7 @@ class TestExecutorAutoResume:
             new_callable=AsyncMock,
             side_effect=[first_output, second_output],
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
-            output = await executor._execute_agent(
+            output = await executor._invoker.execute_agent(
                 "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
@@ -322,7 +323,7 @@ class TestExecutorAutoResume:
             new_callable=AsyncMock,
             return_value=claude_output,
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
-            await executor._execute_agent(
+            await executor._invoker.execute_agent(
                 "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
@@ -348,7 +349,7 @@ class TestExecutorAutoResume:
             new_callable=AsyncMock,
             return_value=claude_output,
         ) as mock_exec, patch("aquarco_supervisor.pipeline.executor.Path"):
-            await executor._execute_agent(
+            await executor._invoker.execute_agent(
                 "test-agent", "task-1", {}, 0,
                 work_dir="/repos/test",
             )
@@ -516,7 +517,7 @@ class TestClaudeResumePrompt:
             new_callable=AsyncMock,
             side_effect=[first_output, second_output],
         ), patch("aquarco_supervisor.pipeline.executor.Path"):
-            output = await executor._execute_agent(
+            output = await executor._invoker.execute_agent(
                 "test-agent", "task-1", {}, 0, work_dir="/repos/test"
             )
 
