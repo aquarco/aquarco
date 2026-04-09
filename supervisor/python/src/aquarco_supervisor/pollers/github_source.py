@@ -11,7 +11,12 @@ from typing import Any
 
 from ..database import Database
 from ..logging import get_logger
-from ..models import SupervisorConfig
+from ..models import GitFlowConfig, SupervisorConfig
+from ..pipeline.git_workflow import (
+    find_active_release_branch,
+    perform_back_merge,
+    resolve_back_merge_target,
+)
 from ..task_queue import TaskQueue
 from ..utils import run_git as _run_git
 from ..utils import url_to_slug as _url_to_slug
@@ -80,6 +85,12 @@ class GitHubSourcePoller(BasePoller):
                     head_sha_updates[f"head_sha:{repo['name']}"] = new_sha
             except Exception as e:
                 log.error("commit_poll_failed", repo=repo["name"], error=str(e))
+
+            # Poll merged PRs for back-merge in Git Flow repos
+            try:
+                await self._poll_merged_prs(repo["name"], slug, cursor)
+            except Exception as e:
+                log.error("merged_pr_poll_failed", repo=slug, error=str(e))
 
         new_cursor = datetime.now(timezone.utc).isoformat()
         state = {"tasks_created": total_created, **head_sha_updates}
@@ -248,6 +259,122 @@ class GitHubSourcePoller(BasePoller):
         )
         return (1 if task_created else 0), new_head_sha
 
+    async def _get_repo_git_flow_config(
+        self, repo_name: str,
+    ) -> GitFlowConfig | None:
+        """Read git_flow_config from DB for a repository by name."""
+        row = await self._db.fetch_one(
+            "SELECT git_flow_config FROM repositories WHERE name = %(name)s",
+            {"name": repo_name},
+        )
+        if not row or not row["git_flow_config"]:
+            return None
+        raw = row["git_flow_config"]
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        cfg = GitFlowConfig(**raw)
+        if not cfg.enabled:
+            return None
+        return cfg
+
+    async def _get_repo_clone_dir(self, repo_name: str) -> str | None:
+        """Get the clone directory for a repository by name."""
+        row = await self._db.fetch_one(
+            "SELECT clone_dir FROM repositories WHERE name = %(name)s AND clone_status = 'ready'",
+            {"name": repo_name},
+        )
+        return row["clone_dir"] if row else None
+
+    async def _poll_merged_prs(
+        self, repo_name: str, repo_slug: str, cursor: str,
+    ) -> None:
+        """Poll recently merged PRs and trigger back-merges for Git Flow repos.
+
+        This method only acts on repositories with git_flow_config enabled.
+        It tracks processed PR numbers in poll_state.state_data to ensure
+        idempotency.
+        """
+        git_flow_cfg = await self._get_repo_git_flow_config(repo_name)
+        if git_flow_cfg is None:
+            return
+
+        clone_dir = await self._get_repo_clone_dir(repo_name)
+        if not clone_dir or not Path(clone_dir).exists():
+            return
+
+        # Fetch recently merged PRs
+        merged_prs = await _gh_list_merged_prs(repo_slug)
+        if not merged_prs:
+            return
+
+        # Load already-processed PR numbers from poll_state
+        state_row = await self._db.fetch_one(
+            "SELECT state_data FROM poll_state WHERE poller_name = %(name)s",
+            {"name": self.name},
+        )
+        state_data = state_row["state_data"] if state_row else {}
+        if isinstance(state_data, str):
+            state_data = json.loads(state_data)
+        processed_key = f"back_merged_prs:{repo_name}"
+        processed_prs: list[int] = state_data.get(processed_key, [])
+
+        for pr in merged_prs:
+            pr_number = pr.get("number")
+            if not pr_number or pr_number in processed_prs:
+                continue
+
+            merged_at = pr.get("mergedAt", "")
+            if merged_at and merged_at <= cursor:
+                continue
+
+            base_ref = pr.get("baseRefName", "")
+            head_ref = pr.get("headRefName", "")
+
+            # Skip system-created back-merge PRs to avoid infinite loops
+            if head_ref.startswith("aquarco/back-merge/"):
+                processed_prs.append(pr_number)
+                continue
+
+            # Determine back-merge target
+            active_release = await find_active_release_branch(
+                clone_dir,
+                git_flow_cfg.branches.stable,
+                git_flow_cfg.branches.release,
+            )
+            target = resolve_back_merge_target(
+                git_flow_cfg, base_ref, active_release_branch=active_release,
+            )
+
+            if target:
+                log.info(
+                    "back_merge_triggered",
+                    repo=repo_slug,
+                    pr=pr_number,
+                    source=base_ref,
+                    target=target,
+                )
+                await perform_back_merge(
+                    clone_dir, repo_slug, base_ref, target,
+                    task_description=f"Back-merge after PR #{pr_number} merged into {base_ref}",
+                )
+
+            processed_prs.append(pr_number)
+
+        # Persist the updated list of processed PRs (keep last 200 to avoid unbounded growth)
+        processed_prs = processed_prs[-200:]
+        await self._db.execute(
+            """
+            INSERT INTO poll_state (poller_name, state_data)
+            VALUES (%(name)s, %(data)s::jsonb)
+            ON CONFLICT (poller_name)
+            DO UPDATE SET state_data = poll_state.state_data || %(data)s::jsonb
+            """,
+            {
+                "name": self.name,
+                "data": json.dumps({processed_key: processed_prs}),
+            },
+        )
+
     async def _process_pr(
         self,
         pr: dict[str, Any],
@@ -330,6 +457,39 @@ async def _gh_list_prs(repo_slug: str, timeout: int = 60) -> list[dict[str, Any]
         err_text = stderr.decode("utf-8", errors="replace")
         err_text = re.sub(r"https?://[^@\s]+@", "https://<redacted>@", err_text)
         raise RuntimeError(f"gh pr list failed: {err_text}")
+    prs: list[dict[str, Any]] = json.loads(stdout.decode())
+    return prs
+
+
+async def _gh_list_merged_prs(
+    repo_slug: str, timeout: int = 60,
+) -> list[dict[str, Any]]:
+    """Call gh pr list --state merged and return parsed JSON.
+
+    Returns recently merged PRs (last 50) for back-merge processing.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "gh", "pr", "list",
+        "--repo", repo_slug,
+        "--state", "merged",
+        "--json",
+        "number,title,headRefName,baseRefName,mergedAt",
+        "--limit", "50",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError(
+            f"gh pr list (merged) timed out after {timeout}s for {repo_slug}"
+        )
+    if proc.returncode != 0:
+        err_text = stderr.decode("utf-8", errors="replace")
+        err_text = re.sub(r"https?://[^@\s]+@", "https://<redacted>@", err_text)
+        raise RuntimeError(f"gh pr list (merged) failed: {err_text}")
     prs: list[dict[str, Any]] = json.loads(stdout.decode())
     return prs
 

@@ -22,7 +22,7 @@ from ..config import get_pipeline_config
 from ..database import Database
 from ..exceptions import PipelineError
 from ..logging import get_logger
-from ..models import PipelineConfig, TaskStatus
+from ..models import GitFlowConfig, PipelineConfig, TaskStatus
 from ..stage_manager import StageManager
 from ..task_queue import TaskQueue
 from ..utils import run_cmd as _run_cmd
@@ -35,6 +35,12 @@ from .conditions import (  # noqa: F401 — re-exported for backward compat
     check_conditions,
 )
 from .git_ops import _auto_commit, _get_ahead_count, _git_checkout, _push_if_ahead
+from .git_workflow import (
+    BranchInfo,
+    find_active_release_branch,
+    post_branch_created_comment,
+    resolve_branch_info,
+)
 from .planner import PipelinePlanner
 from .stage_runner import StageRunner
 
@@ -278,6 +284,32 @@ class PipelineExecutor:
             )
         return clone_dir
 
+    async def _get_git_flow_config(self, task_id: str) -> GitFlowConfig | None:
+        """Read git_flow_config JSONB from the DB for a task's repository.
+
+        Returns None if the repository has no git_flow_config (Simple Branch mode).
+        """
+        row = await self._db.fetch_one(
+            """
+            SELECT r.git_flow_config FROM tasks t
+            JOIN repositories r ON r.name = t.repository
+            WHERE t.id = %(id)s
+            """,
+            {"id": task_id},
+        )
+        if not row:
+            return None
+        raw = row.get("git_flow_config") if isinstance(row, dict) else getattr(row, "git_flow_config", None)
+        if not raw:
+            return None
+        if isinstance(raw, str):
+            import json as _json
+            raw = _json.loads(raw)
+        cfg = GitFlowConfig(**raw)
+        if not cfg.enabled:
+            return None
+        return cfg
+
     async def _setup_branch(
         self,
         task_id: str,
@@ -292,6 +324,11 @@ class PipelineExecutor:
         When *resuming* a checkpointed pipeline, the branch already has
         commits from previous stages -- we must **not** reset it to
         origin/base.
+
+        Supports two modes:
+        - **Simple Branch** (git_flow_config is None): uses ``aquarco/{task_id}/{slug}``
+        - **Git Flow** (git_flow_config is set): uses label-driven branch naming
+          (feature/*, bugfix/*, hotfix/*) with automatic base-branch resolution.
         """
         head_branch: str | None = context.get("head_branch")
         if head_branch:
@@ -302,27 +339,126 @@ class PipelineExecutor:
             await _run_git(work_dir, "checkout", "-B", head_branch, head_branch)
             return head_branch
 
-        # Feature pipeline
         task = await self._tq.get_task(task_id)
         if not task:
             raise PipelineError(f"Task {task_id} not found")
 
+        await _run_git(work_dir, "fetch", "origin")
+
+        git_flow_cfg = await self._get_git_flow_config(task_id)
+
+        if git_flow_cfg is not None:
+            return await self._setup_git_flow_branch(
+                task_id, task, git_flow_cfg, work_dir, resuming=resuming,
+            )
+
+        # Simple Branch mode (existing behaviour)
         slug = re.sub(r"[^a-z0-9]+", "-", task.title.lower()).strip("-")[:50]
         branch_name = f"aquarco/{task_id}/{slug}"
 
-        await _run_git(work_dir, "fetch", "origin")
-
         if resuming:
-            # Branch already exists with work from earlier stages -- just
-            # check it out without resetting to origin/base.
             await _run_git(work_dir, "checkout", "-B", branch_name, branch_name)
         else:
-            # Fresh start: create or reset the branch from origin/base.
             base_branch = await self._get_repo_branch(task_id)
             await _run_git(
                 work_dir, "checkout", "-B", branch_name, f"origin/{base_branch}",
             )
         return branch_name
+
+    async def _setup_git_flow_branch(
+        self,
+        task_id: str,
+        task: Any,
+        git_flow_cfg: GitFlowConfig,
+        work_dir: str,
+        *,
+        resuming: bool = False,
+    ) -> str:
+        """Set up a branch using Git Flow rules."""
+        # Extract labels from task context
+        initial_ctx = task.initial_context or {}
+        labels: list[str] = initial_ctx.get("labels", [])
+
+        # Find active release branch for bugfix resolution
+        active_release = await find_active_release_branch(
+            work_dir,
+            git_flow_cfg.branches.stable,
+            git_flow_cfg.branches.release,
+        )
+
+        result = resolve_branch_info(
+            git_flow_cfg, task_id, task.title, labels,
+            active_release_branch=active_release,
+        )
+
+        if isinstance(result, str):
+            # Error case — e.g. hotfix without target label
+            # Post a comment on the GitHub issue explaining the problem
+            repo_slug = await self._get_repo_slug(task_id)
+            issue_number = initial_ctx.get("github_issue_number")
+            if repo_slug and issue_number:
+                try:
+                    await _run_cmd(
+                        "gh", "issue", "comment", str(issue_number),
+                        "--repo", repo_slug,
+                        "--body", f"⚠️ **Branch not created**\n\n{result}",
+                    )
+                except Exception as e:
+                    log.warning(
+                        "hotfix_comment_failed",
+                        task_id=task_id,
+                        error=str(e),
+                    )
+            raise PipelineError(
+                f"Git Flow branch resolution failed for {task_id}: {result}"
+            )
+
+        branch_info: BranchInfo = result
+
+        if resuming:
+            await _run_git(
+                work_dir, "checkout", "-B",
+                branch_info.branch_name, branch_info.branch_name,
+            )
+        else:
+            await _run_git(
+                work_dir, "checkout", "-B",
+                branch_info.branch_name,
+                f"origin/{branch_info.base_branch}",
+            )
+
+        # Store the base branch in checkpoint_data for PR creation
+        await self._db.execute(
+            """
+            UPDATE tasks
+            SET checkpoint_data = checkpoint_data || %(data)s::jsonb
+            WHERE id = %(id)s
+            """,
+            {
+                "id": task_id,
+                "data": json.dumps({
+                    "git_flow_base_branch": branch_info.base_branch,
+                    "git_flow_branch_type": branch_info.branch_type,
+                }),
+            },
+        )
+
+        # Post branch-created comment on the GitHub issue
+        repo_slug = await self._get_repo_slug(task_id)
+        issue_number = initial_ctx.get("github_issue_number")
+        if repo_slug and issue_number:
+            try:
+                await post_branch_created_comment(
+                    repo_slug, issue_number, branch_info,
+                )
+            except Exception as e:
+                log.warning(
+                    "branch_created_comment_failed",
+                    task_id=task_id,
+                    error=str(e),
+                )
+
+        return branch_info.branch_name
 
     async def _get_repo_branch(self, task_id: str) -> str:
         """Get the default branch for a task's repository."""
@@ -372,7 +508,12 @@ class PipelineExecutor:
                     )
         else:
             # Feature pipeline: create new PR
-            base_branch = await self._get_repo_branch(task_id)
+            # Use git flow base branch if available, otherwise fall back to repo.branch
+            checkpoint = task.checkpoint_data or {}
+            base_branch = checkpoint.get(
+                "git_flow_base_branch",
+                await self._get_repo_branch(task_id),
+            )
             ahead = await _get_ahead_count(clone_dir, branch_name, base_branch)
             if ahead == 0:
                 log.info("no_commits_to_push", task_id=task_id)
@@ -402,12 +543,29 @@ class PipelineExecutor:
                         )
                         return
 
+                # Use the branch type for the PR title prefix
+                branch_type = checkpoint.get("git_flow_branch_type", "feat")
+                pr_prefix_map = {
+                    "feature": "feat",
+                    "bugfix": "fix",
+                    "hotfix": "fix",
+                }
+                pr_prefix = pr_prefix_map.get(branch_type, "feat")
+
+                # Include Closes #N if we have the issue number
+                initial_ctx = task.initial_context or {}
+                issue_num = initial_ctx.get("github_issue_number")
+                pr_body = f"Automated PR for task {task_id}"
+                if issue_num:
+                    pr_body += f"\n\nCloses #{issue_num}"
+
                 pr_output = await _run_cmd(
                     "gh", "pr", "create",
                     "--repo", repo_slug,
                     "--head", branch_name,
-                    "--title", f"feat: {task.title}",
-                    "--body", f"Automated PR for task {task_id}",
+                    "--base", base_branch,
+                    "--title", f"{pr_prefix}: {task.title}",
+                    "--body", pr_body,
                 )
                 # Parse PR number from URL (e.g. https://github.com/.../pull/42)
                 if pr_output:
