@@ -155,24 +155,19 @@ async def test_get_postponed_tasks_empty_when_none_ready(
 
 
 # ---------------------------------------------------------------------------
-# AC-21: get_rate_limited_tasks() is deprecated and emits a warning
+# AC-21: get_rate_limited_tasks() is a deprecated alias for get_postponed_tasks
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_get_rate_limited_tasks_emits_deprecation_warning(
+async def test_get_rate_limited_tasks_delegates_to_get_postponed_tasks(
     tq: TaskQueue, mock_db: AsyncMock
 ) -> None:
-    """AC-21: get_rate_limited_tasks() emits DeprecationWarning."""
+    """AC-21: get_rate_limited_tasks() delegates to get_postponed_tasks()."""
     mock_db.fetch_all = AsyncMock(return_value=[])
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        await tq.get_rate_limited_tasks()
-
-    assert len(caught) == 1
-    assert issubclass(caught[0].category, DeprecationWarning)
-    assert "get_postponed_tasks" in str(caught[0].message)
+    result = await tq.get_rate_limited_tasks()
+    assert result == []
+    mock_db.fetch_all.assert_awaited_once()
 
 
 @pytest.mark.asyncio

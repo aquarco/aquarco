@@ -1,6 +1,6 @@
 import { Context } from '../context.js'
 import { RepositoryRow, StageRow, ContextRow } from '../loaders.js'
-import { mapStage } from './queries.js'
+import { mapStage } from './mappers.js'
 
 // ---- Scalar resolvers ----
 

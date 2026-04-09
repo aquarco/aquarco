@@ -38,11 +38,17 @@ def mock_db() -> AsyncMock:
 @pytest.fixture
 def mock_tq() -> AsyncMock:
     tq = AsyncMock(spec=TaskQueue)
-    tq.get_stage_number_for_id = AsyncMock(return_value=None)
-    tq.get_max_execution_order = AsyncMock(return_value=0)
-    tq.get_task_context = AsyncMock(return_value={})
-    tq.get_latest_stage_run = AsyncMock(return_value=None)
     return tq
+
+
+@pytest.fixture
+def mock_sm() -> AsyncMock:
+    sm = AsyncMock()
+    sm.get_stage_number_for_id = AsyncMock(return_value=None)
+    sm.get_max_execution_order = AsyncMock(return_value=0)
+    sm.get_task_context = AsyncMock(return_value={})
+    sm.get_latest_stage_run = AsyncMock(return_value=None)
+    return sm
 
 
 @pytest.fixture
@@ -69,9 +75,10 @@ def executor(
     mock_db: AsyncMock,
     mock_tq: AsyncMock,
     mock_registry: MagicMock,
+    mock_sm: AsyncMock,
     sample_pipelines: Any,
 ) -> PipelineExecutor:
-    return PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+    return PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines, stage_manager=mock_sm)
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +149,7 @@ class TestExecutionOrderInitialization:
         self,
         executor: PipelineExecutor,
         mock_tq: AsyncMock,
+        mock_sm: AsyncMock,
         mock_db: AsyncMock,
         mock_registry: MagicMock,
     ) -> None:
@@ -156,7 +164,7 @@ class TestExecutionOrderInitialization:
         mock_tq.get_task = AsyncMock(return_value=mock_task)
 
         mock_db.fetch_one = AsyncMock(
-            return_value={"clone_dir": "/repos/test", "branch": "main"}
+            return_value={"clone_dir": "/repos/test", "clone_status": "ready", "branch": "main"}
         )
 
         with patch(
@@ -181,13 +189,14 @@ class TestExecutionOrderInitialization:
             await executor.execute_pipeline("feature-pipeline", "task-1", {})
 
         # Counter initialized for fresh start — get_max_execution_order NOT called
-        mock_tq.get_max_execution_order.assert_not_awaited()
+        mock_sm.get_max_execution_order.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_resume_pipeline_recovers_counter_from_db(
         self,
         executor: PipelineExecutor,
         mock_tq: AsyncMock,
+        mock_sm: AsyncMock,
         mock_db: AsyncMock,
         mock_registry: MagicMock,
     ) -> None:
@@ -206,11 +215,11 @@ class TestExecutionOrderInitialization:
             {"category": "review", "agents": ["review-agent"], "parallel": False, "validation": []},
         ]
         mock_tq.get_task = AsyncMock(return_value=mock_task)
-        mock_tq.get_stage_number_for_id = AsyncMock(return_value=2)
-        mock_tq.get_max_execution_order = AsyncMock(return_value=5)
+        mock_sm.get_stage_number_for_id = AsyncMock(return_value=2)
+        mock_sm.get_max_execution_order = AsyncMock(return_value=5)
 
         mock_db.fetch_one = AsyncMock(
-            return_value={"clone_dir": "/repos/test", "branch": "main"}
+            return_value={"clone_dir": "/repos/test", "clone_status": "ready", "branch": "main"}
         )
 
         with patch(
@@ -235,7 +244,7 @@ class TestExecutionOrderInitialization:
             await executor.execute_pipeline("feature-pipeline", "task-1", {})
 
         # Should have recovered counter from DB
-        mock_tq.get_max_execution_order.assert_awaited_once_with("task-1")
+        mock_sm.get_max_execution_order.assert_awaited_once_with("task-1")
         # Counter should be seeded at 5
         # After pipeline completes, it's cleaned up; verify via side effect:
         # the next calls to _next_execution_order should have started at 6
@@ -255,6 +264,7 @@ class TestExecutionOrderCleanup:
         self,
         executor: PipelineExecutor,
         mock_tq: AsyncMock,
+        mock_sm: AsyncMock,
         mock_db: AsyncMock,
     ) -> None:
         """Counter entry is removed from _execution_order after successful pipeline."""
@@ -267,7 +277,7 @@ class TestExecutionOrderCleanup:
         mock_tq.get_task = AsyncMock(return_value=mock_task)
 
         mock_db.fetch_one = AsyncMock(
-            return_value={"clone_dir": "/repos/test", "branch": "main"}
+            return_value={"clone_dir": "/repos/test", "clone_status": "ready", "branch": "main"}
         )
 
         with patch(
@@ -298,6 +308,7 @@ class TestExecutionOrderCleanup:
         self,
         executor: PipelineExecutor,
         mock_tq: AsyncMock,
+        mock_sm: AsyncMock,
         mock_db: AsyncMock,
         mock_registry: MagicMock,
     ) -> None:
@@ -311,7 +322,7 @@ class TestExecutionOrderCleanup:
         mock_tq.get_task = AsyncMock(return_value=mock_task)
 
         mock_db.fetch_one = AsyncMock(
-            return_value={"clone_dir": "/repos/test", "branch": "main"}
+            return_value={"clone_dir": "/repos/test", "clone_status": "ready", "branch": "main"}
         )
 
         # Make the stage execution fail via StageError so the pipeline fails
@@ -350,37 +361,38 @@ class TestExecutionOrderCleanup:
 
 
 class TestExecutionOrderPropagation:
-    """Tests that execution_order is properly propagated to TaskQueue calls."""
+    """Tests that execution_order is properly propagated to StageManager calls."""
 
     @pytest.mark.asyncio
     async def test_execute_planned_stage_passes_execution_order(
         self,
         executor: PipelineExecutor,
-        mock_tq: AsyncMock,
+        mock_sm: AsyncMock,
         mock_registry: MagicMock,
     ) -> None:
-        """_execute_planned_stage passes execution_order to record_stage_executing."""
+        """execute_planned_stage passes execution_order to record_stage_executing."""
         with patch(
             "aquarco_supervisor.pipeline.executor.execute_claude",
             new_callable=AsyncMock,
             return_value=ClaudeOutput(structured={"ok": True}, raw="{}"),
         ), patch("aquarco_supervisor.pipeline.executor.Path"):
-            await executor._execute_planned_stage(
+            await executor._runner.execute_planned_stage(
                 "task-1", 0, "analyze", "analyze-agent",
                 {"some": "context"},
                 execution_order=3,
+                work_dir="/repos/test",
             )
 
         # Verify record_stage_executing was called with execution_order=3
-        mock_tq.record_stage_executing.assert_awaited_once()
-        call_kwargs = mock_tq.record_stage_executing.call_args
+        mock_sm.record_stage_executing.assert_awaited_once()
+        call_kwargs = mock_sm.record_stage_executing.call_args
         assert call_kwargs[1]["execution_order"] == 3
 
     @pytest.mark.asyncio
     async def test_execute_planned_stage_no_execution_order(
         self,
         executor: PipelineExecutor,
-        mock_tq: AsyncMock,
+        mock_sm: AsyncMock,
         mock_registry: MagicMock,
     ) -> None:
         """When execution_order not provided, None is passed."""
@@ -389,12 +401,13 @@ class TestExecutionOrderPropagation:
             new_callable=AsyncMock,
             return_value=ClaudeOutput(structured={"ok": True}, raw="{}"),
         ), patch("aquarco_supervisor.pipeline.executor.Path"):
-            await executor._execute_planned_stage(
+            await executor._runner.execute_planned_stage(
                 "task-1", 0, "analyze", "analyze-agent",
                 {"some": "context"},
+                work_dir="/repos/test",
             )
 
-        call_kwargs = mock_tq.record_stage_executing.call_args
+        call_kwargs = mock_sm.record_stage_executing.call_args
         assert call_kwargs[1]["execution_order"] is None
 
 
@@ -425,15 +438,15 @@ class TestParallelExecutionOrder:
     async def test_execute_parallel_agents_passes_execution_orders(
         self,
         executor: PipelineExecutor,
-        mock_tq: AsyncMock,
+        mock_sm: AsyncMock,
         mock_registry: MagicMock,
         mock_db: AsyncMock,
     ) -> None:
-        """_execute_parallel_agents passes pre-allocated EO dict to each agent."""
+        """execute_parallel_agents passes pre-allocated EO dict to each agent."""
         executor._execution_order["task-1"] = 0
 
         mock_db.fetch_one = AsyncMock(
-            return_value={"clone_dir": "/repos/test", "branch": "main"}
+            return_value={"clone_dir": "/repos/test", "clone_status": "ready", "branch": "main"}
         )
 
         agents = ["agent-a", "agent-b"]
@@ -447,16 +460,19 @@ class TestParallelExecutionOrder:
             "aquarco_supervisor.pipeline.executor._run_git",
             new_callable=AsyncMock,
             return_value="",
+        ), patch(
+            "aquarco_supervisor.pipeline.executor._git_checkout",
+            new_callable=AsyncMock,
         ):
-            result = await executor._execute_parallel_agents(
+            result = await executor._runner.execute_parallel_agents(
                 "task-1", 0, "analyze", agents,
                 "/repos/test", "main",
                 execution_orders=eos,
             )
 
         # record_stage_executing should have been called with correct EO
-        # for each agent (called via _execute_planned_stage)
-        calls = mock_tq.record_stage_executing.call_args_list
+        # for each agent (called via execute_planned_stage)
+        calls = mock_sm.record_stage_executing.call_args_list
         assert len(calls) == 2
         eo_values = [c[1]["execution_order"] for c in calls]
         assert sorted(eo_values) == [1, 2]

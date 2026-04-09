@@ -18,12 +18,14 @@ from .cli.auth_helper import auth_watch
 from .cli.repo_manager import repo_app
 from .cli.status import status
 from .config import load_config, load_pipelines, load_secrets
-from .config_store import sync_all_agent_definitions_to_db, sync_pipeline_definitions_to_db
+from .agent_store import sync_all_agent_definitions_to_db
+from .pipeline_store import sync_pipeline_definitions_to_db
 from .database import Database
 from .logging import get_logger, setup_logging
 from .models import PipelineConfig, SupervisorConfig, TaskStatus
 from .pipeline.agent_registry import AgentRegistry
 from .pipeline.executor import PipelineExecutor
+from .stage_manager import StageManager
 from .pollers.external_triggers import ExternalTriggersPoller
 from .pollers.github_source import GitHubSourcePoller
 from .pollers.github_tasks import GitHubTasksPoller
@@ -117,8 +119,10 @@ class Supervisor:
         )
         await self._registry.load()
 
+        self._sm = StageManager(self._db)
         self._executor = PipelineExecutor(
-            self._db, self._tq, self._registry, self._pipelines
+            self._db, self._tq, self._registry, self._pipelines,
+            stage_manager=self._sm,
         )
         self._clone_worker = CloneWorker(
             self._db, github_token=self._secrets.get("github_token")
