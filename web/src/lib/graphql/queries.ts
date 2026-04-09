@@ -1,9 +1,9 @@
 import { gql } from '@apollo/client'
 
 // Domain-specific re-exports for backward compatibility
-export * from './task-queries.js'
-export * from './repo-queries.js'
-export * from './agent-queries.js'
+export * from './task-queries'
+export * from './repo-queries'
+export * from './agent-queries'
 
 // ── Dashboard (cross-domain — kept here) ─────────────────────────────────────
 
