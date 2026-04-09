@@ -194,3 +194,83 @@ async def test_get_latest_stage_run_returns_none_when_missing(
 
     result = await task_queue.get_latest_stage_run("task-1", "0:review:agent")
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# get_stage_structured_output
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_stage_structured_output_returns_dict(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Returns structured_output as a dict when the stage exists."""
+    mock_db.fetch_val = AsyncMock(return_value={"summary": "done", "files_changed": []})
+    result = await task_queue.get_stage_structured_output(42)
+    assert result == {"summary": "done", "files_changed": []}
+    params = mock_db.fetch_val.call_args[0][1]
+    assert params["id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_get_stage_structured_output_returns_none_for_missing(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Returns None when the stage has no output or doesn't exist."""
+    mock_db.fetch_val = AsyncMock(return_value=None)
+    result = await task_queue.get_stage_structured_output(999)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_stage_structured_output_parses_json_string(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Parses JSON string output when DB returns a string instead of dict."""
+    mock_db.fetch_val = AsyncMock(return_value='{"key": "value"}')
+    result = await task_queue.get_stage_structured_output(10)
+    assert result == {"key": "value"}
+
+
+# ---------------------------------------------------------------------------
+# record_stage_executing — completed-stage guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_record_stage_executing_stage_id_guards_completed(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """stage_id path: SQL must include AND status != 'completed' guard."""
+    await task_queue.record_stage_executing(
+        "task-1", 0, "implement", "impl-agent",
+        stage_id=10, stage_key="0:implement:impl-agent",
+    )
+    sql = mock_db.execute.call_args[0][0]
+    assert "status != 'completed'" in sql
+
+
+@pytest.mark.asyncio
+async def test_record_stage_executing_stage_key_guards_completed(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """stage_key path: SQL must include AND status != 'completed' guard."""
+    await task_queue.record_stage_executing(
+        "task-1", 0, "implement", "impl-agent",
+        stage_key="0:implement:impl-agent",
+    )
+    sql = mock_db.execute.call_args[0][0]
+    assert "status != 'completed'" in sql
+
+
+@pytest.mark.asyncio
+async def test_record_stage_executing_legacy_guards_completed(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """Legacy path: ON CONFLICT DO UPDATE must include WHERE status != 'completed'."""
+    await task_queue.record_stage_executing(
+        "task-1", 0, "implement", "impl-agent",
+    )
+    sql = mock_db.execute.call_args[0][0]
+    assert "status != 'completed'" in sql
