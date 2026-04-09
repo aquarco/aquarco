@@ -318,14 +318,38 @@ class GitHubSourcePoller(BasePoller):
         processed_key = f"back_merged_prs:{repo_name}"
         processed_prs: list[int] = state_data.get(processed_key, [])
 
+        # Parse cursor to datetime for robust timestamp comparison
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except (ValueError, TypeError):
+            cursor_dt = datetime.now(timezone.utc) - timedelta(hours=1)
+
+        # Pre-compute active release branch once per poll cycle (not per PR)
+        # to avoid O(N*M) git subprocess calls.
+        active_release = await find_active_release_branch(
+            clone_dir,
+            git_flow_cfg.branches.stable,
+            git_flow_cfg.branches.release,
+        )
+
         for pr in merged_prs:
             pr_number = pr.get("number")
             if not pr_number or pr_number in processed_prs:
                 continue
 
             merged_at = pr.get("mergedAt", "")
-            if merged_at and merged_at <= cursor:
-                continue
+            if merged_at:
+                try:
+                    merged_dt = datetime.fromisoformat(merged_at)
+                    if merged_dt <= cursor_dt:
+                        continue
+                except (ValueError, TypeError):
+                    # If we can't parse the timestamp, process the PR anyway
+                    log.warning(
+                        "merged_pr_bad_timestamp",
+                        pr=pr_number,
+                        merged_at=merged_at,
+                    )
 
             base_ref = pr.get("baseRefName", "")
             head_ref = pr.get("headRefName", "")
@@ -336,11 +360,6 @@ class GitHubSourcePoller(BasePoller):
                 continue
 
             # Determine back-merge target
-            active_release = await find_active_release_branch(
-                clone_dir,
-                git_flow_cfg.branches.stable,
-                git_flow_cfg.branches.release,
-            )
             target = resolve_back_merge_target(
                 git_flow_cfg, base_ref, active_release_branch=active_release,
             )
@@ -360,18 +379,24 @@ class GitHubSourcePoller(BasePoller):
 
             processed_prs.append(pr_number)
 
-        # Persist the updated list of processed PRs (keep last 200 to avoid unbounded growth)
+        # Persist the updated list of processed PRs (keep last 200 to avoid unbounded growth).
+        # Use jsonb_set for targeted key update to avoid clobbering concurrent writes.
         processed_prs = processed_prs[-200:]
         await self._db.execute(
             """
             INSERT INTO poll_state (poller_name, state_data)
-            VALUES (%(name)s, %(data)s::jsonb)
+            VALUES (%(name)s, jsonb_build_object(%(key)s, %(prs)s::jsonb))
             ON CONFLICT (poller_name)
-            DO UPDATE SET state_data = poll_state.state_data || %(data)s::jsonb
+            DO UPDATE SET state_data = jsonb_set(
+                COALESCE(poll_state.state_data, '{}'::jsonb),
+                ARRAY[%(key)s],
+                %(prs)s::jsonb
+            )
             """,
             {
                 "name": self.name,
-                "data": json.dumps({processed_key: processed_prs}),
+                "key": processed_key,
+                "prs": json.dumps(processed_prs),
             },
         )
 

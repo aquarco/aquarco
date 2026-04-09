@@ -431,7 +431,7 @@ class PipelineExecutor:
         await self._db.execute(
             """
             UPDATE tasks
-            SET checkpoint_data = checkpoint_data || %(data)s::jsonb
+            SET checkpoint_data = COALESCE(checkpoint_data, '{}'::jsonb) || %(data)s::jsonb
             WHERE id = %(id)s
             """,
             {

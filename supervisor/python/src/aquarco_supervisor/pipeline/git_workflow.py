@@ -241,8 +241,12 @@ async def find_active_release_branch(
     # Fetch to make sure we have the latest remote refs
     try:
         await _run_git(clone_dir, "fetch", "origin", "--prune", check=False)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(
+            "find_active_release_fetch_failed",
+            clone_dir=clone_dir,
+            error=str(e),
+        )
 
     # List remote branches matching the release pattern
     # Convert "release/*" to "refs/remotes/origin/release/"
@@ -275,7 +279,12 @@ async def find_active_release_branch(
                 check=False,
             )
             count = int(count_str.strip()) if count_str.strip() else 0
-        except (ValueError, Exception):
+        except (ValueError, Exception) as e:
+            log.warning(
+                "find_active_release_rev_list_failed",
+                branch=branch_name,
+                error=str(e),
+            )
             count = 0
 
         if count == 0:
@@ -339,6 +348,12 @@ async def perform_back_merge(
         repo=repo_slug,
     )
 
+    # Truncate task_description to prevent excessively long content
+    # being passed to gh CLI commands.
+    _MAX_DESCRIPTION_LEN = 500
+    if len(task_description) > _MAX_DESCRIPTION_LEN:
+        task_description = task_description[:_MAX_DESCRIPTION_LEN] + "…"
+
     try:
         # Fetch latest
         await _run_git(clone_dir, "fetch", "origin")
@@ -356,19 +371,25 @@ async def perform_back_merge(
             clone_dir, "checkout", "-B", merge_branch, f"origin/{target_branch}",
         )
 
+        # Record HEAD before merge to detect success vs already-up-to-date
+        head_before = await _run_git(clone_dir, "rev-parse", "HEAD")
+
         # Attempt the merge
-        merge_result = await _run_git(
+        await _run_git(
             clone_dir, "merge", f"origin/{source_branch}",
             "--no-edit",
             "-m", f"chore: back-merge {source_branch} into {target_branch}",
             check=False,
         )
 
-        # Check if merge had conflicts
+        # Check working tree state after merge attempt
         status = await _run_git(clone_dir, "status", "--porcelain")
+        status_lines = [
+            line for line in status.strip().split("\n") if line.strip()
+        ]
         has_conflicts = any(
             line.startswith("UU") or line.startswith("AA") or line.startswith("DD")
-            for line in status.strip().split("\n") if line.strip()
+            for line in status_lines
         )
 
         if has_conflicts:
@@ -418,6 +439,31 @@ async def perform_back_merge(
                     error=str(e),
                 )
             return True  # We handled the conflict by creating a PR
+
+        if status_lines:
+            # Merge left dirty working tree but no conflict markers —
+            # this means the merge failed for a non-conflict reason
+            # (e.g. invalid ref, corrupt index).  Abort and bail out.
+            log.error(
+                "back_merge_unexpected_dirty_state",
+                source=source_branch,
+                target=target_branch,
+                status_lines=status_lines[:5],
+            )
+            await _run_git(clone_dir, "merge", "--abort", check=False)
+            await _run_git(clone_dir, "reset", "--hard", check=False)
+            return False
+
+        # Working tree is clean — check if HEAD actually advanced
+        head_after = await _run_git(clone_dir, "rev-parse", "HEAD")
+        if head_before.strip() == head_after.strip():
+            # Already up to date — nothing to push
+            log.info(
+                "back_merge_already_up_to_date",
+                source=source_branch,
+                target=target_branch,
+            )
+            return True
 
         # Merge succeeded — push directly to target
         await _run_git(clone_dir, "push", "origin", f"{merge_branch}:{target_branch}")
