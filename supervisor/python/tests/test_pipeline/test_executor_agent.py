@@ -21,7 +21,7 @@ async def test_execute_agent_returns_structured_with_agent_name_and_raw(
     """_execute_agent returns structured output with _agent_name and _raw_output."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(
-        return_value={"clone_dir": "/repos/test", "branch": "main"}
+        return_value={"clone_dir": "/repos/test", "clone_status": "ready", "branch": "main"}
     )
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_registry = MagicMock()
@@ -45,8 +45,9 @@ async def test_execute_agent_returns_structured_with_agent_name_and_raw(
         new_callable=AsyncMock,
         return_value=claude_output,
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
-        output = await executor._execute_agent(
+        output = await executor._invoker.execute_agent(
             "test-agent", "task-1", {"key": "val"}, 0,
+            resolve_clone_dir=executor._resolve_clone_dir,
         )
 
     assert output["_agent_name"] == "test-agent"
@@ -59,7 +60,7 @@ async def test_execute_agent_uses_registry(sample_pipelines: Any) -> None:
     """_execute_agent uses the registry for config lookups."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(
-        return_value={"clone_dir": "/repos/test", "branch": "main"}
+        return_value={"clone_dir": "/repos/test", "clone_status": "ready", "branch": "main"}
     )
     mock_tq = AsyncMock(spec=TaskQueue)
 
@@ -83,8 +84,9 @@ async def test_execute_agent_uses_registry(sample_pipelines: Any) -> None:
         new_callable=AsyncMock,
         return_value=claude_output,
     ) as mock_execute, patch("aquarco_supervisor.pipeline.executor.Path"):
-        output = await executor._execute_agent(
+        output = await executor._invoker.execute_agent(
             "agent-1", "task-1", {}, 0,
+            resolve_clone_dir=executor._resolve_clone_dir,
         )
 
     # Registry methods should be called
@@ -115,7 +117,7 @@ async def test_execute_agent_with_work_dir_override(sample_pipelines: Any) -> No
         new_callable=AsyncMock,
         return_value=claude_output,
     ) as mock_execute, patch("aquarco_supervisor.pipeline.executor.Path"):
-        await executor._execute_agent(
+        await executor._invoker.execute_agent(
             "agent-1", "task-1", {}, 0,
             work_dir="/custom/dir",
         )
@@ -131,7 +133,7 @@ async def test_execute_agent_passes_output_schema(sample_pipelines: Any) -> None
     """_execute_agent passes output_schema from registry to execute_claude."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(
-        return_value={"clone_dir": "/repos/test", "branch": "main"}
+        return_value={"clone_dir": "/repos/test", "clone_status": "ready", "branch": "main"}
     )
     mock_tq = AsyncMock(spec=TaskQueue)
 
@@ -153,8 +155,9 @@ async def test_execute_agent_passes_output_schema(sample_pipelines: Any) -> None
         new_callable=AsyncMock,
         return_value=claude_output,
     ) as mock_execute, patch("aquarco_supervisor.pipeline.executor.Path"):
-        await executor._execute_agent(
+        await executor._invoker.execute_agent(
             "agent-1", "task-1", {}, 0,
+            resolve_clone_dir=executor._resolve_clone_dir,
         )
 
     call_kwargs = mock_execute.call_args.kwargs

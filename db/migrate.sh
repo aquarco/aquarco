@@ -47,6 +47,62 @@ cur.close()
 conn.close()
 PYEOF
 
+# ── Pre-flight: mark consolidated migration on existing deployments ──
+# Databases built via the old incremental migrations (000–043) already have
+# the full schema. If we detect aquarco.tasks exists but yoyo has no record
+# of 000_consolidated_init, we INSERT a tracking row so yoyo skips it.
+python3 - "$DATABASE_URL" <<'PYEOF'
+import sys, os, psycopg2, hashlib
+
+url = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("DATABASE_URL", "")
+
+conn = psycopg2.connect(url)
+conn.autocommit = True
+cur = conn.cursor()
+
+# Check if aquarco.tasks exists (proxy for "schema was built by old migrations")
+cur.execute("SELECT to_regclass('aquarco.tasks')")
+if cur.fetchone()[0] is None:
+    # Fresh database — let the consolidated init run normally
+    cur.close()
+    conn.close()
+    sys.exit(0)
+
+# Schema exists. Check if consolidated migration is already tracked.
+# Guard: _yoyo_migration may not exist yet (e.g. database bootstrapped from a dump).
+cur.execute("SELECT to_regclass('public._yoyo_migration')")
+if cur.fetchone()[0] is None:
+    # Yoyo tracking table doesn't exist — yoyo will create it on first run.
+    # Nothing to mark; exit cleanly.
+    cur.close()
+    conn.close()
+    sys.exit(0)
+
+cur.execute(
+    "SELECT 1 FROM public._yoyo_migration "
+    "WHERE migration_id = '000_consolidated_init'"
+)
+if cur.fetchone():
+    # Already marked — nothing to do
+    cur.close()
+    conn.close()
+    sys.exit(0)
+
+# Mark the consolidated migration as applied so yoyo skips it.
+# Use SHA-256 to match yoyo-migrations' internal hashing algorithm.
+migration_hash = hashlib.sha256(b"000_consolidated_init").hexdigest()
+cur.execute(
+    "INSERT INTO public._yoyo_migration (migration_hash, migration_id, applied_at_utc) "
+    "VALUES (%s, %s, NOW()) "
+    "ON CONFLICT (migration_hash) DO NOTHING",
+    (migration_hash, "000_consolidated_init")
+)
+print("Marked 000_consolidated_init as applied (existing deployment detected)")
+
+cur.close()
+conn.close()
+PYEOF
+
 COMMAND="${1:-apply}"
 shift 2>/dev/null || true
 

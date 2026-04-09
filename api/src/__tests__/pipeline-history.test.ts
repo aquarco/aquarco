@@ -55,6 +55,7 @@ const baseStageRow: StageRow = {
   stage_number: 0,
   iteration: null,
   run: null,
+  execution_order: null,
   category: 'analyze',
   agent: 'analyze-agent',
   agent_version: '1.0.0',

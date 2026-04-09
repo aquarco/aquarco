@@ -451,6 +451,7 @@ export enum StageStatus {
   Completed = 'completed',
   Executing = 'executing',
   Failed = 'failed',
+  MaxTurns = 'max_turns',
   Pending = 'pending',
   RateLimited = 'rate_limited',
   Skipped = 'skipped'
@@ -959,6 +960,7 @@ export type StageResolvers<ContextType = Context, ParentType extends ResolversPa
   completedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   costUsd?: Resolver<Maybe<ResolversTypes['Float']>, ParentType, ContextType>;
   errorMessage?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  executionOrder?: Resolver<Maybe<ResolversTypes['Int']>, ParentType, ContextType>;
   id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
   iteration?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   liveOutput?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
@@ -976,7 +978,7 @@ export type StageResolvers<ContextType = Context, ParentType extends ResolversPa
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
 
-export type StageStatusResolvers = { COMPLETED: 'completed', EXECUTING: 'executing', FAILED: 'failed', PENDING: 'pending', RATE_LIMITED: 'rate_limited', SKIPPED: 'skipped' };
+export type StageStatusResolvers = { COMPLETED: 'completed', EXECUTING: 'executing', FAILED: 'failed', MAX_TURNS: 'max_turns', PENDING: 'pending', RATE_LIMITED: 'rate_limited', SKIPPED: 'skipped' };
 
 export type SubscriptionResolvers<ContextType = Context, ParentType extends ResolversParentTypes['Subscription'] = ResolversParentTypes['Subscription']> = ResolversObject<{
   pipelineProgress?: SubscriptionResolver<ResolversTypes['PipelineStatus'], "pipelineProgress", ParentType, ContextType, RequireFields<SubscriptionPipelineProgressArgs, 'taskId'>>;

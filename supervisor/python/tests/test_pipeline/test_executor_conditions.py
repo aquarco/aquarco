@@ -16,6 +16,7 @@ import pytest
 
 from aquarco_supervisor.database import Database
 from aquarco_supervisor.models import PipelineConfig, PipelineTrigger, StageConfig
+from aquarco_supervisor.pipeline.agent_invoker import AgentInvoker
 from aquarco_supervisor.pipeline.executor import (
     PipelineExecutor,
     check_conditions,
@@ -81,6 +82,10 @@ class TestOutputSchemaResolution:
         executor._tq = mock_tq
         executor._registry = mock_registry
         executor._pipelines = pipelines or []
+        # Create invoker for get_output_schema_for_stage
+        executor._invoker = AgentInvoker.__new__(AgentInvoker)
+        executor._invoker._registry = mock_registry
+        executor._invoker._pipelines = pipelines or []
         return executor
 
     def test_resolves_from_pipeline_categories(self) -> None:
@@ -95,7 +100,7 @@ class TestOutputSchemaResolution:
             categories=categories,
         )
         executor = self._make_executor([pipeline])
-        schema = executor._get_output_schema_for_stage(
+        schema = executor._invoker.get_output_schema_for_stage(
             "feature-pipeline", "analyze", "analyze-agent"
         )
         assert schema is not None
@@ -114,7 +119,7 @@ class TestOutputSchemaResolution:
         executor._registry.get_agent_output_schema = MagicMock(
             return_value={"type": "object", "properties": {"from_agent": {}}}
         )
-        schema = executor._get_output_schema_for_stage(
+        schema = executor._invoker.get_output_schema_for_stage(
             "feature-pipeline", "analyze", "analyze-agent"
         )
         assert schema is not None
@@ -130,7 +135,7 @@ class TestOutputSchemaResolution:
             categories={},
         )
         executor = self._make_executor([pipeline])
-        schema = executor._get_output_schema_for_stage(
+        schema = executor._invoker.get_output_schema_for_stage(
             "feature-pipeline", "analyze", "analyze-agent"
         )
         assert schema is None
@@ -139,7 +144,7 @@ class TestOutputSchemaResolution:
         """When pipeline_name doesn't match, fall back to agent spec."""
         executor = self._make_executor([])
         executor._registry.get_agent_output_schema = MagicMock(return_value={"type": "string"})
-        schema = executor._get_output_schema_for_stage(
+        schema = executor._invoker.get_output_schema_for_stage(
             "nonexistent-pipeline", "analyze", "analyze-agent"
         )
         assert schema == {"type": "string"}
@@ -156,7 +161,7 @@ class TestOutputSchemaResolution:
         executor._registry.get_agent_output_schema = MagicMock(
             return_value={"type": "object"}
         )
-        schema = executor._get_output_schema_for_stage(
+        schema = executor._invoker.get_output_schema_for_stage(
             "test-pipeline", "test", "test-agent"
         )
         # Empty dict is falsy, so should fall back
@@ -174,7 +179,7 @@ class TestOutputSchemaResolution:
         executor._registry.get_agent_output_schema = MagicMock(
             return_value={"type": "object", "from": "registry"}
         )
-        schema = executor._get_output_schema_for_stage(
+        schema = executor._invoker.get_output_schema_for_stage(
             "test-pipeline", "test", "test-agent"
         )
         assert schema is not None

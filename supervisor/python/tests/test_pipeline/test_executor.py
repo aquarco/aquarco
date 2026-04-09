@@ -184,13 +184,15 @@ def test_compare_complexity_invalid_expected() -> None:
 async def test_resolve_clone_dir_found(sample_pipelines: Any) -> None:
     """Returns clone_dir when the DB row is found."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/my-repo", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/my-repo", "branch": "main", "clone_status": "ready"})
 
     mock_tq = AsyncMock(spec=TaskQueue)
     mock_registry = AsyncMock()
 
     executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
-    clone_dir = await executor._resolve_clone_dir("task-001")
+    with patch("aquarco_supervisor.pipeline.executor.Path") as MockPath:
+        MockPath.return_value.exists.return_value = True
+        clone_dir = await executor._resolve_clone_dir("task-001")
 
     assert clone_dir == "/repos/my-repo"
 
@@ -311,10 +313,12 @@ async def test_execute_pipeline_no_pipeline_name_uses_task_pipeline(
 ) -> None:
     """When pipeline_name is empty, reads pipeline from the task record."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_stage_number_for_id = AsyncMock(return_value=None)
-    mock_tq.get_task_context = AsyncMock(return_value={})
+    mock_sm = AsyncMock()
+    mock_sm.get_task_context = AsyncMock(return_value={})
+    mock_sm.get_latest_stage_run = AsyncMock(return_value=None)
+    mock_sm.create_planned_pending_stages = AsyncMock(return_value={})
 
     mock_task = MagicMock()
     mock_task.pipeline = "feature-pipeline"
@@ -336,7 +340,7 @@ async def test_execute_pipeline_no_pipeline_name_uses_task_pipeline(
     mock_registry.should_skip_planning = MagicMock(return_value=True)
     mock_registry.get_agents_for_category = MagicMock(return_value=["review-agent"])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines, stage_manager=mock_sm)
 
     with patch(
         "aquarco_supervisor.pipeline.executor.execute_claude",
@@ -403,7 +407,7 @@ async def test_run_git_delegates_to_run_cmd(tmp_path: Any) -> None:
 async def test_auto_commit_skips_when_clean() -> None:
     """_auto_commit does nothing when status output is empty."""
     with patch(
-        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+        "aquarco_supervisor.pipeline.git_ops._run_git", new_callable=AsyncMock
     ) as mock_git:
         mock_git.return_value = ""  # clean tree
         await _auto_commit("/repo", "task-001", 0, "review")
@@ -421,7 +425,7 @@ async def test_auto_commit_commits_when_dirty() -> None:
     call_results = ["M  file.py", "", ""]  # status, add, commit
 
     with patch(
-        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+        "aquarco_supervisor.pipeline.git_ops._run_git", new_callable=AsyncMock
     ) as mock_git:
         mock_git.side_effect = call_results
         await _auto_commit("/repo", "task-001", 2, "implement")
@@ -436,11 +440,11 @@ async def test_auto_commit_commits_when_dirty() -> None:
 async def test_push_if_ahead_pushes_when_ahead() -> None:
     """_push_if_ahead calls git push when ahead count > 0."""
     with patch(
-        "aquarco_supervisor.pipeline.executor._get_ahead_count",
+        "aquarco_supervisor.pipeline.git_ops._get_ahead_count",
         new_callable=AsyncMock,
         return_value=3,
     ), patch(
-        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+        "aquarco_supervisor.pipeline.git_ops._run_git", new_callable=AsyncMock
     ) as mock_git:
         await _push_if_ahead("/repo", "my-branch")
 
@@ -452,11 +456,11 @@ async def test_push_if_ahead_pushes_when_ahead() -> None:
 async def test_push_if_ahead_skips_when_not_ahead() -> None:
     """_push_if_ahead does not push when ahead count == 0."""
     with patch(
-        "aquarco_supervisor.pipeline.executor._get_ahead_count",
+        "aquarco_supervisor.pipeline.git_ops._get_ahead_count",
         new_callable=AsyncMock,
         return_value=0,
     ), patch(
-        "aquarco_supervisor.pipeline.executor._run_git", new_callable=AsyncMock
+        "aquarco_supervisor.pipeline.git_ops._run_git", new_callable=AsyncMock
     ) as mock_git:
         await _push_if_ahead("/repo", "my-branch")
 
@@ -466,7 +470,7 @@ async def test_push_if_ahead_skips_when_not_ahead() -> None:
 @pytest.mark.asyncio
 async def test_get_ahead_count_returns_integer() -> None:
     with patch(
-        "aquarco_supervisor.pipeline.executor._run_git",
+        "aquarco_supervisor.pipeline.git_ops._run_git",
         new_callable=AsyncMock,
         return_value="5",
     ):
@@ -478,7 +482,7 @@ async def test_get_ahead_count_returns_integer() -> None:
 @pytest.mark.asyncio
 async def test_get_ahead_count_returns_zero_on_empty() -> None:
     with patch(
-        "aquarco_supervisor.pipeline.executor._run_git",
+        "aquarco_supervisor.pipeline.git_ops._run_git",
         new_callable=AsyncMock,
         return_value="",
     ):
@@ -490,7 +494,7 @@ async def test_get_ahead_count_returns_zero_on_empty() -> None:
 @pytest.mark.asyncio
 async def test_get_ahead_count_returns_zero_on_non_numeric() -> None:
     with patch(
-        "aquarco_supervisor.pipeline.executor._run_git",
+        "aquarco_supervisor.pipeline.git_ops._run_git",
         new_callable=AsyncMock,
         return_value="not-a-number",
     ):
@@ -506,8 +510,9 @@ async def test_get_ahead_count_returns_zero_on_non_numeric() -> None:
 async def test_execute_stage_success(sample_pipelines: Any) -> None:
     """_execute_stage selects agent, runs it, and returns output."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
+    mock_sm = AsyncMock()
     mock_registry = AsyncMock()
     mock_registry.select_agent = AsyncMock(return_value="impl-agent")
     mock_registry.get_agent_prompt_file = MagicMock(return_value="/prompts/impl.md")
@@ -515,16 +520,12 @@ async def test_execute_stage_success(sample_pipelines: Any) -> None:
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines, stage_manager=mock_sm)
 
-    with patch(
-        "aquarco_supervisor.pipeline.executor.execute_claude",
-        new_callable=AsyncMock,
-        return_value=ClaudeOutput(structured={"result": "done"}, raw='{"result": "done"}'),
-    ), patch(
-        "aquarco_supervisor.pipeline.executor.Path",
-    ):
-        output = await executor._execute_stage("implement", "task-1", {}, 0)
+    executor._runner._invoker.execute_agent = AsyncMock(
+        return_value={"_agent_name": "impl-agent", "result": "done"}
+    )
+    output = await executor._runner.execute_stage("implement", "task-1", {}, 0)
 
     assert output["_agent_name"] == "impl-agent"
     assert output["result"] == "done"
@@ -536,8 +537,9 @@ async def test_execute_stage_success(sample_pipelines: Any) -> None:
 async def test_execute_stage_failure_records_and_raises(sample_pipelines: Any) -> None:
     """_execute_stage records failure and raises StageError on agent error."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
+    mock_sm = AsyncMock()
     mock_registry = AsyncMock()
     mock_registry.select_agent = AsyncMock(return_value="impl-agent")
     mock_registry.get_agent_prompt_file = MagicMock(return_value="/prompts/impl.md")
@@ -545,16 +547,15 @@ async def test_execute_stage_failure_records_and_raises(sample_pipelines: Any) -
     mock_registry.get_allowed_tools = MagicMock(return_value=[])
     mock_registry.get_denied_tools = MagicMock(return_value=[])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines, stage_manager=mock_sm)
 
-    with patch(
-        "aquarco_supervisor.pipeline.executor.execute_claude",
-        new_callable=AsyncMock,
+    executor._runner._invoker.execute_agent = AsyncMock(
         side_effect=RuntimeError("agent crashed"),
-    ), pytest.raises(StageError, match="Stage 0.*failed"):
-        await executor._execute_stage("implement", "task-1", {}, 0)
+    )
+    with pytest.raises(StageError, match="Stage 0.*failed"):
+        await executor._runner.execute_stage("implement", "task-1", {}, 0)
 
-    mock_tq.record_stage_failed.assert_awaited_once()
+    mock_sm.record_stage_failed.assert_awaited_once()
     mock_registry.decrement_agent_instances.assert_awaited_once()
 
 
@@ -565,10 +566,12 @@ async def test_execute_stage_failure_records_and_raises(sample_pipelines: Any) -
 async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
     """Full pipeline execution with stages, branch setup, and PR creation."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_stage_number_for_id = AsyncMock(return_value=None)
-    mock_tq.get_task_context = AsyncMock(return_value={})
+    mock_sm = AsyncMock()
+    mock_sm.get_task_context = AsyncMock(return_value={})
+    mock_sm.get_latest_stage_run = AsyncMock(return_value=None)
+    mock_sm.create_planned_pending_stages = AsyncMock(return_value={})
 
     task = MagicMock()
     task.title = "Add widget"
@@ -589,7 +592,7 @@ async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
     mock_registry.should_skip_planning = MagicMock(return_value=True)
     mock_registry.get_agents_for_category = MagicMock(return_value=["impl-agent"])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines, stage_manager=mock_sm)
 
     with patch(
         "aquarco_supervisor.pipeline.executor.execute_claude",
@@ -619,10 +622,13 @@ async def test_execute_pipeline_full_flow(sample_pipelines: Any) -> None:
 async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) -> None:
     """Pipeline resumes from checkpoint, skipping completed stages."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_stage_number_for_id = AsyncMock(return_value=0)  # stage_number for the last completed stage
-    mock_tq.get_task_context = AsyncMock(return_value={})
+    mock_sm = AsyncMock()
+    mock_sm.get_stage_number_for_id = AsyncMock(return_value=0)  # stage_number for the last completed stage
+    mock_sm.get_task_context = AsyncMock(return_value={})
+    mock_sm.get_latest_stage_run = AsyncMock(return_value=None)
+    mock_sm.get_max_execution_order = AsyncMock(return_value=0)
 
     task = MagicMock()
     task.title = "Resume task"
@@ -645,7 +651,7 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
     mock_registry.get_agent_environment = MagicMock(return_value={})
     mock_registry.get_agent_output_schema = MagicMock(return_value=None)
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines, stage_manager=mock_sm)
 
     with patch(
         "aquarco_supervisor.pipeline.executor.execute_claude",
@@ -669,7 +675,7 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
         await executor.execute_pipeline("feature-pipeline", "task-1", {})
 
     # Should NOT call create_planned_pending_stages since resuming
-    mock_tq.create_planned_pending_stages.assert_not_awaited()
+    mock_sm.create_planned_pending_stages.assert_not_awaited()
     mock_tq.complete_task.assert_awaited_once()
 
 
@@ -677,10 +683,12 @@ async def test_execute_pipeline_with_checkpoint_resume(sample_pipelines: Any) ->
 async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> None:
     """When a required stage fails, the task is postponed for retry."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_stage_number_for_id = AsyncMock(return_value=None)
-    mock_tq.get_task_context = AsyncMock(return_value={})
+    mock_sm = AsyncMock()
+    mock_sm.get_task_context = AsyncMock(return_value={})
+    mock_sm.get_latest_stage_run = AsyncMock(return_value=None)
+    mock_sm.create_planned_pending_stages = AsyncMock(return_value={})
 
     task = MagicMock()
     task.title = "Failing task"
@@ -700,7 +708,7 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
     mock_registry.should_skip_planning = MagicMock(return_value=True)
     mock_registry.get_agents_for_category = MagicMock(return_value=["agent"])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines, stage_manager=mock_sm)
 
     with patch(
         "aquarco_supervisor.pipeline.executor.execute_claude",
@@ -719,7 +727,7 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
     # Required stage failures are now retried via postpone (not permanent fail)
     mock_tq.postpone_task.assert_awaited_once()
     # No checkpoint when the first stage fails — no prior completed stage to reference
-    mock_tq.update_checkpoint.assert_not_awaited()
+    mock_sm.update_checkpoint.assert_not_awaited()
     mock_tq.complete_task.assert_not_called()
 
 
@@ -727,10 +735,12 @@ async def test_execute_pipeline_required_stage_fails(sample_pipelines: Any) -> N
 async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) -> None:
     """When an optional stage fails, pipeline continues to next stage."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_stage_number_for_id = AsyncMock(return_value=None)
-    mock_tq.get_task_context = AsyncMock(return_value={})
+    mock_sm = AsyncMock()
+    mock_sm.get_task_context = AsyncMock(return_value={})
+    mock_sm.get_latest_stage_run = AsyncMock(return_value=None)
+    mock_sm.create_planned_pending_stages = AsyncMock(return_value={})
 
     task = MagicMock()
     task.title = "Optional stage task"
@@ -750,7 +760,7 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
     mock_registry.should_skip_planning = MagicMock(return_value=True)
     mock_registry.get_agents_for_category = MagicMock(return_value=["agent"])
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines, stage_manager=mock_sm)
 
     # Patch pipeline config to have an optional first stage
     optional_stages = [
@@ -795,7 +805,7 @@ async def test_execute_pipeline_optional_stage_failure(sample_pipelines: Any) ->
     mock_tq.complete_task.assert_awaited_once()
     mock_tq.fail_task.assert_not_called()
     # Optional stage should be recorded as skipped
-    mock_tq.record_stage_skipped.assert_awaited()
+    mock_sm.record_stage_skipped.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -832,27 +842,28 @@ def _make_registry_mock() -> MagicMock:
 async def test_execute_planned_stage_fresh_run(sample_pipelines: Any) -> None:
     """When get_latest_stage_run returns None, the stage executes with run=1."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_latest_stage_run = AsyncMock(return_value=None)
+    mock_sm = AsyncMock()
+    mock_sm.get_latest_stage_run = AsyncMock(return_value=None)
     mock_registry = _make_registry_mock()
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines, stage_manager=mock_sm)
 
     with patch(
         "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
-        result, stage_id = await executor._execute_planned_stage(
-            "task-1", 0, "implement", "impl-agent", {}, iteration=1,
+        result, stage_id = await executor._runner.execute_planned_stage(
+            "task-1", 0, "implement", "impl-agent", {}, iteration=1, work_dir="/repos/test",
         )
 
     # No retry row should be created
-    mock_tq.create_rerun_stage.assert_not_awaited()
+    mock_sm.create_rerun_stage.assert_not_awaited()
     # record_stage_executing called with run=1
-    mock_tq.record_stage_executing.assert_awaited_once()
-    call_kwargs = mock_tq.record_stage_executing.call_args.kwargs
+    mock_sm.record_stage_executing.assert_awaited_once()
+    call_kwargs = mock_sm.record_stage_executing.call_args.kwargs
     assert call_kwargs["run"] == 1
 
 
@@ -860,32 +871,33 @@ async def test_execute_planned_stage_fresh_run(sample_pipelines: Any) -> None:
 async def test_execute_planned_stage_retry_after_failure(sample_pipelines: Any) -> None:
     """When latest run has status=failed, creates a retry row with run=latest+1."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_latest_stage_run = AsyncMock(
+    mock_sm = AsyncMock()
+    mock_sm.get_latest_stage_run = AsyncMock(
         return_value={"id": 10, "status": "failed", "run": 1, "error_message": "boom", "session_id": None}
     )
-    mock_tq.create_rerun_stage = AsyncMock(return_value=20)
+    mock_sm.create_rerun_stage = AsyncMock(return_value=20)
     mock_registry = _make_registry_mock()
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines, stage_manager=mock_sm)
 
     with patch(
         "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
-        result, stage_id = await executor._execute_planned_stage(
-            "task-1", 0, "implement", "impl-agent", {}, iteration=1,
+        result, stage_id = await executor._runner.execute_planned_stage(
+            "task-1", 0, "implement", "impl-agent", {}, iteration=1, work_dir="/repos/test",
         )
 
     # Must create a retry row with run=2
-    mock_tq.create_rerun_stage.assert_awaited_once()
-    retry_kwargs = mock_tq.create_rerun_stage.call_args
+    mock_sm.create_rerun_stage.assert_awaited_once()
+    retry_kwargs = mock_sm.create_rerun_stage.call_args
     assert retry_kwargs.args[6] == 2 or retry_kwargs.kwargs.get("run") == 2 or retry_kwargs.args[-1] == 2
 
     # record_stage_executing called with run=2 and stage_id from create_rerun_stage
-    call_kwargs = mock_tq.record_stage_executing.call_args.kwargs
+    call_kwargs = mock_sm.record_stage_executing.call_args.kwargs
     assert call_kwargs["run"] == 2
     assert call_kwargs["stage_id"] == 20
     assert stage_id == 20
@@ -895,30 +907,31 @@ async def test_execute_planned_stage_retry_after_failure(sample_pipelines: Any) 
 async def test_execute_planned_stage_retry_after_rate_limited(sample_pipelines: Any) -> None:
     """When latest run has status=rate_limited, creates a retry row with run=latest+1."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_latest_stage_run = AsyncMock(
+    mock_sm = AsyncMock()
+    mock_sm.get_latest_stage_run = AsyncMock(
         return_value={"id": 15, "status": "rate_limited", "run": 2, "error_message": "429", "session_id": None}
     )
-    mock_tq.create_rerun_stage = AsyncMock(return_value=25)
+    mock_sm.create_rerun_stage = AsyncMock(return_value=25)
     mock_registry = _make_registry_mock()
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines, stage_manager=mock_sm)
 
     with patch(
         "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
-        result, stage_id = await executor._execute_planned_stage(
-            "task-1", 0, "implement", "impl-agent", {}, iteration=1,
+        result, stage_id = await executor._runner.execute_planned_stage(
+            "task-1", 0, "implement", "impl-agent", {}, iteration=1, work_dir="/repos/test",
         )
 
     # Must create a retry row with run=3
-    mock_tq.create_rerun_stage.assert_awaited_once()
+    mock_sm.create_rerun_stage.assert_awaited_once()
 
     # record_stage_executing called with run=3
-    call_kwargs = mock_tq.record_stage_executing.call_args.kwargs
+    call_kwargs = mock_sm.record_stage_executing.call_args.kwargs
     assert call_kwargs["run"] == 3
     assert stage_id == 25
 
@@ -927,28 +940,29 @@ async def test_execute_planned_stage_retry_after_rate_limited(sample_pipelines: 
 async def test_execute_planned_stage_reuse_pending_run(sample_pipelines: Any) -> None:
     """When latest run has status=pending, reuses that run number without creating a new row."""
     mock_db = AsyncMock(spec=Database)
-    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main"})
+    mock_db.fetch_one = AsyncMock(return_value={"clone_dir": "/repos/test", "branch": "main", "clone_status": "ready"})
     mock_tq = AsyncMock(spec=TaskQueue)
-    mock_tq.get_latest_stage_run = AsyncMock(
+    mock_sm = AsyncMock()
+    mock_sm.get_latest_stage_run = AsyncMock(
         return_value={"id": 30, "status": "pending", "run": 3, "error_message": None, "session_id": None}
     )
     mock_registry = _make_registry_mock()
 
-    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines)
+    executor = PipelineExecutor(mock_db, mock_tq, mock_registry, sample_pipelines, stage_manager=mock_sm)
 
     with patch(
         "aquarco_supervisor.pipeline.executor.execute_claude",
         new_callable=AsyncMock,
         return_value=ClaudeOutput(structured={"result": "ok"}, raw='{"result": "ok"}'),
     ), patch("aquarco_supervisor.pipeline.executor.Path"):
-        result, stage_id = await executor._execute_planned_stage(
-            "task-1", 0, "implement", "impl-agent", {}, iteration=1,
+        result, stage_id = await executor._runner.execute_planned_stage(
+            "task-1", 0, "implement", "impl-agent", {}, iteration=1, work_dir="/repos/test",
         )
 
     # No new retry row should be created
-    mock_tq.create_rerun_stage.assert_not_awaited()
+    mock_sm.create_rerun_stage.assert_not_awaited()
     # record_stage_executing called with the existing run=3
-    call_kwargs = mock_tq.record_stage_executing.call_args.kwargs
+    call_kwargs = mock_sm.record_stage_executing.call_args.kwargs
     assert call_kwargs["run"] == 3
     assert call_kwargs["stage_id"] == 30
     assert stage_id == 30
@@ -964,7 +978,7 @@ async def test_close_task_resources_removes_worktree(
     """close_task_resources removes the worktree directory."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(
-        return_value={"clone_dir": str(tmp_path / "clone"), "branch": "main"}
+        return_value={"clone_dir": str(tmp_path / "clone"), "branch": "main", "clone_status": "ready"}
     )
     mock_tq = AsyncMock(spec=TaskQueue)
     executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
@@ -1020,7 +1034,7 @@ async def test_close_task_resources_fallback_rmtree(
     """close_task_resources falls back to rmtree when git worktree remove fails."""
     mock_db = AsyncMock(spec=Database)
     mock_db.fetch_one = AsyncMock(
-        return_value={"clone_dir": str(tmp_path / "clone"), "branch": "main"}
+        return_value={"clone_dir": str(tmp_path / "clone"), "branch": "main", "clone_status": "ready"}
     )
     mock_tq = AsyncMock(spec=TaskQueue)
     executor = PipelineExecutor(mock_db, mock_tq, AsyncMock(), sample_pipelines)
