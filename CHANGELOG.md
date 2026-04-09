@@ -1,5 +1,35 @@
 # Changelog
 
+## [2026-04-09] — Implement Git Workflow Specification (#118)
+
+### Added
+- **Git Workflow system** — automated branching and merging strategy supporting two modes:
+  - **Simple Branch mode** — single-branch workflow (all work targets `main` or `master`)
+  - **Git Flow mode** — structured multi-branch strategy with `develop`, `release/*`, `feature/*`, `bugfix/*`, and `hotfix/*` branches
+- **Automatic back-merge logic** — when a PR merges into `release/*` or `main`, Aquarco automatically back-merges to prevent regressions (PR merged to release → `develop`; PR merged to main → active release or `develop`)
+- **Task label support** — branch type controlled via `feature`, `bugfix`, `hotfix` labels and optional `target:` label to override default base branch
+- **Conflict handling for back-merges** — conflicts during automatic back-merge are surfaced as new PRs labeled with `back-merge` and `conflict` for manual resolution
+- **Active release branch detection** — automatically identifies newest `release/*` branch (by semantic version) that hasn't been fully merged to `main`
+- **Comprehensive test coverage** — 61 new tests covering Git Flow scenarios: feature/bugfix/hotfix branch creation, automatic back-merging, conflict handling, empty release branches, and multiple active releases
+
+### Fixed
+- **CRITICAL** — Race condition in `perform_back_merge()` (git_workflow.py): Added HEAD-before/after comparison and dirty-state detection. If merge leaves dirty working tree without conflict markers (indicating merge failure), function now aborts and returns False instead of pushing incomplete merge
+- **CRITICAL** — SQL NULL handling in `executor.py`: Changed `checkpoint_data || %(data)s::jsonb` to `COALESCE(checkpoint_data, '{}'::jsonb) || %(data)s::jsonb` to safely handle NULL checkpoint_data in UPSERT operations
+- **CRITICAL** — Unsanitized CLI input in `git_workflow.py`: Added truncation of task_description to 500 characters before passing to `gh` CLI commands to prevent argument injection
+- **WARNING** — Fetch failures in `find_active_release_branch()` now log warnings with context instead of silently passing
+- **WARNING** — `rev-list` failures now log warnings with branch information for debugging
+- **WARNING** — Merged PR timestamp comparison now uses parsed datetime objects instead of string comparison
+- **PERFORMANCE** — Hoisted `find_active_release_branch()` call outside the merged-PR loop (reduced from O(N*M) to O(N) complexity)
+- **PERFORMANCE** — UPSERT uses targeted jsonb_set with COALESCE to prevent concurrent write clobbering
+
+### Test Coverage
+- 61 new tests across two test files:
+  - `test_pipeline/test_git_workflow_extended.py` — Git Flow scenarios (feature/bugfix/hotfix branch creation, back-merge routing, conflict handling)
+  - `test_pollers/test_github_source_backmerge.py` — GitHub webhook integration and back-merge triggers
+- 9 async integration tests covering `perform_back_merge()` success, conflict, dirty-state, already-up-to-date, and description truncation cases
+- 8 tests for `find_active_release_branch()` including active branch selection, all-merged releases, no releases, and fetch failure scenarios
+- All 103 tests passing with 89% code coverage
+
 ## [2026-04-08] — Consolidate migrations (#110)
 
 ### Added

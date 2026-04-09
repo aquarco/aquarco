@@ -117,6 +117,26 @@ class Stage(BaseModel):
     error_message: str | None = None
 
 
+class GitFlowBranches(BaseModel):
+    """Branch naming patterns for Git Flow mode."""
+    stable: str = "main"
+    development: str = "develop"
+    release: str = "release/*"
+    feature: str = "feature/*"
+    bugfix: str = "bugfix/*"
+    hotfix: str = "hotfix/*"
+
+
+class GitFlowConfig(BaseModel):
+    """Git Flow configuration for a repository.
+
+    When present (non-None) on a Repository, enables Git Flow mode.
+    When absent (None), the repository uses Simple Branch mode.
+    """
+    enabled: bool = True
+    branches: GitFlowBranches = Field(default_factory=GitFlowBranches)
+
+
 class Repository(BaseModel):
     name: str
     url: str
@@ -128,6 +148,7 @@ class Repository(BaseModel):
     last_pulled_at: datetime | None = None
     error_message: str | None = None
     deploy_public_key: str | None = None
+    git_flow_config: GitFlowConfig | None = None
 
 
 class AgentInstance(BaseModel):
