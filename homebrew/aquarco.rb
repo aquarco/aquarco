@@ -7,14 +7,14 @@
 # `aquarco update` is disabled — updates go through `brew upgrade` instead.
 #
 # On first `aquarco init`, the VM is provisioned with production Docker images
-# tagged rc-1.0.0 from ghcr.io/borissuska/aquarco.
+# tagged 1.0.0rc1 from ghcr.io/borissuska/aquarco.
 
 class Aquarco < Formula
   include Language::Python::Virtualenv
 
   desc "CLI for managing Aquarco autonomous agent VMs"
   homepage "https://github.com/aquarco/aquarco"
-  url "https://github.com/aquarco/aquarco/archive/refs/tags/vrc-1.0.0.tar.gz"
+  url "https://github.com/aquarco/aquarco/archive/refs/tags/v1.0.0rc1.tar.gz"
   # SHA256 is stamped automatically by the release CI job (see .github/workflows/release.yml).
   # To compute manually: curl -sL <url> | shasum -a 256
   sha256 "PLACEHOLDER_SHA256"
