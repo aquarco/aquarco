@@ -1,56 +1,128 @@
-# compose.prod.yml — production overlay for Aquarco Docker Compose stack
+# compose.prod.yml — standalone production VM stack for Aquarco
 #
-# Usage:  docker compose -f compose.yml -f compose.prod.yml up -d
+# Self-contained: does NOT require compose.yml as a base.
+# Uses pre-built images only — no build contexts, no source mounts.
 #
-# Requires versions.env to be sourced (or passed via --env-file).
-# Replaces build contexts with pre-built images, disables dev-only services,
-# switches to production commands, and removes source volume mounts.
+# Usage:
+#   docker compose -f docker/compose.prod.yml up -d
+#
+# Required env vars (set in /etc/aquarco/env or export in shell):
+#   AQUARCO_REGISTRY         — image registry prefix
+#   AQUARCO_MIGRATIONS_VERSION
+#   AQUARCO_API_VERSION
+#   AQUARCO_WEB_VERSION
+#   POSTGRES_USER
+#   POSTGRES_PASSWORD
+#   DATABASE_URL             — full postgres connection string
+
+name: aquarco
+
+networks:
+  aquarco:
+    driver: bridge
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
 
 services:
 
-  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  # ── PostgreSQL ────────────────────────────────────────────────────────────────
   postgres:
-    image: postgres:${AQUARCO_POSTGRES_VERSION}
+    image: postgres:${AQUARCO_POSTGRES_VERSION:-16-alpine}
+    restart: unless-stopped
+    networks:
+      - aquarco
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-aquarco}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aquarco}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  # ── Database Migrations ──────────────────────────────────────────────────────
+  # ── Database Migrations (yoyo) ────────────────────────────────────────────────
   migrations:
-    build: !reset null
-    image: ${AQUARCO_REGISTRY}/migrations:${AQUARCO_MIGRATIONS_VERSION}
-    volumes: !reset []
+    image: ${AQUARCO_REGISTRY}/migrations:${AQUARCO_MIGRATIONS_VERSION:?AQUARCO_MIGRATIONS_VERSION must be set}
+    restart: "no"
+    networks:
+      - aquarco
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
-  # ── GraphQL API ──────────────────────────────────────────────────────────────
+  # ── GraphQL API ───────────────────────────────────────────────────────────────
   api:
-    build: !reset null
-    image: ${AQUARCO_REGISTRY}/api:${AQUARCO_API_VERSION}
+    image: ${AQUARCO_REGISTRY}/api:${AQUARCO_API_VERSION:?AQUARCO_API_VERSION must be set}
+    restart: unless-stopped
     command: ["node", "dist/server.js"]
-    volumes: !reset
+    networks:
+      - aquarco
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
       - ${AGENT_SSH_DIR:-/home/agent/.ssh}:/agent-ssh
       - ${REPOS_BASE:-/home/agent/repos}:/repos
       - /var/lib/aquarco/claude-ipc:/claude-ipc
     environment:
-      # DATABASE_URL must be set via .env or env-file — no default to avoid
-      # shipping weak credentials in production. The compose stack will fail
-      # to start if this is unset, which is the desired behavior.
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in production}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
       NODE_ENV: production
       PORT: ${PORT:-4000}
       REPOS_BASE: ${REPOS_BASE:-/home/agent/repos}
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 4000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
 
-  # ── Web UI (Next.js) ────────────────────────────────────────────────────────
+  # ── Web UI (Next.js) ──────────────────────────────────────────────────────────
   web:
-    build: !reset null
-    image: ${AQUARCO_REGISTRY}/web:${AQUARCO_WEB_VERSION}
+    image: ${AQUARCO_REGISTRY}/web:${AQUARCO_WEB_VERSION:?AQUARCO_WEB_VERSION must be set}
+    restart: unless-stopped
     command: ["npm", "run", "start"]
-    volumes: !reset []
+    networks:
+      - aquarco
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/graphql}
       NODE_ENV: production
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      api:
+        condition: service_healthy
 
   # ── Caddy Reverse Proxy ─────────────────────────────────────────────────────
   caddy:
-    image: caddy:${AQUARCO_CADDY_VERSION}
-
-  # ── Adminer — dev only ─────────────────────────────────────────────────────
-  adminer:
-    profiles:
-      - dev
+    image: caddy:${AQUARCO_CADDY_VERSION:-2-alpine}
+    restart: unless-stopped
+    networks:
+      - aquarco
+    ports:
+      - "8080:8080"
+      - "127.0.0.1:2019:2019"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
