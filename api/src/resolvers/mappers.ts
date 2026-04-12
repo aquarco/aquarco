@@ -96,7 +96,50 @@ export async function fetchAgentWithOverrides(
 // Repository mapping
 // ---------------------------------------------------------------------------
 
+function parseBranchRule(raw: unknown): { issueLabels: string[]; baseBranch: string; pipeline: string | null } | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  return {
+    issueLabels: Array.isArray(r.issueLabels) ? (r.issueLabels as string[]) : [],
+    baseBranch: (r.baseBranch as string) ?? 'development',
+    pipeline: (r.pipeline as string | null) ?? null,
+  }
+}
+
 export function mapRepository(row: Record<string, unknown>) {
+  const rawGfc = row.git_flow_config
+  let gitFlowConfig: {
+    enabled: boolean
+    branches: Record<string, string>
+    rules: {
+      feature: ReturnType<typeof parseBranchRule>
+      bugfix: ReturnType<typeof parseBranchRule>
+      hotfix: ReturnType<typeof parseBranchRule>
+      branchNameOverride: string | null
+    } | null
+  } | null = null
+  if (rawGfc !== null && rawGfc !== undefined) {
+    const gfc = typeof rawGfc === 'string' ? JSON.parse(rawGfc) : rawGfc as Record<string, unknown>
+    const branches = (gfc.branches as Record<string, string> | undefined) ?? {}
+    const rawRules = gfc.rules as Record<string, unknown> | null | undefined
+    gitFlowConfig = {
+      enabled: (gfc.enabled as boolean) ?? true,
+      branches: {
+        stable: branches.stable ?? 'main',
+        development: branches.development ?? 'develop',
+        release: branches.release ?? 'release/*',
+        feature: branches.feature ?? 'feature/*',
+        bugfix: branches.bugfix ?? 'bugfix/*',
+        hotfix: branches.hotfix ?? 'hotfix/*',
+      },
+      rules: rawRules ? {
+        feature: parseBranchRule(rawRules.feature),
+        bugfix: parseBranchRule(rawRules.bugfix),
+        hotfix: parseBranchRule(rawRules.hotfix),
+        branchNameOverride: (rawRules.branchNameOverride as string | null) ?? null,
+      } : null,
+    }
+  }
   return {
     name: row.name,
     url: row.url,
@@ -109,6 +152,7 @@ export function mapRepository(row: Record<string, unknown>) {
     headSha: row.head_sha ?? null,
     errorMessage: row.error_message ?? null,
     deployPublicKey: row.deploy_public_key ?? null,
+    gitFlowConfig,
     // taskCount resolved by Repository field resolver
     _name: row.name,
   }

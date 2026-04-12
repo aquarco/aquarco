@@ -14,6 +14,13 @@ from ..task_queue import TaskQueue
 from ..utils import url_to_slug as _url_to_slug
 from .base import BasePoller
 
+# Map branch type → default pipeline name when rule has no explicit pipeline.
+_BRANCH_TYPE_PIPELINE: dict[str, str] = {
+    "feature": "feature-pipeline",
+    "bugfix": "bugfix-pipeline",
+    "hotfix": "bugfix-pipeline",
+}
+
 log = get_logger("github-tasks")
 
 
@@ -52,7 +59,7 @@ class GitHubTasksPoller(BasePoller):
                 continue
 
             for issue in issues:
-                created = await self._process_issue(issue, repo["name"], slug)
+                created = await self._process_issue(issue, repo["name"], slug, repo)
                 if created:
                     total_created += 1
 
@@ -68,7 +75,11 @@ class GitHubTasksPoller(BasePoller):
         return total_created
 
     async def _process_issue(
-        self, issue: dict[str, Any], repo_name: str, repo_slug: str
+        self,
+        issue: dict[str, Any],
+        repo_name: str,
+        repo_slug: str,
+        repo: dict[str, Any] | None = None,
     ) -> bool:
         """Process a single GitHub issue into a task."""
         number = issue.get("number")
@@ -78,7 +89,8 @@ class GitHubTasksPoller(BasePoller):
             return False
 
         labels = [lbl.get("name", "") for lbl in issue.get("labels", [])]
-        pipeline = self._select_pipeline(labels)
+        repo_rules = self._extract_repo_rules(repo)
+        pipeline = self._select_pipeline(labels, repo_rules)
 
         context = {
             "github_issue_number": number,
@@ -99,13 +111,52 @@ class GitHubTasksPoller(BasePoller):
             context=context,
         )
 
-    def _select_pipeline(self, labels: list[str]) -> str:
-        """Select a pipeline based on issue labels."""
-        label_set = set(labels)
-        for pipeline in self._pipelines:
-            trigger_labels = set(pipeline.trigger.labels)
-            if trigger_labels and trigger_labels & label_set:
-                return pipeline.name
+    def _extract_repo_rules(self, repo: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Parse git_flow_config.rules from a repository row, or None."""
+        if not repo:
+            return None
+        raw_gfc = repo.get("git_flow_config")
+        if not raw_gfc:
+            return None
+        if isinstance(raw_gfc, str):
+            try:
+                raw_gfc = json.loads(raw_gfc)
+            except (ValueError, TypeError):
+                return None
+        if not isinstance(raw_gfc, dict):
+            return None
+        # Note: rules are used for pipeline selection regardless of git-flow mode.
+        return raw_gfc.get("rules") or None
+
+    def _select_pipeline(
+        self,
+        labels: list[str],
+        repo_rules: dict[str, Any] | None = None,
+    ) -> str:
+        """Select a pipeline based on issue labels.
+
+        Repo-level rules (from git_flow_config.rules) take precedence over the
+        global pipelines.yaml trigger labels.
+        """
+        label_set = {lbl.lower().strip() for lbl in labels}
+
+        # --- Repo-level rules (highest priority) ---
+        if repo_rules:
+            # hotfix > bugfix > feature priority
+            for branch_type in ("hotfix", "bugfix", "feature"):
+                rule = repo_rules.get(branch_type)
+                if not isinstance(rule, dict):
+                    continue
+                rule_labels = {
+                    lbl.lower().strip()
+                    for lbl in rule.get("issueLabels", [])
+                }
+                if rule_labels and rule_labels & label_set:
+                    explicit = rule.get("pipeline")
+                    if explicit:
+                        return explicit
+                    return _BRANCH_TYPE_PIPELINE.get(branch_type, "feature-pipeline")
+
         return "feature-pipeline"
 
 

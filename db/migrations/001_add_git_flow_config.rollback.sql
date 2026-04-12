@@ -1,4 +1,3 @@
--- depends: 000_consolidated_init
 -- Migration: Add git_flow_config JSONB column to repositories
 -- Task: github-issue-aquarco-118
 -- Description: Stores Git Flow configuration per repository.
@@ -20,9 +19,5 @@
 
 SET search_path TO aquarco, public;
 
--- apply
-ALTER TABLE repositories
-    ADD COLUMN IF NOT EXISTS git_flow_config JSONB NULL;
-
-COMMENT ON COLUMN repositories.git_flow_config IS
-    'Git Flow configuration. NULL = Simple Branch mode. See issue #118.';
+-- rollback
+ALTER TABLE repositories DROP COLUMN IF EXISTS git_flow_config;

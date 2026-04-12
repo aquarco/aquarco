@@ -9,7 +9,7 @@ import yaml
 
 from .exceptions import ConfigError, ConfigFileNotFoundError, ConfigValidationError
 from .logging import get_logger
-from .models import PipelineConfig, PipelineTrigger, StageConfig, SupervisorConfig
+from .models import PipelineConfig, StageConfig, SupervisorConfig
 
 log = get_logger("config")
 
@@ -77,16 +77,10 @@ def load_pipelines(pipelines_file: str | Path) -> list[PipelineConfig]:
 
     pipelines: list[PipelineConfig] = []
     for entry in raw.get("pipelines", []):
-        trigger_data = entry.get("trigger", {})
-        trigger = PipelineTrigger(
-            labels=trigger_data.get("labels", []),
-            events=trigger_data.get("events", []),
-        )
         stages = [StageConfig(**s) for s in entry.get("stages", [])]
         pipelines.append(PipelineConfig(
             name=entry["name"],
             version=entry.get("version", "0.0.0"),
-            trigger=trigger,
             stages=stages,
             categories=categories_map,
         ))

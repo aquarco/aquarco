@@ -6,6 +6,60 @@ import { Context, requireInternalAuth } from '../context.js'
 import { mapRepository, getDrainStatus } from './mappers.js'
 import { repoErrorPayload } from './helpers.js'
 
+type BranchRuleInput = {
+  issueLabels?: string[] | null
+  baseBranch?: string | null
+  pipeline?: string | null
+}
+
+type GitFlowConfigInput = {
+  enabled: boolean
+  branches?: {
+    stable?: string | null
+    development?: string | null
+    release?: string | null
+    feature?: string | null
+    bugfix?: string | null
+    hotfix?: string | null
+  } | null
+  rules?: {
+    feature?: BranchRuleInput | null
+    bugfix?: BranchRuleInput | null
+    hotfix?: BranchRuleInput | null
+    branchNameOverride?: string | null
+  } | null
+} | null
+
+function serializeBranchRule(rule: BranchRuleInput | null | undefined) {
+  if (!rule) return null
+  return {
+    issueLabels: rule.issueLabels ?? [],
+    baseBranch: rule.baseBranch ?? 'development',
+    pipeline: rule.pipeline ?? null,
+  }
+}
+
+function serializeGitFlowConfig(config: GitFlowConfigInput): string | null {
+  if (!config) return null
+  return JSON.stringify({
+    enabled: config.enabled,
+    branches: {
+      stable: config.branches?.stable ?? 'main',
+      development: config.branches?.development ?? 'develop',
+      release: config.branches?.release ?? 'release/*',
+      feature: config.branches?.feature ?? 'feature/*',
+      bugfix: config.branches?.bugfix ?? 'bugfix/*',
+      hotfix: config.branches?.hotfix ?? 'hotfix/*',
+    },
+    rules: config.rules ? {
+      feature: serializeBranchRule(config.rules.feature),
+      bugfix: serializeBranchRule(config.rules.bugfix),
+      hotfix: serializeBranchRule(config.rules.hotfix),
+      branchNameOverride: config.rules.branchNameOverride ?? null,
+    } : null,
+  })
+}
+
 export const repoMutations = {
   async registerRepository(
     _: unknown,
@@ -16,6 +70,7 @@ export const repoMutations = {
         branch?: string | null
         cloneDir?: string | null
         pollers?: string[] | null
+        gitFlowConfig?: GitFlowConfigInput
       }
     },
     ctx: Context
@@ -34,9 +89,10 @@ export const repoMutations = {
 
     try {
       const trimmedUrl = input.url.trim()
+      const gitFlowConfigValue = serializeGitFlowConfig(input.gitFlowConfig ?? null)
       const result = await ctx.pool.query<Record<string, unknown>>(
-        `INSERT INTO repositories (name, url, original_url, branch, clone_dir, pollers, clone_status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+        `INSERT INTO repositories (name, url, original_url, branch, clone_dir, pollers, clone_status, git_flow_config)
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
          RETURNING *`,
         [
           input.name,
@@ -45,6 +101,7 @@ export const repoMutations = {
           input.branch || null,
           cloneDir,
           input.pollers ?? [],
+          gitFlowConfigValue,
         ]
       )
       return { repository: mapRepository(result.rows[0]), errors: [] }
@@ -54,6 +111,63 @@ export const repoMutations = {
       if (err instanceof Error && err.message.includes('unique')) {
         return repoErrorPayload('name', `Repository "${input.name}" already exists`)
       }
+      return repoErrorPayload(null, message)
+    }
+  },
+
+  async updateRepository(
+    _: unknown,
+    args: {
+      name: string
+      input: {
+        url?: string | null
+        branch?: string | null
+        pollers?: string[] | null
+        gitFlowConfig?: GitFlowConfigInput
+      }
+    },
+    ctx: Context
+  ) {
+    const { name, input } = args
+    const setClauses: string[] = []
+    const values: unknown[] = []
+
+    if (input.url !== undefined && input.url !== null) {
+      values.push(input.url.trim())
+      setClauses.push(`url = $${values.length}`)
+    }
+    if (input.branch !== undefined) {
+      values.push(input.branch || null)
+      setClauses.push(`branch = $${values.length}`)
+    }
+    if (input.pollers !== undefined && input.pollers !== null) {
+      values.push(input.pollers)
+      setClauses.push(`pollers = $${values.length}`)
+    }
+    if ('gitFlowConfig' in input) {
+      values.push(serializeGitFlowConfig(input.gitFlowConfig ?? null))
+      setClauses.push(`git_flow_config = $${values.length}`)
+    }
+
+    if (setClauses.length === 0) {
+      const row = await ctx.pool.query<Record<string, unknown>>(
+        'SELECT * FROM repositories WHERE name = $1',
+        [name]
+      )
+      if (row.rows.length === 0) return repoErrorPayload('name', `Repository "${name}" not found`)
+      return { repository: mapRepository(row.rows[0]), errors: [] }
+    }
+
+    values.push(name)
+    try {
+      const result = await ctx.pool.query<Record<string, unknown>>(
+        `UPDATE repositories SET ${setClauses.join(', ')} WHERE name = $${values.length} RETURNING *`,
+        values
+      )
+      if (result.rows.length === 0) return repoErrorPayload('name', `Repository "${name}" not found`)
+      return { repository: mapRepository(result.rows[0]), errors: [] }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update repository'
       return repoErrorPayload(null, message)
     }
   },

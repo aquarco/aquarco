@@ -64,6 +64,19 @@ export enum AgentSource {
   Repository = 'REPOSITORY'
 }
 
+export type BranchRule = {
+  __typename?: 'BranchRule';
+  baseBranch: Scalars['String']['output'];
+  issueLabels: Array<Scalars['String']['output']>;
+  pipeline?: Maybe<Scalars['String']['output']>;
+};
+
+export type BranchRuleInput = {
+  baseBranch?: InputMaybe<Scalars['String']['input']>;
+  issueLabels?: InputMaybe<Array<Scalars['String']['input']>>;
+  pipeline?: InputMaybe<Scalars['String']['input']>;
+};
+
 export type ClaudeAuthStatus = {
   __typename?: 'ClaudeAuthStatus';
   authenticated: Scalars['Boolean']['output'];
@@ -147,6 +160,53 @@ export type Error = {
   message: Scalars['String']['output'];
 };
 
+export type GitFlowBranchRules = {
+  __typename?: 'GitFlowBranchRules';
+  branchNameOverride?: Maybe<Scalars['String']['output']>;
+  bugfix?: Maybe<BranchRule>;
+  feature?: Maybe<BranchRule>;
+  hotfix?: Maybe<BranchRule>;
+};
+
+export type GitFlowBranchRulesInput = {
+  branchNameOverride?: InputMaybe<Scalars['String']['input']>;
+  bugfix?: InputMaybe<BranchRuleInput>;
+  feature?: InputMaybe<BranchRuleInput>;
+  hotfix?: InputMaybe<BranchRuleInput>;
+};
+
+export type GitFlowBranches = {
+  __typename?: 'GitFlowBranches';
+  bugfix: Scalars['String']['output'];
+  development: Scalars['String']['output'];
+  feature: Scalars['String']['output'];
+  hotfix: Scalars['String']['output'];
+  release: Scalars['String']['output'];
+  stable: Scalars['String']['output'];
+};
+
+export type GitFlowBranchesInput = {
+  bugfix?: InputMaybe<Scalars['String']['input']>;
+  development?: InputMaybe<Scalars['String']['input']>;
+  feature?: InputMaybe<Scalars['String']['input']>;
+  hotfix?: InputMaybe<Scalars['String']['input']>;
+  release?: InputMaybe<Scalars['String']['input']>;
+  stable?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type GitFlowConfig = {
+  __typename?: 'GitFlowConfig';
+  branches: GitFlowBranches;
+  enabled: Scalars['Boolean']['output'];
+  rules?: Maybe<GitFlowBranchRules>;
+};
+
+export type GitFlowConfigInput = {
+  branches?: InputMaybe<GitFlowBranchesInput>;
+  enabled: Scalars['Boolean']['input'];
+  rules?: InputMaybe<GitFlowBranchRulesInput>;
+};
+
 export type GithubAuthStatus = {
   __typename?: 'GithubAuthStatus';
   authenticated: Scalars['Boolean']['output'];
@@ -199,6 +259,7 @@ export type Mutation = {
   setAgentDisabled: AgentDefinitionPayload;
   setDrainMode: DrainStatus;
   unblockTask: TaskPayload;
+  updateRepository: RepositoryPayload;
   updateTaskStatus: TaskPayload;
 };
 
@@ -281,6 +342,12 @@ export type MutationSetDrainModeArgs = {
 export type MutationUnblockTaskArgs = {
   id: Scalars['ID']['input'];
   resolution: Scalars['String']['input'];
+};
+
+
+export type MutationUpdateRepositoryArgs = {
+  input: UpdateRepositoryInput;
+  name: Scalars['String']['input'];
 };
 
 
@@ -386,6 +453,7 @@ export type QueryTokenUsageByModelArgs = {
 export type RegisterRepositoryInput = {
   branch?: InputMaybe<Scalars['String']['input']>;
   cloneDir?: InputMaybe<Scalars['String']['input']>;
+  gitFlowConfig?: InputMaybe<GitFlowConfigInput>;
   name: Scalars['String']['input'];
   pollers?: InputMaybe<Array<Scalars['String']['input']>>;
   url: Scalars['String']['input'];
@@ -398,6 +466,7 @@ export type Repository = {
   cloneStatus: CloneStatus;
   deployPublicKey?: Maybe<Scalars['String']['output']>;
   errorMessage?: Maybe<Scalars['String']['output']>;
+  gitFlowConfig?: Maybe<GitFlowConfig>;
   hasClaudeAgents: Scalars['Boolean']['output'];
   headSha?: Maybe<Scalars['String']['output']>;
   lastClonedAt?: Maybe<Scalars['DateTime']['output']>;
@@ -537,6 +606,13 @@ export type TokenUsageByDay = {
   tokensOutput: Scalars['Int']['output'];
 };
 
+export type UpdateRepositoryInput = {
+  branch?: InputMaybe<Scalars['String']['input']>;
+  gitFlowConfig?: InputMaybe<GitFlowConfigInput>;
+  pollers?: InputMaybe<Array<Scalars['String']['input']>>;
+  url?: InputMaybe<Scalars['String']['input']>;
+};
+
 export type WithIndex<TObject> = TObject & Record<string, any>;
 export type ResolversObject<TObject> = WithIndex<TObject>;
 
@@ -615,6 +691,8 @@ export type ResolversTypes = ResolversObject<{
   AgentInstance: ResolverTypeWrapper<AgentInstance>;
   AgentSource: AgentSource;
   Boolean: ResolverTypeWrapper<Scalars['Boolean']['output']>;
+  BranchRule: ResolverTypeWrapper<BranchRule>;
+  BranchRuleInput: BranchRuleInput;
   ClaudeAuthStatus: ResolverTypeWrapper<ClaudeAuthStatus>;
   ClaudeLoginResult: ResolverTypeWrapper<ClaudeLoginResult>;
   ClaudeLoginStart: ResolverTypeWrapper<ClaudeLoginStart>;
@@ -627,6 +705,12 @@ export type ResolversTypes = ResolversObject<{
   DrainStatus: ResolverTypeWrapper<DrainStatus>;
   Error: ResolverTypeWrapper<Error>;
   Float: ResolverTypeWrapper<Scalars['Float']['output']>;
+  GitFlowBranchRules: ResolverTypeWrapper<GitFlowBranchRules>;
+  GitFlowBranchRulesInput: GitFlowBranchRulesInput;
+  GitFlowBranches: ResolverTypeWrapper<GitFlowBranches>;
+  GitFlowBranchesInput: GitFlowBranchesInput;
+  GitFlowConfig: ResolverTypeWrapper<GitFlowConfig>;
+  GitFlowConfigInput: GitFlowConfigInput;
   GithubAuthStatus: ResolverTypeWrapper<GithubAuthStatus>;
   GithubDeviceCode: ResolverTypeWrapper<GithubDeviceCode>;
   GithubLoginResult: ResolverTypeWrapper<GithubLoginResult>;
@@ -654,6 +738,7 @@ export type ResolversTypes = ResolversObject<{
   TaskPayload: ResolverTypeWrapper<TaskPayload>;
   TaskStatus: null;
   TokenUsageByDay: ResolverTypeWrapper<TokenUsageByDay>;
+  UpdateRepositoryInput: UpdateRepositoryInput;
 }>;
 
 /** Mapping between all available schema types and the resolvers parents */
@@ -662,6 +747,8 @@ export type ResolversParentTypes = ResolversObject<{
   AgentDefinitionPayload: AgentDefinitionPayload;
   AgentInstance: AgentInstance;
   Boolean: Scalars['Boolean']['output'];
+  BranchRule: BranchRule;
+  BranchRuleInput: BranchRuleInput;
   ClaudeAuthStatus: ClaudeAuthStatus;
   ClaudeLoginResult: ClaudeLoginResult;
   ClaudeLoginStart: ClaudeLoginStart;
@@ -673,6 +760,12 @@ export type ResolversParentTypes = ResolversObject<{
   DrainStatus: DrainStatus;
   Error: Error;
   Float: Scalars['Float']['output'];
+  GitFlowBranchRules: GitFlowBranchRules;
+  GitFlowBranchRulesInput: GitFlowBranchRulesInput;
+  GitFlowBranches: GitFlowBranches;
+  GitFlowBranchesInput: GitFlowBranchesInput;
+  GitFlowConfig: GitFlowConfig;
+  GitFlowConfigInput: GitFlowConfigInput;
   GithubAuthStatus: GithubAuthStatus;
   GithubDeviceCode: GithubDeviceCode;
   GithubLoginResult: GithubLoginResult;
@@ -698,6 +791,7 @@ export type ResolversParentTypes = ResolversObject<{
   TaskConnection: TaskConnection;
   TaskPayload: TaskPayload;
   TokenUsageByDay: TokenUsageByDay;
+  UpdateRepositoryInput: UpdateRepositoryInput;
 }>;
 
 export type AgentDefinitionResolvers<ContextType = Context, ParentType extends ResolversParentTypes['AgentDefinition'] = ResolversParentTypes['AgentDefinition']> = ResolversObject<{
@@ -730,6 +824,13 @@ export type AgentInstanceResolvers<ContextType = Context, ParentType extends Res
   lastExecutionAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
   totalExecutions?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   totalTokensUsed?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
+export type BranchRuleResolvers<ContextType = Context, ParentType extends ResolversParentTypes['BranchRule'] = ResolversParentTypes['BranchRule']> = ResolversObject<{
+  baseBranch?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  issueLabels?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
+  pipeline?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
 
@@ -805,6 +906,31 @@ export type ErrorResolvers<ContextType = Context, ParentType extends ResolversPa
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
 
+export type GitFlowBranchRulesResolvers<ContextType = Context, ParentType extends ResolversParentTypes['GitFlowBranchRules'] = ResolversParentTypes['GitFlowBranchRules']> = ResolversObject<{
+  branchNameOverride?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  bugfix?: Resolver<Maybe<ResolversTypes['BranchRule']>, ParentType, ContextType>;
+  feature?: Resolver<Maybe<ResolversTypes['BranchRule']>, ParentType, ContextType>;
+  hotfix?: Resolver<Maybe<ResolversTypes['BranchRule']>, ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
+export type GitFlowBranchesResolvers<ContextType = Context, ParentType extends ResolversParentTypes['GitFlowBranches'] = ResolversParentTypes['GitFlowBranches']> = ResolversObject<{
+  bugfix?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  development?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  feature?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  hotfix?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  release?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  stable?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
+export type GitFlowConfigResolvers<ContextType = Context, ParentType extends ResolversParentTypes['GitFlowConfig'] = ResolversParentTypes['GitFlowConfig']> = ResolversObject<{
+  branches?: Resolver<ResolversTypes['GitFlowBranches'], ParentType, ContextType>;
+  enabled?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
+  rules?: Resolver<Maybe<ResolversTypes['GitFlowBranchRules']>, ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+}>;
+
 export type GithubAuthStatusResolvers<ContextType = Context, ParentType extends ResolversParentTypes['GithubAuthStatus'] = ResolversParentTypes['GithubAuthStatus']> = ResolversObject<{
   authenticated?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   username?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
@@ -860,6 +986,7 @@ export type MutationResolvers<ContextType = Context, ParentType extends Resolver
   setAgentDisabled?: Resolver<ResolversTypes['AgentDefinitionPayload'], ParentType, ContextType, RequireFields<MutationSetAgentDisabledArgs, 'disabled' | 'name' | 'scope'>>;
   setDrainMode?: Resolver<ResolversTypes['DrainStatus'], ParentType, ContextType, RequireFields<MutationSetDrainModeArgs, 'enabled'>>;
   unblockTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationUnblockTaskArgs, 'id' | 'resolution'>>;
+  updateRepository?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationUpdateRepositoryArgs, 'input' | 'name'>>;
   updateTaskStatus?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationUpdateTaskStatusArgs, 'id' | 'status'>>;
 }>;
 
@@ -928,6 +1055,7 @@ export type RepositoryResolvers<ContextType = Context, ParentType extends Resolv
   cloneStatus?: Resolver<ResolversTypes['CloneStatus'], ParentType, ContextType>;
   deployPublicKey?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   errorMessage?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  gitFlowConfig?: Resolver<Maybe<ResolversTypes['GitFlowConfig']>, ParentType, ContextType>;
   hasClaudeAgents?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   headSha?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   lastClonedAt?: Resolver<Maybe<ResolversTypes['DateTime']>, ParentType, ContextType>;
@@ -1042,6 +1170,7 @@ export type Resolvers<ContextType = Context> = ResolversObject<{
   AgentDefinition?: AgentDefinitionResolvers<ContextType>;
   AgentDefinitionPayload?: AgentDefinitionPayloadResolvers<ContextType>;
   AgentInstance?: AgentInstanceResolvers<ContextType>;
+  BranchRule?: BranchRuleResolvers<ContextType>;
   ClaudeAuthStatus?: ClaudeAuthStatusResolvers<ContextType>;
   ClaudeLoginResult?: ClaudeLoginResultResolvers<ContextType>;
   ClaudeLoginStart?: ClaudeLoginStartResolvers<ContextType>;
@@ -1052,6 +1181,9 @@ export type Resolvers<ContextType = Context> = ResolversObject<{
   DateTime?: GraphQLScalarType;
   DrainStatus?: DrainStatusResolvers<ContextType>;
   Error?: ErrorResolvers<ContextType>;
+  GitFlowBranchRules?: GitFlowBranchRulesResolvers<ContextType>;
+  GitFlowBranches?: GitFlowBranchesResolvers<ContextType>;
+  GitFlowConfig?: GitFlowConfigResolvers<ContextType>;
   GithubAuthStatus?: GithubAuthStatusResolvers<ContextType>;
   GithubDeviceCode?: GithubDeviceCodeResolvers<ContextType>;
   GithubLoginResult?: GithubLoginResultResolvers<ContextType>;

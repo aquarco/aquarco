@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..logging import get_logger
-from ..models import GitFlowConfig
+from ..models import GitFlowBranches, GitFlowConfig
 from ..utils import run_cmd as _run_cmd
 from ..utils import run_git as _run_git
 
@@ -60,25 +60,50 @@ def _extract_task_numeric_id(task_id: str) -> str:
 
 
 def _parse_labels(labels: list[str]) -> tuple[str | None, str | None]:
-    """Parse branch type and target override from task labels.
+    """Parse branch type and base-branch override from task labels.
 
-    Returns (branch_type, target_override).
+    Returns (branch_type, base_override).
     branch_type is one of "feature", "bugfix", "hotfix", or None.
-    target_override is the branch name from a "target: <branch>" label, or None.
+    base_override is the branch name from a "base: <branch>" label (or legacy
+    "target: <branch>"), or None.
     """
     branch_type: str | None = None
-    target_override: str | None = None
+    base_override: str | None = None
 
     for label in labels:
         label_lower = label.strip().lower()
         if label_lower in ("feature", "bugfix", "hotfix"):
             branch_type = label_lower
+        elif label_lower.startswith("base:"):
+            raw = label.strip()[len("base:"):].strip()
+            if raw:
+                base_override = raw
         elif label_lower.startswith("target:"):
-            raw_target = label.strip()[len("target:"):].strip()
-            if raw_target:
-                target_override = raw_target
+            # Legacy alias for base:
+            raw = label.strip()[len("target:"):].strip()
+            if raw:
+                base_override = raw
 
-    return branch_type, target_override
+    return branch_type, base_override
+
+
+def _resolve_base_branch(
+    rule_base: str,
+    branches: GitFlowBranches,
+    active_release_branch: str | None,
+) -> str:
+    """Resolve a symbolic base-branch name to an actual branch.
+
+    Symbolic values: "stable", "release", "development".
+    Any other value is treated as an explicit branch name.
+    """
+    if rule_base == "stable":
+        return branches.stable
+    if rule_base == "release":
+        return active_release_branch or branches.development
+    if rule_base == "development":
+        return branches.development
+    return rule_base  # explicit branch name
 
 
 def _validate_branch_name(name: str) -> str:
@@ -98,6 +123,13 @@ def resolve_branch_info(
 ) -> BranchInfo | str:
     """Resolve the branch name and base branch for a task in Git Flow mode.
 
+    When the repository has ``git_flow_config.rules`` configured, the rules
+    are used to determine the branch type and base branch from the issue labels.
+    Without rules the legacy direct-label matching is used.
+
+    In both modes a ``base: <branch>`` (or legacy ``target: <branch>``) issue
+    label always overrides the computed base branch.
+
     Parameters
     ----------
     git_flow_cfg:
@@ -107,7 +139,7 @@ def resolve_branch_info(
     title:
         The task title, used for slug generation.
     labels:
-        Task labels (e.g. ["feature", "target: develop"]).
+        Task labels (e.g. ["feature", "base: develop"]).
     active_release_branch:
         The currently active release branch, if any.  Must be pre-resolved
         by the caller via :func:`find_active_release_branch`.
@@ -117,42 +149,87 @@ def resolve_branch_info(
     BranchInfo
         On success, the resolved branch name, base branch, and type.
     str
-        On failure, an error message (e.g. hotfix missing target label).
+        On failure, an error message (e.g. hotfix missing base label).
     """
-    branch_type, target_override = _parse_labels(labels)
     branches = git_flow_cfg.branches
     numeric_id = _extract_task_numeric_id(task_id)
     slug = _slugify(title)
+    _, base_override = _parse_labels(labels)
+
+    # --- Rules-based resolution -------------------------------------------
+    if git_flow_cfg.rules:
+        label_set = set(lbl.lower().strip() for lbl in labels)
+        rules = git_flow_cfg.rules
+
+        matched_type: str | None = None
+        matched_rule = None
+        # Hotfix takes precedence over bugfix over feature
+        for branch_type in ("hotfix", "bugfix", "feature"):
+            rule = getattr(rules, branch_type, None)
+            if not rule:
+                continue
+            rule_labels = {lbl.lower().strip() for lbl in rule.issueLabels}
+            if rule_labels and rule_labels & label_set:
+                matched_type = branch_type
+                matched_rule = rule
+                break
+
+        if matched_type is not None and matched_rule is not None:
+            pattern = getattr(branches, matched_type)  # branches.feature / .bugfix / .hotfix
+            prefix = pattern.replace("/*", "/")
+            branch_name = f"{prefix}{numeric_id}-{slug}"
+            try:
+                _validate_branch_name(branch_name)
+            except ValueError:
+                return f"Generated branch name is invalid: {branch_name}"
+
+            if base_override:
+                try:
+                    _validate_branch_name(base_override)
+                except ValueError:
+                    return f"Base override branch name is invalid: {base_override}"
+                base_branch = base_override
+            else:
+                base_branch = _resolve_base_branch(
+                    matched_rule.baseBranch, branches, active_release_branch,
+                )
+
+            back_merge_note = _back_merge_note_for(matched_type, base_branch, branches)
+            return BranchInfo(
+                branch_name=branch_name,
+                base_branch=base_branch,
+                branch_type=matched_type,
+                back_merge_note=back_merge_note,
+            )
+
+    # --- Legacy direct-label matching -------------------------------------
+    branch_type, _ = _parse_labels(labels)
 
     if not branch_type:
         # Default to feature if no explicit type label
         branch_type = "feature"
 
-    # Build the branch name from the pattern
     pattern_map = {
         "feature": branches.feature,
         "bugfix": branches.bugfix,
         "hotfix": branches.hotfix,
     }
     pattern = pattern_map[branch_type]
-    # Replace the wildcard with the id-slug
     prefix = pattern.replace("/*", "/")
     branch_name = f"{prefix}{numeric_id}-{slug}"
 
-    # Validate the constructed branch name
     try:
         _validate_branch_name(branch_name)
     except ValueError:
         return f"Generated branch name is invalid: {branch_name}"
 
-    # Determine base branch
-    if target_override:
-        # Explicit target label overrides the default
+    # base: / target: label overrides everything
+    if base_override:
         try:
-            _validate_branch_name(target_override)
+            _validate_branch_name(base_override)
         except ValueError:
-            return f"Target override branch name is invalid: {target_override}"
-        base_branch = target_override
+            return f"Base override branch name is invalid: {base_override}"
+        base_branch = base_override
         back_merge_note = _back_merge_note_for(branch_type, base_branch, branches)
         return BranchInfo(
             branch_name=branch_name,
@@ -162,10 +239,9 @@ def resolve_branch_info(
         )
 
     if branch_type == "feature":
-        base_branch = branches.development
         return BranchInfo(
             branch_name=branch_name,
-            base_branch=base_branch,
+            base_branch=branches.development,
             branch_type=branch_type,
             back_merge_note="No automatic back-merge — features target the development branch only.",
         )
@@ -188,10 +264,9 @@ def resolve_branch_info(
         )
 
     if branch_type == "hotfix":
-        # Hotfix REQUIRES a target label
         return (
-            "Hotfix tasks require a `target:` label specifying the base branch "
-            "(e.g. `target: main`). Please add a `target:` label to this issue "
+            "Hotfix tasks require a `base:` label specifying the base branch "
+            "(e.g. `base: main`). Please add a `base:` label to this issue "
             "and Aquarco will create the hotfix branch automatically."
         )
 

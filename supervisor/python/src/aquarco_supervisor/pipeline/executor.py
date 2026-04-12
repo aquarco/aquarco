@@ -10,6 +10,7 @@ lifting has been extracted into focused submodules:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import shutil
@@ -20,7 +21,7 @@ from ..cli.claude import _LOG_DIR as _CLAUDE_LOG_DIR
 from ..cli.claude import execute_claude  # noqa: F401 — re-export for test backward compat
 from ..config import get_pipeline_config
 from ..database import Database
-from ..exceptions import PipelineError
+from ..exceptions import PipelineError, RetryableError, StageError
 from ..logging import get_logger
 from ..models import GitFlowConfig, PipelineConfig, TaskStatus
 from ..stage_manager import StageManager
@@ -89,6 +90,121 @@ class PipelineExecutor:
         next_val = current + 1
         self._execution_order[task_id] = next_val
         return next_val
+
+    # -----------------------------------------------------------------------
+    # Backward-compat bridge methods (used by legacy tests and callers)
+    # -----------------------------------------------------------------------
+
+    async def _execute_agent(
+        self,
+        agent_name: str,
+        task_id: str,
+        context: dict[str, Any],
+        stage_num: int,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Invoke an agent via the runner's invoker. Mockable in tests."""
+        return await self._runner._invoker.execute_agent(
+            agent_name, task_id, context, stage_num, **kwargs
+        )
+
+    async def _execute_planned_stage(
+        self,
+        task_id: str,
+        stage_num: int,
+        category: str,
+        agent_name: str,
+        context: dict[str, Any],
+        *,
+        iteration: int = 1,
+        stage_id: int | None = None,
+        work_dir: str | None = None,
+        pipeline_name: str = "",
+        execution_order: int | None = None,
+    ) -> tuple[dict[str, Any], int | None]:
+        """Execute a single planned stage (backward-compat wrapper).
+
+        Uses ``self._sm`` for stage management and ``self._execute_agent`` for
+        agent invocation so that tests can mock either dependency directly.
+        """
+        stage_key = f"{stage_num}:{category}:{agent_name}"
+
+        run = 1
+        resume_session_id: str | None = None
+        latest = await self._sm.get_latest_stage_run(task_id, stage_key, iteration)
+        if latest and latest["status"] == "completed":
+            log.warning(
+                "completed_stage_guard",
+                task_id=task_id,
+                stage_key=stage_key,
+                iteration=iteration,
+                stage_id=latest.get("id"),
+                msg="Refusing to re-execute a completed stage; returning existing output",
+            )
+            existing = await self._sm.get_stage_structured_output(latest["id"])
+            return existing or {}, latest.get("id")
+        elif latest and latest["status"] in ("failed", "rate_limited"):
+            run = latest["run"] + 1
+            resume_session_id = latest.get("session_id")
+            stage_id = await self._sm.create_rerun_stage(
+                task_id, stage_num, category, agent_name,
+                stage_key, iteration, run,
+            )
+        elif latest and latest["status"] == "pending":
+            run = latest["run"]
+            stage_id = latest.get("id") or stage_id
+
+        await self._sm.record_stage_executing(
+            task_id, stage_num, category, agent_name,
+            stage_id=stage_id,
+            stage_key=stage_key, iteration=iteration, run=run,
+            input_context=context,
+            execution_order=execution_order,
+        )
+        await self._registry.increment_agent_instances(agent_name)
+        try:
+            output = await self._execute_agent(
+                agent_name, task_id, context, stage_num,
+                work_dir=work_dir,
+                pipeline_name=pipeline_name,
+                category=category,
+                resume_session_id=resume_session_id,
+            )
+            await self._sm.store_stage_output(
+                task_id, stage_num, category, agent_name, output,
+                stage_id=stage_id,
+                stage_key=stage_key, iteration=iteration, run=run,
+            )
+            return output, stage_id
+        except RetryableError:
+            raise
+        except StageError as e:
+            sid = getattr(e, "session_id", None)
+            await self._sm.record_stage_failed(
+                task_id, stage_num, str(e),
+                stage_id=stage_id,
+                stage_key=stage_key, iteration=iteration, run=run,
+                session_id=sid,
+            )
+            raise
+        except asyncio.CancelledError:
+            await self._sm.record_stage_failed(
+                task_id, stage_num, "Stage cancelled (task timed out)",
+                stage_id=stage_id,
+                stage_key=stage_key, iteration=iteration, run=run,
+            )
+            raise
+        except Exception as e:
+            await self._sm.record_stage_failed(
+                task_id, stage_num, str(e),
+                stage_id=stage_id,
+                stage_key=stage_key, iteration=iteration, run=run,
+            )
+            raise StageError(
+                f"Stage {stage_num} ({category}/{agent_name}) failed: {e}"
+            ) from e
+        finally:
+            await self._registry.decrement_agent_instances(agent_name)
 
     # -----------------------------------------------------------------------
     # Main entry point

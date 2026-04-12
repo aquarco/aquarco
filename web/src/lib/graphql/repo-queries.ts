@@ -18,6 +18,57 @@ export const GET_REPOSITORIES = gql`
       deployPublicKey
       taskCount
       hasClaudeAgents
+      gitFlowConfig {
+        enabled
+        branches {
+          stable
+          development
+          release
+          feature
+          bugfix
+          hotfix
+        }
+        rules {
+          feature { issueLabels baseBranch pipeline }
+          bugfix { issueLabels baseBranch pipeline }
+          hotfix { issueLabels baseBranch pipeline }
+          branchNameOverride
+        }
+      }
+    }
+  }
+`
+
+export const UPDATE_REPOSITORY = gql`
+  mutation UpdateRepository($name: String!, $input: UpdateRepositoryInput!) {
+    updateRepository(name: $name, input: $input) {
+      repository {
+        name
+        url
+        branch
+        pollers
+        gitFlowConfig {
+          enabled
+          branches {
+            stable
+            development
+            release
+            feature
+            bugfix
+            hotfix
+          }
+          rules {
+            feature { issueLabels baseBranch pipeline }
+            bugfix { issueLabels baseBranch pipeline }
+            hotfix { issueLabels baseBranch pipeline }
+            branchNameOverride
+          }
+        }
+      }
+      errors {
+        field
+        message
+      }
     }
   }
 `

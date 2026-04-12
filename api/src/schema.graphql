@@ -69,6 +69,7 @@ type Mutation {
 
   # Repository actions
   retryClone(name: String!): RepositoryPayload!
+  updateRepository(name: String!, input: UpdateRepositoryInput!): RepositoryPayload!
 
   # Intervention
   unblockTask(id: ID!, resolution: String!): TaskPayload!
@@ -141,6 +142,62 @@ type Stage {
   liveOutput: String
 }
 
+type GitFlowBranches {
+  stable: String!
+  development: String!
+  release: String!
+  feature: String!
+  bugfix: String!
+  hotfix: String!
+}
+
+type BranchRule {
+  issueLabels: [String!]!
+  baseBranch: String!
+  pipeline: String
+}
+
+type GitFlowBranchRules {
+  feature: BranchRule
+  bugfix: BranchRule
+  hotfix: BranchRule
+  branchNameOverride: String
+}
+
+type GitFlowConfig {
+  enabled: Boolean!
+  branches: GitFlowBranches!
+  rules: GitFlowBranchRules
+}
+
+input GitFlowBranchesInput {
+  stable: String
+  development: String
+  release: String
+  feature: String
+  bugfix: String
+  hotfix: String
+}
+
+input BranchRuleInput {
+  issueLabels: [String!]
+  baseBranch: String
+  pipeline: String
+}
+
+input GitFlowBranchRulesInput {
+  feature: BranchRuleInput
+  bugfix: BranchRuleInput
+  hotfix: BranchRuleInput
+  branchNameOverride: String
+}
+
+input GitFlowConfigInput {
+  enabled: Boolean!
+  branches: GitFlowBranchesInput
+  rules: GitFlowBranchRulesInput
+}
+
 type Repository {
   name: String!
   url: String!
@@ -155,6 +212,7 @@ type Repository {
   deployPublicKey: String
   taskCount: Int!
   hasClaudeAgents: Boolean!
+  gitFlowConfig: GitFlowConfig
 }
 
 type AgentInstance {
@@ -259,6 +317,14 @@ input RegisterRepositoryInput {
   branch: String
   cloneDir: String
   pollers: [String!]
+  gitFlowConfig: GitFlowConfigInput
+}
+
+input UpdateRepositoryInput {
+  url: String
+  branch: String
+  pollers: [String!]
+  gitFlowConfig: GitFlowConfigInput
 }
 
 # --- Enums ---

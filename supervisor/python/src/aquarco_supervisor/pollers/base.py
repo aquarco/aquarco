@@ -35,7 +35,7 @@ class BasePoller(abc.ABC):
         if poller_name:
             rows = await self._db.fetch_all(
                 """
-                SELECT name, url, branch, clone_dir, pollers
+                SELECT name, url, branch, clone_dir, pollers, git_flow_config
                 FROM repositories
                 WHERE clone_status = 'ready'
                   AND %(poller)s = ANY(pollers)
@@ -45,7 +45,7 @@ class BasePoller(abc.ABC):
         else:
             rows = await self._db.fetch_all(
                 """
-                SELECT name, url, branch, clone_dir, pollers
+                SELECT name, url, branch, clone_dir, pollers, git_flow_config
                 FROM repositories
                 WHERE clone_status = 'ready'
                 """

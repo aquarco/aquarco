@@ -47,20 +47,69 @@ import Checkbox from '@mui/material/Checkbox'
 import SettingsIcon from '@mui/icons-material/Settings'
 import Snackbar from '@mui/material/Snackbar'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
-import { GET_REPOSITORIES, REGISTER_REPOSITORY, REMOVE_REPOSITORY, RETRY_CLONE, GITHUB_AUTH_STATUS, GITHUB_LOGIN_START, GITHUB_LOGIN_POLL, GITHUB_LOGOUT, GITHUB_REPOSITORIES } from '@/lib/graphql/queries'
+import Select from '@mui/material/Select'
+import MenuItem from '@mui/material/MenuItem'
+import InputLabel from '@mui/material/InputLabel'
+import FormControl from '@mui/material/FormControl'
+import Divider from '@mui/material/Divider'
+import { GET_REPOSITORIES, REGISTER_REPOSITORY, REMOVE_REPOSITORY, RETRY_CLONE, GITHUB_AUTH_STATUS, GITHUB_LOGIN_START, GITHUB_LOGIN_POLL, GITHUB_LOGOUT, GITHUB_REPOSITORIES, GITHUB_BRANCHES, UPDATE_REPOSITORY } from '@/lib/graphql/queries'
+import { GET_PIPELINE_DEFINITIONS } from '@/lib/graphql/agent-queries'
 import { formatDate } from '@/lib/format'
+
+interface GitFlowBranches {
+  stable: string
+  development: string
+  release: string
+  feature: string
+  bugfix: string
+  hotfix: string
+}
+
+interface BranchRule {
+  issueLabels: string[]
+  baseBranch: string
+  pipeline: string | null
+}
+
+interface GitFlowBranchRules {
+  feature: BranchRule | null
+  bugfix: BranchRule | null
+  hotfix: BranchRule | null
+  branchNameOverride: string | null
+}
+
+interface GitFlowConfig {
+  enabled: boolean
+  branches: GitFlowBranches
+  rules: GitFlowBranchRules | null
+}
+
+interface BranchRuleFormState {
+  issueLabels: string
+  baseBranch: 'stable' | 'release' | 'development'
+  pipeline: string
+}
+
+interface GitFlowRulesFormState {
+  feature: BranchRuleFormState
+  bugfix: BranchRuleFormState
+  hotfix: BranchRuleFormState
+  branchNameOverride: string
+}
 
 interface Repository {
   name: string
   url: string
   branch: string
   cloneDir: string
+  pollers: string[]
   cloneStatus: string
   lastPulledAt: string | null
   errorMessage: string | null
   deployPublicKey: string | null
   taskCount: number
   hasClaudeAgents: boolean
+  gitFlowConfig: GitFlowConfig | null
 }
 
 function getCloneStatusColor(status: string): ChipProps['color'] {
@@ -87,14 +136,327 @@ const AVAILABLE_POLLERS = [
 ] as const
 const DEFAULT_POLLERS = ['github-tasks', 'github-source']
 
-interface AddRepoFormState {
-  name: string
-  url: string
-  defaultBranch: string | null
-  pollers: string[]
+const DEFAULT_GIT_FLOW_BRANCHES: GitFlowBranches = {
+  stable: 'main',
+  development: 'develop',
+  release: 'release/*',
+  feature: 'feature/*',
+  bugfix: 'bugfix/*',
+  hotfix: 'hotfix/*',
 }
 
-const EMPTY_FORM: AddRepoFormState = { name: '', url: '', defaultBranch: null, pollers: [...DEFAULT_POLLERS] }
+const DEFAULT_GIT_FLOW_RULES: GitFlowRulesFormState = {
+  feature: { issueLabels: 'feature, enhancement', baseBranch: 'development', pipeline: '' },
+  bugfix:  { issueLabels: 'bug',                  baseBranch: 'release',     pipeline: '' },
+  hotfix:  { issueLabels: 'hotfix',               baseBranch: 'stable',      pipeline: '' },
+  branchNameOverride: 'base:*',
+}
+
+function findDefaultPipeline(pipelineNames: string[], branchPrefix: string, issueLabels: string): string {
+  const lower = (s: string) => s.toLowerCase()
+  const byBranch = pipelineNames.find(name => lower(name).includes(lower(branchPrefix)))
+  if (byBranch) return byBranch
+  const labels = issueLabels.split(',').map(s => s.trim()).filter(Boolean)
+  for (const label of labels) {
+    const byLabel = pipelineNames.find(name => lower(name).includes(lower(label)))
+    if (byLabel) return byLabel
+  }
+  return ''
+}
+
+// Shared form state for both Add and Edit dialogs
+interface RepoFormState {
+  url: string
+  branch: string
+  pollers: string[]
+  gitFlowEnabled: boolean
+  gitFlowBranches: GitFlowBranches
+  gitFlowRules: GitFlowRulesFormState
+}
+
+interface AddRepoFormState extends RepoFormState {
+  name: string
+}
+
+const EMPTY_FORM: AddRepoFormState = {
+  name: '',
+  url: '',
+  branch: '',
+  pollers: [...DEFAULT_POLLERS],
+  gitFlowEnabled: false,
+  gitFlowBranches: { ...DEFAULT_GIT_FLOW_BRANCHES },
+  gitFlowRules: { ...DEFAULT_GIT_FLOW_RULES },
+}
+
+function parseGithubOwnerRepo(url: string): { owner: string; repo: string } | null {
+  const m = url.match(/github\.com[/:]([^/]+)\/([^/.\s]+?)(?:\.git)?(?:\/.*)?$/)
+  return m ? { owner: m[1], repo: m[2] } : null
+}
+
+interface RepoSettingsFieldsProps {
+  value: RepoFormState
+  onChange: (patch: Partial<RepoFormState>) => void
+  branches: string[]
+  branchesLoading: boolean
+  pipelines: string[]
+  showUrlClear?: boolean
+  testIdPrefix?: string
+}
+
+function buildRuleDescription(
+  branchPattern: string,
+  rule: BranchRuleFormState,
+  gitFlowBranches: GitFlowBranches,
+  gitFlowEnabled: boolean
+): string {
+  const labels = rule.issueLabels.split(',').map(s => s.trim()).filter(Boolean)
+  const labelText = labels.length > 0 ? labels.map(l => `"${l}"`).join(' or ') : '<no labels set>'
+  const branchPrefix = branchPattern.replace(/\/\*$/, '')
+  const pipelineText = rule.pipeline || '<no pipeline set>'
+  if (!gitFlowEnabled) {
+    return `When issue is labeled ${labelText}, branch ${branchPrefix}/<issue_id>-<issue-name> is created and ${pipelineText} pipeline is applied`
+  }
+  const baseBranchName =
+    rule.baseBranch === 'stable' ? (gitFlowBranches.stable || 'main')
+    : rule.baseBranch === 'release' ? 'Active release branch'
+    : (gitFlowBranches.development || 'develop')
+  return `When issue is labeled ${labelText}, branch ${branchPrefix}/<issue_id>-<issue-name> is created from ${baseBranchName} and ${pipelineText} pipeline is applied which creates a PR ${branchPrefix}/* → ${baseBranchName}`
+}
+
+function RepoSettingsFields({
+  value,
+  onChange,
+  branches,
+  branchesLoading,
+  pipelines,
+  showUrlClear = false,
+  testIdPrefix = '',
+}: RepoSettingsFieldsProps) {
+  return (
+    <Stack spacing={2}>
+      <TextField
+        label="URL"
+        required
+        fullWidth
+        value={value.url}
+        onChange={(e) => onChange({ url: e.target.value })}
+        placeholder="https://github.com/org/repo.git"
+        data-testid={`${testIdPrefix}url`}
+        slotProps={{
+          input: {
+            endAdornment: showUrlClear && value.url ? (
+              <InputAdornment position="end">
+                <IconButton size="small" onClick={() => onChange({ url: '' })} edge="end">
+                  <ClearIcon fontSize="small" />
+                </IconButton>
+              </InputAdornment>
+            ) : undefined,
+          },
+        }}
+      />
+      <Box>
+        <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Pollers</Typography>
+        <FormGroup row>
+          {AVAILABLE_POLLERS.map(({ value: pv, label }) => (
+            <FormControlLabel
+              key={pv}
+              control={
+                <Checkbox
+                  checked={value.pollers.includes(pv)}
+                  onChange={(e) =>
+                    onChange({
+                      pollers: e.target.checked
+                        ? [...value.pollers, pv]
+                        : value.pollers.filter((p) => p !== pv),
+                    })
+                  }
+                  data-testid={`${testIdPrefix}poller-${pv}`}
+                />
+              }
+              label={label}
+            />
+          ))}
+        </FormGroup>
+      </Box>
+      <FormControlLabel
+        control={
+          <Switch
+            checked={value.gitFlowEnabled}
+            onChange={(e) => onChange({ gitFlowEnabled: e.target.checked })}
+            data-testid={`${testIdPrefix}git-flow-enabled`}
+          />
+        }
+        label="Enable Git Flow"
+      />
+      {value.gitFlowEnabled ? (
+        <Stack spacing={1.5}>
+          <Typography variant="caption" color="text.secondary">
+            Branch name patterns (use <code>*</code> as a wildcard)
+          </Typography>
+          <Autocomplete
+            freeSolo
+            options={branches}
+            loading={branchesLoading}
+            value={value.gitFlowBranches.stable}
+            onChange={(_e, v) => onChange({ gitFlowBranches: { ...value.gitFlowBranches, stable: v ?? '' } })}
+            onInputChange={(_e, v, reason) => { if (reason === 'input') onChange({ gitFlowBranches: { ...value.gitFlowBranches, stable: v } }) }}
+            renderInput={(params) => (
+              <TextField {...params} label="Stable" data-testid={`${testIdPrefix}git-flow-branch-stable`} />
+            )}
+          />
+          <TextField
+            label="Release"
+            fullWidth
+            value={value.gitFlowBranches.release}
+            onChange={(e) => onChange({ gitFlowBranches: { ...value.gitFlowBranches, release: e.target.value } })}
+            data-testid={`${testIdPrefix}git-flow-branch-release`}
+            helperText="The active release branch is the one ahead of the stable branch"
+          />
+          <Autocomplete
+            freeSolo
+            options={branches}
+            loading={branchesLoading}
+            value={value.gitFlowBranches.development}
+            onChange={(_e, v) => onChange({ gitFlowBranches: { ...value.gitFlowBranches, development: v ?? '' } })}
+            onInputChange={(_e, v, reason) => { if (reason === 'input') onChange({ gitFlowBranches: { ...value.gitFlowBranches, development: v } }) }}
+            renderInput={(params) => (
+              <TextField {...params} label="Development" data-testid={`${testIdPrefix}git-flow-branch-development`} />
+            )}
+          />
+        </Stack>
+      ) : (
+        <Autocomplete
+          freeSolo
+          options={branches}
+          loading={branchesLoading}
+          value={value.branch}
+          onChange={(_e, v) => onChange({ branch: v ?? '' })}
+          onInputChange={(_e, v, reason) => { if (reason === 'input') onChange({ branch: v }) }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="Branch"
+              placeholder="default"
+              helperText="Used as the single working branch (equivalent to main + develop in Git Flow)"
+              data-testid={`${testIdPrefix}branch`}
+            />
+          )}
+        />
+      )}
+      <Box>
+        <Divider sx={{ mb: 1.5 }}>
+          <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            Rules
+          </Typography>
+        </Divider>
+        <Stack spacing={2}>
+          {(['feature', 'bugfix', 'hotfix'] as const).map((field) => {
+            const rule = value.gitFlowRules[field]
+            const branchPattern = value.gitFlowBranches[field]
+            return (
+              <Box key={field}>
+                <Stack direction="row" spacing={1} alignItems="flex-start">
+                  <TextField
+                    label="Issue labels"
+                    size="small"
+                    sx={{ flex: 2 }}
+                    value={rule.issueLabels}
+                    onChange={(e) =>
+                      onChange({
+                        gitFlowRules: {
+                          ...value.gitFlowRules,
+                          [field]: { ...rule, issueLabels: e.target.value },
+                        },
+                      })
+                    }
+                    placeholder="e.g. feature, enhancement"
+                    helperText="Comma-separated"
+                    data-testid={`${testIdPrefix}git-flow-rule-${field}-labels`}
+                  />
+                  <TextField
+                    label={field.charAt(0).toUpperCase() + field.slice(1)}
+                    size="small"
+                    sx={{ flex: 1.5 }}
+                    value={value.gitFlowBranches[field]}
+                    onChange={(e) =>
+                      onChange({ gitFlowBranches: { ...value.gitFlowBranches, [field]: e.target.value } })
+                    }
+                    data-testid={`${testIdPrefix}git-flow-branch-${field}`}
+                  />
+                  {value.gitFlowEnabled && (
+                    <FormControl size="small" sx={{ flex: 1, minWidth: 120 }}>
+                      <InputLabel>Base branch</InputLabel>
+                      <Select
+                        value={rule.baseBranch}
+                        label="Base branch"
+                        onChange={(e) =>
+                          onChange({
+                            gitFlowRules: {
+                              ...value.gitFlowRules,
+                              [field]: { ...rule, baseBranch: e.target.value as BranchRuleFormState['baseBranch'] },
+                            },
+                          })
+                        }
+                        data-testid={`${testIdPrefix}git-flow-rule-${field}-base`}
+                      >
+                        <MenuItem value="stable">Stable</MenuItem>
+                        <MenuItem value="release">Release</MenuItem>
+                        <MenuItem value="development">Development</MenuItem>
+                      </Select>
+                    </FormControl>
+                  )}
+                  <FormControl size="small" sx={{ flex: 1.5, minWidth: 130 }}>
+                    <InputLabel>Pipeline</InputLabel>
+                    <Select
+                      value={rule.pipeline}
+                      label="Pipeline"
+                      renderValue={(v) => v || <em>None</em>}
+                      onChange={(e) =>
+                        onChange({
+                          gitFlowRules: {
+                            ...value.gitFlowRules,
+                            [field]: { ...rule, pipeline: e.target.value },
+                          },
+                        })
+                      }
+                      data-testid={`${testIdPrefix}git-flow-rule-${field}-pipeline`}
+                    >
+                      <MenuItem value=""><em>None</em></MenuItem>
+                      {pipelines.map((p) => (
+                        <MenuItem key={p} value={p}>{p}</MenuItem>
+                      ))}
+                      {rule.pipeline && !pipelines.includes(rule.pipeline) && (
+                        <MenuItem value={rule.pipeline}>{rule.pipeline}</MenuItem>
+                      )}
+                    </Select>
+                  </FormControl>
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  {buildRuleDescription(branchPattern, rule, value.gitFlowBranches, value.gitFlowEnabled)}
+                </Typography>
+              </Box>
+            )
+          })}
+          <Box>
+            <TextField
+              label="Branch name override"
+              fullWidth
+              size="small"
+              value={value.gitFlowRules.branchNameOverride}
+              onChange={(e) =>
+                onChange({ gitFlowRules: { ...value.gitFlowRules, branchNameOverride: e.target.value } })
+              }
+              data-testid={`${testIdPrefix}git-flow-branch-name-override`}
+            />
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+              If an issue has a label matching this pattern, it overrides the base branch in the above rules (e.g. <code>base:main</code> overrides to <code>main</code>)
+            </Typography>
+          </Box>
+        </Stack>
+      </Box>
+    </Stack>
+  )
+}
 
 export default function ReposPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -110,13 +472,36 @@ export default function ReposPage() {
   const [loginSuccess, setLoginSuccess] = useState<string | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // Edit repository dialog — declared early so its URL can drive the branch query below
+  const [editDialogRepo, setEditDialogRepo] = useState<Repository | null>(null)
+  const [editForm, setEditForm] = useState<RepoFormState>(
+    { url: '', branch: '', pollers: [], gitFlowEnabled: false, gitFlowBranches: { ...DEFAULT_GIT_FLOW_BRANCHES }, gitFlowRules: { ...DEFAULT_GIT_FLOW_RULES } }
+  )
+  const [editError, setEditError] = useState<string | null>(null)
+
   const { data, loading, error, refetch } = useQuery(GET_REPOSITORIES)
   const { data: authData, loading: authLoading, refetch: refetchAuth } = useQuery(GITHUB_AUTH_STATUS)
+  const { data: pipelineDefsData } = useQuery(GET_PIPELINE_DEFINITIONS)
+  const pipelineNames: string[] = (pipelineDefsData?.pipelineDefinitions ?? []).map((p: { name: string }) => p.name)
   const isGithubAuthenticated = authData?.githubAuthStatus?.authenticated === true
   const { data: ghReposData, loading: ghReposLoading } = useQuery(GITHUB_REPOSITORIES, {
     skip: !isGithubAuthenticated,
   })
   const githubRepos: GithubRepo[] = ghReposData?.githubRepositories ?? []
+
+  const addFormParsed = parseGithubOwnerRepo(form.url)
+  const { data: addBranchesData, loading: addBranchesLoading } = useQuery(GITHUB_BRANCHES, {
+    skip: !isGithubAuthenticated || !addFormParsed,
+    variables: addFormParsed ?? { owner: '', repo: '' },
+  })
+  const addBranches: string[] = addBranchesData?.githubBranches ?? []
+
+  const editParsed = parseGithubOwnerRepo(editDialogRepo?.url ?? '')
+  const { data: editBranchesData, loading: editBranchesLoading } = useQuery(GITHUB_BRANCHES, {
+    skip: !isGithubAuthenticated || !editParsed || !editDialogRepo,
+    variables: editParsed ?? { owner: '', repo: '' },
+  })
+  const editBranches: string[] = editBranchesData?.githubBranches ?? []
 
   // Poll while any repo is in a non-terminal state
   const repositories: Repository[] = data?.repositories ?? []
@@ -231,6 +616,92 @@ export default function ReposPage() {
     onCompleted: () => refetch(),
   })
 
+  const [updateRepository, { loading: savingEdit }] = useMutation(UPDATE_REPOSITORY, {
+    onCompleted: (result) => {
+      const errors = result?.updateRepository?.errors
+      if (errors?.length) {
+        setEditError(errors.map((e: { message: string }) => e.message).join(', '))
+      } else {
+        setEditDialogRepo(null)
+        setEditError(null)
+        refetch()
+      }
+    },
+    onError: (err) => setEditError(err.message),
+  })
+
+  function ruleToFormState(rule: BranchRule | null | undefined, field: 'feature' | 'bugfix' | 'hotfix', branchPattern: string): BranchRuleFormState {
+    const defaults = DEFAULT_GIT_FLOW_RULES[field]
+    const branchPrefix = branchPattern.replace(/\/\*$/, '')
+    const defaultPipeline = findDefaultPipeline(pipelineNames, branchPrefix, defaults.issueLabels)
+    if (!rule) return { ...defaults, pipeline: defaultPipeline }
+    return {
+      issueLabels: rule.issueLabels.join(', ') || defaults.issueLabels,
+      baseBranch: (rule.baseBranch as BranchRuleFormState['baseBranch']) || defaults.baseBranch,
+      pipeline: rule.pipeline ?? defaultPipeline,
+    }
+  }
+
+  function openEditDialog(repo: Repository) {
+    setEditDialogRepo(repo)
+    setEditError(null)
+    const rules = repo.gitFlowConfig?.rules
+    setEditForm({
+      url: repo.url,
+      branch: repo.branch ?? '',
+      pollers: [...(repo.pollers ?? [])],
+      gitFlowEnabled: repo.gitFlowConfig?.enabled ?? false,
+      gitFlowBranches: repo.gitFlowConfig
+        ? {
+            stable: repo.gitFlowConfig.branches.stable,
+            development: repo.gitFlowConfig.branches.development,
+            release: repo.gitFlowConfig.branches.release,
+            feature: repo.gitFlowConfig.branches.feature,
+            bugfix: repo.gitFlowConfig.branches.bugfix,
+            hotfix: repo.gitFlowConfig.branches.hotfix,
+          }
+        : { ...DEFAULT_GIT_FLOW_BRANCHES },
+      gitFlowRules: {
+        feature: ruleToFormState(rules?.feature, 'feature', repo.gitFlowConfig?.branches?.feature ?? DEFAULT_GIT_FLOW_BRANCHES.feature),
+        bugfix:  ruleToFormState(rules?.bugfix,  'bugfix',  repo.gitFlowConfig?.branches?.bugfix  ?? DEFAULT_GIT_FLOW_BRANCHES.bugfix),
+        hotfix:  ruleToFormState(rules?.hotfix,  'hotfix',  repo.gitFlowConfig?.branches?.hotfix  ?? DEFAULT_GIT_FLOW_BRANCHES.hotfix),
+        branchNameOverride: rules?.branchNameOverride ?? 'base:*',
+      },
+    })
+  }
+
+  function ruleFormToInput(rule: BranchRuleFormState) {
+    return {
+      issueLabels: rule.issueLabels.split(',').map(s => s.trim()).filter(Boolean),
+      baseBranch: rule.baseBranch,
+      pipeline: rule.pipeline || null,
+    }
+  }
+
+  function handleEditSave() {
+    if (!editDialogRepo) return
+    updateRepository({
+      variables: {
+        name: editDialogRepo.name,
+        input: {
+          url: editForm.url,
+          branch: editForm.branch || null,
+          pollers: editForm.pollers,
+          gitFlowConfig: {
+              enabled: editForm.gitFlowEnabled,
+              branches: editForm.gitFlowBranches,
+              rules: {
+                feature: ruleFormToInput(editForm.gitFlowRules.feature),
+                bugfix: ruleFormToInput(editForm.gitFlowRules.bugfix),
+                hotfix: ruleFormToInput(editForm.gitFlowRules.hotfix),
+                branchNameOverride: editForm.gitFlowRules.branchNameOverride || null,
+              },
+            },
+        },
+      },
+    })
+  }
+
 
   function handleSubmit() {
     if (!form.name.trim() || !form.url.trim()) {
@@ -242,11 +713,35 @@ export default function ReposPage() {
         input: {
           name: form.name.trim(),
           url: form.url.trim(),
-          branch: form.defaultBranch || undefined,
+          branch: form.branch || undefined,
           pollers: form.pollers,
+          gitFlowConfig: {
+              enabled: form.gitFlowEnabled,
+              branches: form.gitFlowBranches,
+              rules: {
+                feature: ruleFormToInput(form.gitFlowRules.feature),
+                bugfix: ruleFormToInput(form.gitFlowRules.bugfix),
+                hotfix: ruleFormToInput(form.gitFlowRules.hotfix),
+                branchNameOverride: form.gitFlowRules.branchNameOverride || null,
+              },
+            },
         },
       },
     })
+  }
+
+  function openAddDialog() {
+    setForm({
+      ...EMPTY_FORM,
+      gitFlowRules: {
+        ...DEFAULT_GIT_FLOW_RULES,
+        feature: { ...DEFAULT_GIT_FLOW_RULES.feature, pipeline: findDefaultPipeline(pipelineNames, DEFAULT_GIT_FLOW_BRANCHES.feature.replace(/\/\*$/, ''), DEFAULT_GIT_FLOW_RULES.feature.issueLabels) },
+        bugfix:  { ...DEFAULT_GIT_FLOW_RULES.bugfix,  pipeline: findDefaultPipeline(pipelineNames, DEFAULT_GIT_FLOW_BRANCHES.bugfix.replace(/\/\*$/, ''),  DEFAULT_GIT_FLOW_RULES.bugfix.issueLabels)  },
+        hotfix:  { ...DEFAULT_GIT_FLOW_RULES.hotfix,  pipeline: findDefaultPipeline(pipelineNames, DEFAULT_GIT_FLOW_BRANCHES.hotfix.replace(/\/\*$/, ''),  DEFAULT_GIT_FLOW_RULES.hotfix.issueLabels)  },
+      },
+    })
+    setFormError(null)
+    setDialogOpen(true)
   }
 
   function handleClose() {
@@ -287,7 +782,7 @@ export default function ReposPage() {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            onClick={() => setDialogOpen(true)}
+            onClick={openAddDialog}
             data-testid="btn-add-repository"
           >
             Add Repository
@@ -373,6 +868,16 @@ export default function ReposPage() {
                         <TableCell align="right">{repo.taskCount ?? 0}</TableCell>
                         <TableCell align="right" sx={{ py: 0 }}>
                           <Stack direction="row" spacing={0} justifyContent="flex-end">
+                            <Tooltip title="Repository settings">
+                              <IconButton
+                                size="small"
+                                onClick={(e) => { e.stopPropagation(); openEditDialog(repo) }}
+                                data-testid={`btn-edit-repo-${repo.name}`}
+                                color={repo.gitFlowConfig?.enabled ? 'primary' : 'default'}
+                              >
+                                <SettingsIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
                             <IconButton
                               size="small"
                               color="error"
@@ -518,14 +1023,14 @@ export default function ReposPage() {
                 )}
                 onChange={(_e, value) => {
                   if (!value) {
-                    setForm((f) => ({ ...f, name: '', url: '', defaultBranch: null }))
+                    setForm((f) => ({ ...f, name: '', url: '', branch: '' }))
                   } else if (typeof value !== 'string') {
                     const repoName = value.nameWithOwner.split('/').pop() ?? value.nameWithOwner
                     setForm((f) => ({
                       ...f,
                       name: repoName,
                       url: value.url,
-                      defaultBranch: value.defaultBranch,
+                      branch: value.defaultBranch,
                     }))
                   }
                 }}
@@ -556,55 +1061,15 @@ export default function ReposPage() {
                 data-testid="repo-form-name"
               />
             )}
-            <TextField
-              label="URL"
-              required
-              fullWidth
-              value={form.url}
-              onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
-              placeholder="https://github.com/org/repo.git"
-              data-testid="repo-form-url"
-              slotProps={{
-                input: {
-                  endAdornment: form.url ? (
-                    <InputAdornment position="end">
-                      <IconButton
-                        size="small"
-                        onClick={() => setForm((f) => ({ ...f, url: '' }))}
-                        edge="end"
-                      >
-                        <ClearIcon fontSize="small" />
-                      </IconButton>
-                    </InputAdornment>
-                  ) : undefined,
-                },
-              }}
+            <RepoSettingsFields
+              value={form}
+              onChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
+              branches={addBranches}
+              branchesLoading={addBranchesLoading}
+              pipelines={pipelineNames}
+              showUrlClear
+              testIdPrefix="repo-form-"
             />
-            <Box>
-              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Pollers</Typography>
-              <FormGroup row>
-                {AVAILABLE_POLLERS.map(({ value, label }) => (
-                  <FormControlLabel
-                    key={value}
-                    control={
-                      <Checkbox
-                        checked={form.pollers.includes(value)}
-                        onChange={(e) => {
-                          setForm((f) => ({
-                            ...f,
-                            pollers: e.target.checked
-                              ? [...f.pollers, value]
-                              : f.pollers.filter((p) => p !== value),
-                          }))
-                        }}
-                        data-testid={`repo-form-poller-${value}`}
-                      />
-                    }
-                    label={label}
-                  />
-                ))}
-              </FormGroup>
-            </Box>
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -626,6 +1091,35 @@ export default function ReposPage() {
         onClose={() => setSnackbarMsg(null)}
         message={snackbarMsg}
       />
+
+      {/* Edit Repository dialog */}
+      <Dialog open={editDialogRepo !== null} onClose={() => setEditDialogRepo(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Settings — {editDialogRepo?.name}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {editError && <Alert severity="error">{editError}</Alert>}
+            <RepoSettingsFields
+              value={editForm}
+              onChange={(patch) => setEditForm((f) => ({ ...f, ...patch }))}
+              branches={editBranches}
+              branchesLoading={editBranchesLoading}
+              pipelines={pipelineNames}
+              testIdPrefix="edit-repo-"
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDialogRepo(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleEditSave}
+            disabled={savingEdit}
+            data-testid="btn-edit-repo-save"
+          >
+            {savingEdit ? 'Saving…' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* GitHub Login dialog */}
       <Dialog open={loginDialogOpen} onClose={handleLoginDialogClose} maxWidth="xs" fullWidth>

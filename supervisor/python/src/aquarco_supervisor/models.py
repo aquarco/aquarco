@@ -127,6 +127,22 @@ class GitFlowBranches(BaseModel):
     hotfix: str = "hotfix/*"
 
 
+class BranchRule(BaseModel):
+    """Per-branch-type rule: maps issue labels to a pipeline and base branch."""
+    issueLabels: list[str] = Field(default_factory=list)
+    # Symbolic: "stable", "release", "development", or an explicit branch name.
+    baseBranch: str = "development"
+    pipeline: str | None = None
+
+
+class GitFlowBranchRules(BaseModel):
+    """Repository-level rules for pipeline and branch selection."""
+    feature: BranchRule | None = None
+    bugfix: BranchRule | None = None
+    hotfix: BranchRule | None = None
+    branchNameOverride: str | None = None
+
+
 class GitFlowConfig(BaseModel):
     """Git Flow configuration for a repository.
 
@@ -135,6 +151,7 @@ class GitFlowConfig(BaseModel):
     """
     enabled: bool = True
     branches: GitFlowBranches = Field(default_factory=GitFlowBranches)
+    rules: GitFlowBranchRules | None = None
 
 
 class Repository(BaseModel):
@@ -231,15 +248,9 @@ class StageConfig(BaseModel):
     conditions: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class PipelineTrigger(BaseModel):
-    labels: list[str] = Field(default_factory=list)
-    events: list[str] = Field(default_factory=list)
-
-
 class PipelineConfig(BaseModel):
     name: str
     version: str = "0.0.0"
-    trigger: PipelineTrigger
     stages: list[StageConfig]
     categories: dict[str, dict[str, Any]] = Field(default_factory=dict)
 

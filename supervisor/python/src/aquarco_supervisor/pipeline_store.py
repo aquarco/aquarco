@@ -35,7 +35,7 @@ def load_pipeline_definitions_from_file(
     schema: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Read the pipelines YAML file, optionally validate, return a list of
-    pipeline dicts (each has name, version, trigger, stages).
+    pipeline dicts (each has name, version, stages).
     """
     if not pipelines_file.is_file():
         log.warning("pipelines_file_not_found", path=str(pipelines_file))
@@ -99,18 +99,16 @@ async def store_pipeline_definitions(
         # Upsert current version
         await db.execute(
             """INSERT INTO pipeline_definitions
-                   (name, version, trigger_config, stages, categories, is_active)
+                   (name, version, stages, categories, is_active)
                VALUES
-                   (%(name)s, %(version)s, %(trigger_config)s, %(stages)s, %(categories)s, true)
+                   (%(name)s, %(version)s, %(stages)s, %(categories)s, true)
                ON CONFLICT (name, version) DO UPDATE SET
-                   trigger_config = EXCLUDED.trigger_config,
                    stages         = EXCLUDED.stages,
                    categories     = EXCLUDED.categories,
                    is_active      = true""",
             {
                 "name": name,
                 "version": version,
-                "trigger_config": json.dumps(p.get("trigger", {})),
                 "stages": json.dumps(p.get("stages", [])),
                 "categories": json.dumps(p.get("categories", {})),
             },
@@ -153,14 +151,13 @@ async def read_pipeline_definitions_from_db(
     """
     where = "WHERE is_active = true" if active_only else ""
     rows = await db.fetch_all(
-        f"SELECT name, version, trigger_config, stages, categories, is_active "
+        f"SELECT name, version, stages, categories, is_active "
         f"FROM pipeline_definitions {where} ORDER BY name, version"
     )
     return [
         {
             "name": row["name"],
             "version": row["version"],
-            "trigger": row["trigger_config"],
             "stages": row["stages"],
             "categories": row.get("categories", {}),
         }
