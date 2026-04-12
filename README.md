@@ -25,6 +25,11 @@ Install: `pip install -e cli/` (requires Python 3.10+)
 | Command | Description |
 |---------|-------------|
 | `aquarco init` | Bootstrap the Aquarco VM (checks VirtualBox + Vagrant, runs `vagrant up`, verifies health) |
+| `aquarco init --dev` | Bootstrap in dev mode: mounts the aquarco source tree into the VM (`AQUARCO_DEV=1`) |
+| `aquarco backup` | Back up database and credentials to `~/.aquarco/backups/` on the host |
+| `aquarco backup --no-db` | Back up credentials only |
+| `aquarco backup --no-creds` | Back up database only |
+| `aquarco backup -o <dir>` | Back up to a custom directory instead of the default |
 | `aquarco update` | Update VM: Docker images, migrations, restart services (with drain mode support) |
 | `aquarco auth` | Auto-detect unauthenticated services and run their login flows |
 | `aquarco auth claude` | Authenticate Claude via OAuth PKCE flow |
