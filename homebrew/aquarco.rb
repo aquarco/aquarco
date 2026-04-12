@@ -19,7 +19,7 @@ class Aquarco < Formula
   # To compute manually: curl -sL <url> | shasum -a 256
   sha256 "PLACEHOLDER_SHA256"
   license "MIT"
-  version "rc-1.0.0"
+  version "1.0.0rc1"
 
   depends_on "python@3.11"
 
@@ -62,7 +62,7 @@ class Aquarco < Formula
 
   test do
     # Verify the CLI starts and reports its version
-    assert_match "rc-1.0.0", shell_output("#{bin}/aquarco --version")
+    assert_match "1.0.0rc1", shell_output("#{bin}/aquarco --version")
 
     # Verify the production guard blocks `aquarco update`
     output = shell_output("#{bin}/aquarco update 2>&1", 1)

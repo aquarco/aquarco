@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aquarco-cli"
-version = "rc-1.0.0"
+version = "1.0.0rc1"
 description = "Aquarco CLI — manage your Aquarco VM from the host"
 requires-python = ">=3.10"
 dependencies = [
