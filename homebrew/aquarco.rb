@@ -21,4 +21,10 @@ cask "aquarco" do
   depends_on cask: "vagrant"
 
   binary "aquarco"
+
+  postflight do
+    # Strip Gatekeeper quarantine so macOS doesn't block the unsigned binary
+    system_command "/usr/bin/xattr",
+                   args: ["-dr", "com.apple.quarantine", staged_path.to_s]
+  end
 end
