@@ -22,8 +22,6 @@ class Aquarco < Formula
   version "rc-1.0.0"
 
   depends_on "python@3.11"
-  depends_on cask: "vagrant"
-  depends_on cask: "virtualbox"
 
   def install
     # Install the full source tree to share so Vagrant's synced_folder ("..")
@@ -50,6 +48,15 @@ class Aquarco < Formula
       exec "#{libexec}/bin/aquarco" "$@"
     EOS
     chmod 0555, bin/"aquarco"
+  end
+
+  def caveats
+    <<~EOS
+      Aquarco requires VirtualBox and Vagrant to manage VMs.
+      Install them before running `aquarco init`:
+        brew install --cask virtualbox
+        brew install --cask vagrant
+    EOS
   end
 
   test do
