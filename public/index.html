@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aquarco — Autonomous AI Agent Pipelines</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --teal: #2dd4bf;
+      --blue: #3b82f6;
+      --purple: #a855f7;
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --radius: 12px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Libre Baskerville', Georgia, serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 80px 24px 60px;
+      gap: 24px;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.5rem, 6vw, 4.5rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .brand { color: var(--teal); }
+
+    .tagline {
+      font-size: 1.25rem;
+      color: var(--muted);
+      max-width: 560px;
+    }
+
+    .cta-row { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 28px;
+      border-radius: var(--radius);
+      font-size: 1rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: opacity .15s;
+    }
+    .btn:hover { opacity: .85; }
+
+    .btn-primary {
+      background: var(--teal);
+      color: #0f172a;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text);
+      border: 2px solid var(--muted);
+    }
+
+    /* Aquarium SVG */
+    .aquarium { width: min(480px, 90vw); }
+
+    /* Terminal */
+    .terminal-section {
+      background: var(--surface);
+      border-radius: var(--radius);
+      max-width: 640px;
+      margin: 0 auto 60px;
+      padding: 24px 32px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .9rem;
+    }
+
+    .terminal-line { margin-bottom: 6px; color: var(--muted); }
+    .terminal-line .prompt { color: var(--teal); }
+    .terminal-line .cmd { color: var(--text); }
+
+    /* How it works */
+    section#how {
+      max-width: 900px;
+      margin: 0 auto 80px;
+      padding: 0 24px;
+      text-align: center;
+    }
+
+    section#how h2 { font-size: 2rem; margin-bottom: 40px; }
+
+    .pipeline-stages {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .stage {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .85rem;
+      color: var(--blue);
+      border: 1px solid rgba(59,130,246,.2);
+    }
+
+    /* Taglines grid */
+    .taglines-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 24px;
+      max-width: 900px;
+      margin: 0 auto 80px;
+      padding: 0 24px;
+    }
+
+    .tagline-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 24px;
+    }
+
+    .tagline-card h3 { color: var(--purple); margin-bottom: 8px; font-size: 1rem; }
+    .tagline-card p { color: var(--muted); font-size: .9rem; }
+
+    footer {
+      text-align: center;
+      padding: 40px 24px;
+      color: var(--muted);
+      font-size: .875rem;
+      border-top: 1px solid var(--surface);
+    }
+
+    footer a { color: var(--muted); text-decoration: none; }
+    footer a:hover { color: var(--teal); }
+  </style>
+</head>
+<body>
+
+  <!-- Hero -->
+  <section class="hero">
+    <!-- Aquarium SVG logo -->
+    <svg class="aquarium" viewBox="0 0 480 200" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="waterGrad" cx="50%" cy="50%">
+          <stop offset="0%" stop-color="#0c4a6e" stop-opacity=".6"/>
+          <stop offset="100%" stop-color="#0f172a" stop-opacity=".9"/>
+        </radialGradient>
+      </defs>
+      <rect width="480" height="200" rx="16" fill="url(#waterGrad)"/>
+
+      <!-- Fish 1 -->
+      <g id="fish1" transform="translate(80, 80)">
+        <ellipse cx="0" cy="0" rx="28" ry="14" fill="#2dd4bf"/>
+        <polygon points="-28,0 -44,-12 -44,12" fill="#2dd4bf"/>
+        <circle cx="16" cy="-4" r="3" fill="#0f172a"/>
+      </g>
+
+      <!-- Fish 2 -->
+      <g id="fish2" transform="translate(240, 110)">
+        <ellipse cx="0" cy="0" rx="22" ry="11" fill="#3b82f6"/>
+        <polygon points="-22,0 -36,-10 -36,10" fill="#3b82f6"/>
+        <circle cx="12" cy="-3" r="2.5" fill="#0f172a"/>
+      </g>
+
+      <!-- Fish 3 -->
+      <g id="fish3" transform="translate(380, 70)">
+        <ellipse cx="0" cy="0" rx="18" ry="9" fill="#a855f7"/>
+        <polygon points="-18,0 -30,-8 -30,8" fill="#a855f7"/>
+        <circle cx="10" cy="-2.5" r="2" fill="#0f172a"/>
+      </g>
+
+      <!-- Bubbles container -->
+      <g id="bubbles"></g>
+    </svg>
+
+    <h1><span class="brand">aquarco</span></h1>
+    <p class="tagline">Autonomous AI agent pipelines running in a sandboxed VM — watching your repos, filing PRs, never touching production.</p>
+
+    <div class="cta-row">
+      <a href="https://github.com/aquarco/aquarco" class="btn btn-primary">Get Started on GitHub</a>
+      <a href="#how" class="btn btn-ghost">See how it works</a>
+    </div>
+  </section>
+
+  <!-- Terminal demo -->
+  <div class="terminal-section">
+    <div class="terminal-line"><span class="prompt">$</span> <span class="cmd">aquarco init</span></div>
+    <div class="terminal-line"><span class="prompt">$</span> <span class="cmd">aquarco auth github</span></div>
+    <div class="terminal-line"><span class="prompt">$</span> <span class="cmd">aquarco auth claude</span></div>
+    <div class="terminal-line"><span class="prompt">$</span> <span class="cmd">aquarco repos add https://github.com/user/repo</span></div>
+    <div class="terminal-line" style="color:var(--teal)">✓ Watching repo — agents are live</div>
+  </div>
+
+  <!-- How it works -->
+  <section id="how">
+    <h2>How it works</h2>
+    <div class="pipeline-stages">
+      <div class="stage">Analyze</div>
+      <div class="stage">Design</div>
+      <div class="stage">Implement</div>
+      <div class="stage">Test</div>
+      <div class="stage">Review</div>
+      <div class="stage">Submit</div>
+    </div>
+  </section>
+
+  <!-- Taglines grid -->
+  <div class="taglines-grid">
+    <div class="tagline-card">
+      <h3>Isolated by design</h3>
+      <p>Every agent runs inside a VirtualBox VM. Your host machine is never touched.</p>
+    </div>
+    <div class="tagline-card">
+      <h3>Multi-stage pipelines</h3>
+      <p>Configurable YAML pipelines with structured conditions, loops, and PR submission.</p>
+    </div>
+    <div class="tagline-card">
+      <h3>Observable</h3>
+      <p>Live stage output, execution order tracking, and Grafana dashboards out of the box.</p>
+    </div>
+    <div class="tagline-card">
+      <h3>Cost-aware</h3>
+      <p>Per-task Claude API spend tracked and surfaced in the dashboard.</p>
+    </div>
+  </div>
+
+  <footer>
+    <p>MIT License &nbsp;·&nbsp;
+       <a href="https://github.com/aquarco/aquarco">github.com/yourorg/aquarco</a>
+    </p>
+  </footer>
+
+  <script>
+    // Fish animation
+    const fishes = [
+      { id: 'fish1', x: 80,  y: 80,  dx: 0.4, dy: 0.15, minX: 30,  maxX: 220 },
+      { id: 'fish2', x: 240, y: 110, dx: -0.3, dy: 0.2,  minX: 60,  maxX: 420 },
+      { id: 'fish3', x: 380, y: 70,  dx: 0.5,  dy: -0.1, minX: 100, maxX: 460 },
+    ];
+
+    const fishEls = fishes.map(f => document.getElementById(f.id));
+
+    // Bubble definitions
+    const bubbleDefs = [
+      { cx: 120, r: 4, speed: 0.3 },
+      { cx: 200, r: 6, speed: 0.2 },
+      { cx: 320, r: 3, speed: 0.4 },
+      { cx: 400, r: 5, speed: 0.25 },
+    ];
+
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const bubblesEl = document.getElementById('bubbles');
+    const bubbleCircles = bubbleDefs.map(def => {
+      const c = document.createElementNS(svgNS, 'circle');
+      c.setAttribute('r', def.r);
+      c.setAttribute('fill', 'none');
+      c.setAttribute('stroke', 'rgba(255,255,255,0.25)');
+      c.setAttribute('stroke-width', '1');
+      c.setAttribute('cx', def.cx);
+      c.setAttribute('cy', 190);
+      bubblesEl.appendChild(c);
+      return { el: c, cx: def.cx, cy: 190, speed: def.speed };
+    });
+
+    let last = 0;
+    function animate(ts) {
+      const dt = ts - last;
+      last = ts;
+
+      fishes.forEach((f, i) => {
+        f.x += f.dx * dt * 0.05;
+        f.y += f.dy * dt * 0.03;
+        if (f.x < f.minX || f.x > f.maxX) { f.dx *= -1; }
+        if (f.y < 20 || f.y > 180) { f.dy *= -1; }
+        const scaleX = f.dx > 0 ? 1 : -1;
+        fishEls[i].setAttribute('transform',
+          `translate(${f.x.toFixed(1)}, ${f.y.toFixed(1)}) scale(${scaleX}, 1)`);
+      });
+
+      bubbleCircles.forEach(b => {
+        b.cy -= b.speed * dt * 0.05;
+        if (b.cy < 10) { b.cy = 195; }
+        b.el.setAttribute('cy', b.cy.toFixed(1));
+      });
+
+      requestAnimationFrame(animate);
+    }
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>

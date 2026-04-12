@@ -298,7 +298,7 @@ fi
 
 log "Writing /etc/aquarco/env (build environment marker)..."
 if [[ ! -f /etc/aquarco/env ]]; then
-  echo "development" > /etc/aquarco/env
+  echo "${AQUARCO_DOCKER_MODE:-development}" > /etc/aquarco/env
 fi
 
 log "Installing aquarco-stack systemd service..."
