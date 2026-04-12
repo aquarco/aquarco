@@ -15,12 +15,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from aquarco_supervisor.database import Database
-from aquarco_supervisor.models import PipelineConfig, PipelineTrigger, StageConfig
+from aquarco_supervisor.models import PipelineConfig, StageConfig
 from aquarco_supervisor.pipeline.agent_invoker import AgentInvoker
 from aquarco_supervisor.pipeline.executor import (
     PipelineExecutor,
     check_conditions,
 )
+from aquarco_supervisor.stage_manager import StageManager
 from aquarco_supervisor.task_queue import TaskQueue
 
 
@@ -95,7 +96,7 @@ class TestOutputSchemaResolution:
         }
         pipeline = PipelineConfig(
             name="feature-pipeline",
-            trigger=PipelineTrigger(labels=["feature"]),
+
             stages=[StageConfig(name="analysis", category="analyze")],
             categories=categories,
         )
@@ -111,7 +112,7 @@ class TestOutputSchemaResolution:
         """When pipeline has no categories for this category, fall back to agent spec."""
         pipeline = PipelineConfig(
             name="feature-pipeline",
-            trigger=PipelineTrigger(labels=["feature"]),
+
             stages=[StageConfig(name="analysis", category="analyze")],
             categories={},
         )
@@ -130,7 +131,7 @@ class TestOutputSchemaResolution:
         """No schema in categories or agent spec => None."""
         pipeline = PipelineConfig(
             name="feature-pipeline",
-            trigger=PipelineTrigger(labels=["feature"]),
+
             stages=[StageConfig(name="analysis", category="analyze")],
             categories={},
         )
@@ -153,7 +154,7 @@ class TestOutputSchemaResolution:
         """Empty dict schema in categories => falls back to agent spec."""
         pipeline = PipelineConfig(
             name="test-pipeline",
-            trigger=PipelineTrigger(labels=["test"]),
+
             stages=[StageConfig(name="s1", category="test")],
             categories={"test": {}},
         )
@@ -171,7 +172,7 @@ class TestOutputSchemaResolution:
         """When no pipeline schema, registry is used for agent schema fallback."""
         pipeline = PipelineConfig(
             name="test-pipeline",
-            trigger=PipelineTrigger(labels=["test"]),
+
             stages=[StageConfig(name="s1", category="test")],
             categories={},
         )
@@ -276,10 +277,12 @@ class TestCompletedStageGuard:
     def _make_executor(self) -> PipelineExecutor:
         mock_db = AsyncMock(spec=Database)
         mock_tq = AsyncMock(spec=TaskQueue)
+        mock_sm = AsyncMock(spec=StageManager)
         mock_registry = MagicMock()
         executor = PipelineExecutor.__new__(PipelineExecutor)
         executor._db = mock_db
         executor._tq = mock_tq
+        executor._sm = mock_sm
         executor._registry = mock_registry
         executor._pipelines = []
         executor._execution_order = {}
@@ -291,12 +294,12 @@ class TestCompletedStageGuard:
         executor = self._make_executor()
 
         # Mock get_latest_stage_run returning a completed stage
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 42, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
         # Mock get_stage_structured_output returning existing output
-        executor._tq.get_stage_structured_output = AsyncMock(return_value={
+        executor._sm.get_stage_structured_output = AsyncMock(return_value={
             "summary": "Already implemented", "files_changed": ["a.py"],
         })
 
@@ -308,7 +311,7 @@ class TestCompletedStageGuard:
         assert stage_id == 42
         assert output["summary"] == "Already implemented"
         # Must NOT have called record_stage_executing
-        executor._tq.record_stage_executing.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
         # Must NOT have called the agent
         executor._registry.increment_agent_instances.assert_not_called()
 
@@ -317,11 +320,11 @@ class TestCompletedStageGuard:
         """Completed stage with no stored output returns empty dict."""
         executor = self._make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 99, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value=None)
+        executor._sm.get_stage_structured_output = AsyncMock(return_value=None)
 
         output, stage_id = await executor._execute_planned_stage(
             "task-1", 2, "review", "review-agent",
@@ -330,19 +333,19 @@ class TestCompletedStageGuard:
 
         assert stage_id == 99
         assert output == {}
-        executor._tq.record_stage_executing.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_failed_stage_still_creates_rerun(self) -> None:
         """A failed stage still creates a retry run (existing behavior preserved)."""
         executor = self._make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 50, "status": "failed", "run": 1,
             "error_message": "boom", "session_id": "sess-1",
         })
-        executor._tq.create_rerun_stage = AsyncMock(return_value=60)
-        executor._tq.record_stage_executing = AsyncMock()
+        executor._sm.create_rerun_stage = AsyncMock(return_value=60)
+        executor._sm.record_stage_executing = AsyncMock()
         executor._registry.increment_agent_instances = AsyncMock()
         executor._registry.decrement_agent_instances = AsyncMock()
 
@@ -350,7 +353,7 @@ class TestCompletedStageGuard:
         executor._execute_agent = AsyncMock(return_value={
             "_subtype": "success", "_is_error": False,
         })
-        executor._tq.store_stage_output = AsyncMock()
+        executor._sm.store_stage_output = AsyncMock()
 
         output, stage_id = await executor._execute_planned_stage(
             "task-1", 0, "analyze", "analyze-agent",
@@ -358,28 +361,28 @@ class TestCompletedStageGuard:
         )
 
         # create_rerun_stage should have been called with run=2
-        executor._tq.create_rerun_stage.assert_called_once()
-        call_kwargs = executor._tq.create_rerun_stage.call_args
+        executor._sm.create_rerun_stage.assert_called_once()
+        call_kwargs = executor._sm.create_rerun_stage.call_args
         assert call_kwargs[0][6] == 2  # run=2
         # record_stage_executing should be called (not blocked)
-        executor._tq.record_stage_executing.assert_called_once()
+        executor._sm.record_stage_executing.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_pending_stage_uses_existing_row(self) -> None:
         """A pending stage reuses the existing row (existing behavior preserved)."""
         executor = self._make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 70, "status": "pending", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.record_stage_executing = AsyncMock()
+        executor._sm.record_stage_executing = AsyncMock()
         executor._registry.increment_agent_instances = AsyncMock()
         executor._registry.decrement_agent_instances = AsyncMock()
         executor._execute_agent = AsyncMock(return_value={
             "_subtype": "success", "_is_error": False,
         })
-        executor._tq.store_stage_output = AsyncMock()
+        executor._sm.store_stage_output = AsyncMock()
 
         output, stage_id = await executor._execute_planned_stage(
             "task-1", 0, "analyze", "analyze-agent",
@@ -387,6 +390,6 @@ class TestCompletedStageGuard:
         )
 
         # record_stage_executing should be called with the pending row's id
-        executor._tq.record_stage_executing.assert_called_once()
-        call_kwargs = executor._tq.record_stage_executing.call_args
+        executor._sm.record_stage_executing.assert_called_once()
+        call_kwargs = executor._sm.record_stage_executing.call_args
         assert call_kwargs[1].get("stage_id") or call_kwargs[0][4] is not None

@@ -457,6 +457,8 @@ class TestParallelExecutionOrder:
             new_callable=AsyncMock,
             return_value=ClaudeOutput(structured={"ok": True}, raw="{}"),
         ), patch("aquarco_supervisor.pipeline.executor.Path"), patch(
+            "aquarco_supervisor.pipeline.stage_runner.Path",
+        ), patch(
             "aquarco_supervisor.pipeline.executor._run_git",
             new_callable=AsyncMock,
             return_value="",

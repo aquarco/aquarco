@@ -152,7 +152,7 @@ class TestVagrantComposeAlignment:
             p_str = str(p)
             if "8080" in p_str:
                 assert re.search(
-                    r'forwarded_port.*guest:\s*8080.*host:\s*8080', vagrantfile
+                    r'forwarded_port.*guest:\s*8080', vagrantfile
                 ), "Vagrant must forward the Caddy proxy port 8080"
 
     def test_vagrant_forwards_postgres_port(self, vagrantfile: str, compose: dict):

@@ -25,6 +25,8 @@ TEMPLATE_COMPOSE = ROOT / "supervisor" / "templates" / "docker-compose.repo.yml.
 # After consolidation there is a single canonical migration.
 EXPECTED_MIGRATIONS = [
     "000_consolidated_init",
+    "001_add_git_flow_config",
+    "002_drop_pipeline_trigger_config",
 ]
 
 

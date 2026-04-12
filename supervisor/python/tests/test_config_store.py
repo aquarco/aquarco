@@ -98,7 +98,6 @@ def _make_pipeline_doc(
             {
                 "name": "test-pipeline",
                 "version": "1.0.0",
-                "trigger": {"labels": ["test"]},
                 "stages": [{"name": "analysis", "category": "analyze", "required": True}],
             },
         ]
@@ -192,7 +191,7 @@ class TestValidatePipelineDefinition:
         doc = _make_pipeline_doc([{
             "name": "bad-pipeline",
             "version": "1.0.0",
-            "trigger": {"labels": ["x"]},
+
             "stages": [{"category": "nope"}],
         }])
         with pytest.raises(Exception):
@@ -202,7 +201,7 @@ class TestValidatePipelineDefinition:
         doc = _make_pipeline_doc([{
             "name": "cond-pipeline",
             "version": "1.0.0",
-            "trigger": {"labels": ["feature"]},
+
             "stages": [
                 {"name": "analysis", "category": "analyze", "required": True},
                 {
@@ -221,7 +220,7 @@ class TestValidatePipelineDefinition:
         doc = _make_pipeline_doc([{
             "name": "event-pipeline",
             "version": "1.0.0",
-            "trigger": {"events": ["pr_opened"]},
+
             "stages": [{"name": "review", "category": "review"}],
         }])
         validate_pipeline_definition(doc, _pipeline_schema())
@@ -229,7 +228,7 @@ class TestValidatePipelineDefinition:
     def test_missing_version(self) -> None:
         doc = _make_pipeline_doc([{
             "name": "no-ver",
-            "trigger": {"labels": ["x"]},
+
             "stages": [{"category": "analyze"}],
         }])
         with pytest.raises(Exception):
@@ -239,7 +238,7 @@ class TestValidatePipelineDefinition:
         doc = _make_pipeline_doc([{
             "name": "bad-ver",
             "version": "not-semver",
-            "trigger": {"labels": ["x"]},
+
             "stages": [{"category": "analyze"}],
         }])
         with pytest.raises(Exception):
@@ -348,13 +347,13 @@ class TestLoadPipelineDefinitionsFromFile:
             {
                 "name": "pipe-a",
                 "version": "1.0.0",
-                "trigger": {"labels": ["a"]},
+    
                 "stages": [{"category": "analyze"}],
             },
             {
                 "name": "pipe-b",
                 "version": "2.0.0",
-                "trigger": {"events": ["pr_opened"]},
+    
                 "stages": [{"category": "review"}],
             },
         ]
@@ -451,7 +450,7 @@ class TestStorePipelineDefinitions:
         pipelines = [{
             "name": "my-pipeline",
             "version": "1.0.0",
-            "trigger": {"labels": ["bug"]},
+
             "stages": [{"category": "analyze", "required": True}],
         }]
         count = await store_pipeline_definitions(mock_db, pipelines)
@@ -463,21 +462,21 @@ class TestStorePipelineDefinitions:
         params = upsert_call[0][1]
         assert params["name"] == "my-pipeline"
         assert params["version"] == "1.0.0"
-        assert json.loads(params["trigger_config"]) == {"labels": ["bug"]}
+        assert "trigger_config" not in params
         assert json.loads(params["stages"]) == [{"category": "analyze", "required": True}]
 
     @pytest.mark.asyncio
     async def test_stores_multiple(self, mock_db: AsyncMock) -> None:
         pipelines = [
-            {"name": "p1", "version": "1.0.0", "trigger": {}, "stages": [{"category": "test"}]},
-            {"name": "p2", "version": "1.0.0", "trigger": {}, "stages": [{"category": "review"}]},
+            {"name": "p1", "version": "1.0.0", "stages": [{"category": "test"}]},
+            {"name": "p2", "version": "1.0.0", "stages": [{"category": "review"}]},
         ]
         count = await store_pipeline_definitions(mock_db, pipelines)
         assert count == 2
 
     @pytest.mark.asyncio
     async def test_skips_missing_name(self, mock_db: AsyncMock) -> None:
-        pipelines = [{"name": "", "version": "1.0.0", "trigger": {}, "stages": []}]
+        pipelines = [{"name": "", "version": "1.0.0", "stages": []}]
         count = await store_pipeline_definitions(mock_db, pipelines)
         assert count == 0
 
@@ -486,7 +485,7 @@ class TestStorePipelineDefinitions:
         pipelines = [{
             "name": "my-pipe",
             "version": "2.0.0",
-            "trigger": {"labels": ["x"]},
+
             "stages": [{"category": "analyze"}],
         }]
         await store_pipeline_definitions(mock_db, pipelines)
@@ -502,7 +501,7 @@ class TestStorePipelineDefinitions:
     @pytest.mark.asyncio
     async def test_default_version(self, mock_db: AsyncMock) -> None:
         """Pipeline without version gets default 0.0.0."""
-        pipelines = [{"name": "no-ver", "trigger": {}, "stages": [{"category": "test"}]}]
+        pipelines = [{"name": "no-ver", "stages": [{"category": "test"}]}]
         await store_pipeline_definitions(mock_db, pipelines)
 
         upsert_call = mock_db.execute.call_args_list[1]
@@ -693,7 +692,7 @@ class TestReadPipelineDefinitionsFromDb:
             {
                 "name": "feature-pipeline",
                 "version": "1.0.0",
-                "trigger_config": {"labels": ["feature"]},
+
                 "stages": [{"category": "analyze", "required": True}],
                 "is_active": True,
             },
@@ -702,7 +701,7 @@ class TestReadPipelineDefinitionsFromDb:
         assert len(pipelines) == 1
         assert pipelines[0]["name"] == "feature-pipeline"
         assert pipelines[0]["version"] == "1.0.0"
-        assert pipelines[0]["trigger"] == {"labels": ["feature"]}
+        assert "trigger" not in pipelines[0]
         assert pipelines[0]["stages"] == [{"category": "analyze", "required": True}]
 
     @pytest.mark.asyncio
@@ -830,7 +829,7 @@ class TestExportPipelineDefinitionsToFile:
             {
                 "name": "test-pipeline",
                 "version": "1.0.0",
-                "trigger_config": {"labels": ["test"]},
+
                 "stages": [{"category": "analyze", "required": True}],
                 "is_active": True,
             },
@@ -864,7 +863,7 @@ class TestExportPipelineDefinitionsToFile:
             {
                 "name": "bad-pipeline",
                 "version": "1.0.0",
-                "trigger_config": {"labels": ["x"]},
+
                 "stages": [{"category": "bogus_category"}],
                 "is_active": True,
             },
@@ -883,7 +882,7 @@ class TestExportPipelineDefinitionsToFile:
             {
                 "name": "ok-pipeline",
                 "version": "1.0.0",
-                "trigger_config": {"labels": ["feature"]},
+
                 "stages": [{"name": "analysis", "category": "analyze", "required": True}],
                 "categories": {},
                 "is_active": True,
@@ -904,7 +903,7 @@ class TestExportPipelineDefinitionsToFile:
             {
                 "name": "p",
                 "version": "1.0.0",
-                "trigger_config": {"labels": ["x"]},
+
                 "stages": [{"category": "analyze"}],
                 "is_active": True,
             },
@@ -971,7 +970,6 @@ class TestRoundTrip:
             {
                 "name": "rt-pipeline",
                 "version": "1.2.3",
-                "trigger": {"labels": ["feature"], "events": ["pr_opened"]},
                 "stages": [
                     {"category": "analyze", "required": True},
                     {"category": "implement", "required": True},
@@ -988,7 +986,7 @@ class TestRoundTrip:
             {
                 "name": loaded[0]["name"],
                 "version": loaded[0]["version"],
-                "trigger_config": loaded[0]["trigger"],
+
                 "stages": loaded[0]["stages"],
                 "is_active": True,
             },
@@ -1002,7 +1000,7 @@ class TestRoundTrip:
         exported_p = exported["pipelines"][0]
         assert exported_p["name"] == "rt-pipeline"
         assert exported_p["version"] == "1.2.3"
-        assert exported_p["trigger"] == {"labels": ["feature"], "events": ["pr_opened"]}
+        assert "trigger" not in exported_p
         assert len(exported_p["stages"]) == 2
 
 
@@ -1042,7 +1040,7 @@ class TestVersioning:
         pipelines = [{
             "name": "my-pipe",
             "version": "1.0.0",
-            "trigger": {"labels": ["bug"]},
+
             "stages": [{"category": "analyze"}],
         }]
         await store_pipeline_definitions(mock_db, pipelines)
@@ -1057,7 +1055,7 @@ class TestVersioning:
         pipelines = [{
             "name": "my-pipe",
             "version": "2.0.0",
-            "trigger": {"labels": ["bug"]},
+
             "stages": [{"category": "analyze"}],
         }]
         await store_pipeline_definitions(mock_db, pipelines)

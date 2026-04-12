@@ -176,7 +176,7 @@ class TestResolveBranchInfo:
             ["hotfix"],
         )
         assert isinstance(result, str)
-        assert "target:" in result.lower()
+        assert "base:" in result.lower()
 
     def test_target_override_on_feature(self):
         result = resolve_branch_info(

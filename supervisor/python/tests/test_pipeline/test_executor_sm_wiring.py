@@ -41,7 +41,7 @@ def sample_pipelines() -> list[PipelineConfig]:
         PipelineConfig(
             name="test-pipeline",
             version="1.0.0",
-            trigger={"labels": ["test"]},
+
             stages=[{"name": "analyze", "category": "analyze", "required": True}],
         )
     ]

@@ -5,7 +5,6 @@ from __future__ import annotations
 from aquarco_supervisor.models import (
     Complexity,
     PipelineConfig,
-    PipelineTrigger,
     StageConfig,
     Task,
     TaskStatus,
@@ -89,7 +88,7 @@ def test_pipeline_config_categories() -> None:
     }
     pipeline = PipelineConfig(
         name="test-pipeline",
-        trigger=PipelineTrigger(labels=["test"]),
+
         stages=[StageConfig(name="s1", category="analyze")],
         categories=categories,
     )
@@ -100,7 +99,7 @@ def test_pipeline_config_categories() -> None:
 def test_pipeline_config_categories_default() -> None:
     pipeline = PipelineConfig(
         name="test-pipeline",
-        trigger=PipelineTrigger(labels=["test"]),
+
         stages=[StageConfig(name="s1", category="analyze")],
     )
     assert pipeline.categories == {}

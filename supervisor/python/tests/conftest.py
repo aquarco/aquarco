@@ -93,7 +93,6 @@ def sample_config_path(tmp_path: Path) -> Path:
             {
                 "name": "feature-pipeline",
                 "version": "1.0.0",
-                "trigger": {"labels": ["feature", "enhancement"]},
                 "stages": [
                     {"name": "analysis", "category": "analyze", "required": True},
                     {
@@ -109,7 +108,6 @@ def sample_config_path(tmp_path: Path) -> Path:
             {
                 "name": "bugfix-pipeline",
                 "version": "1.0.0",
-                "trigger": {"labels": ["bug"]},
                 "stages": [
                     {"name": "analysis", "category": "analyze", "required": True},
                     {"name": "implementation", "category": "implement", "required": True},

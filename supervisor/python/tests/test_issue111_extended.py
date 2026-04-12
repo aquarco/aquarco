@@ -24,6 +24,7 @@ import pytest
 
 from aquarco_supervisor.database import Database
 from aquarco_supervisor.pipeline.executor import PipelineExecutor
+from aquarco_supervisor.stage_manager import StageManager
 from aquarco_supervisor.task_queue import TaskQueue
 
 
@@ -36,10 +37,12 @@ def _make_executor() -> PipelineExecutor:
     """Create a PipelineExecutor with mocked dependencies."""
     mock_db = AsyncMock(spec=Database)
     mock_tq = AsyncMock(spec=TaskQueue)
+    mock_sm = AsyncMock(spec=StageManager)
     mock_registry = MagicMock()
     executor = PipelineExecutor.__new__(PipelineExecutor)
     executor._db = mock_db
     executor._tq = mock_tq
+    executor._sm = mock_sm
     executor._registry = mock_registry
     executor._pipelines = []
     executor._execution_order = {}
@@ -75,11 +78,11 @@ class TestParallelExecutionCompletedGuard:
         executor = _make_executor()
 
         # Setup: stage already completed at iteration=1
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 500, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value={
+        executor._sm.get_stage_structured_output = AsyncMock(return_value={
             "summary": "parallel agent done",
             "files_changed": ["x.py"],
         })
@@ -94,7 +97,7 @@ class TestParallelExecutionCompletedGuard:
 
         assert stage_id == 500
         assert output["summary"] == "parallel agent done"
-        executor._tq.record_stage_executing.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
         executor._registry.increment_agent_instances.assert_not_called()
 
     @pytest.mark.asyncio
@@ -110,11 +113,11 @@ class TestParallelExecutionCompletedGuard:
 
         # Stage was completed at iteration=1, run=1
         completed_output = {"_subtype": "success", "from": "iteration-1"}
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 510, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(
+        executor._sm.get_stage_structured_output = AsyncMock(
             return_value=completed_output,
         )
 
@@ -128,7 +131,7 @@ class TestParallelExecutionCompletedGuard:
         assert output == completed_output
         assert sid == 510
         # But this masks the fact that this should have been iteration=2
-        executor._tq.record_stage_executing.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
 
 
 # ===========================================================================
@@ -149,11 +152,11 @@ class TestGuardErrorResilience:
         propagates (the guard does not swallow it)."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 600, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(
+        executor._sm.get_stage_structured_output = AsyncMock(
             side_effect=Exception("DB connection lost"),
         )
 
@@ -163,7 +166,7 @@ class TestGuardErrorResilience:
             )
 
         # Critical: even though get_output failed, the agent was never called
-        executor._tq.record_stage_executing.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
         executor._registry.increment_agent_instances.assert_not_called()
 
     @pytest.mark.asyncio
@@ -171,7 +174,7 @@ class TestGuardErrorResilience:
         """If get_latest_stage_run raises, the error propagates naturally."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(
+        executor._sm.get_latest_stage_run = AsyncMock(
             side_effect=Exception("Connection timeout"),
         )
 
@@ -180,7 +183,7 @@ class TestGuardErrorResilience:
                 "task-err2", 0, "analyze", "agent", {}, iteration=1,
             )
 
-        executor._tq.record_stage_executing.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
 
 
 # ===========================================================================
@@ -262,11 +265,11 @@ class TestMultipleRunsCompletedGuard:
         executor = _make_executor()
 
         # Latest run is completed at run=2
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 700, "status": "completed", "run": 2,
             "error_message": None, "session_id": "sess-run2",
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value={
+        executor._sm.get_stage_structured_output = AsyncMock(return_value={
             "summary": "succeeded on retry",
         })
 
@@ -277,19 +280,19 @@ class TestMultipleRunsCompletedGuard:
 
         assert stage_id == 700
         assert output["summary"] == "succeeded on retry"
-        executor._tq.record_stage_executing.assert_not_called()
-        executor._tq.create_rerun_stage.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
+        executor._sm.create_rerun_stage.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_completed_at_high_run_number_still_blocked(self) -> None:
         """Guard fires for stages completed at run=10 (many retries)."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 710, "status": "completed", "run": 10,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value={
+        executor._sm.get_stage_structured_output = AsyncMock(return_value={
             "after_many_retries": True,
         })
 
@@ -300,7 +303,7 @@ class TestMultipleRunsCompletedGuard:
 
         assert stage_id == 710
         assert output["after_many_retries"] is True
-        executor._tq.record_stage_executing.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
 
 
 # ===========================================================================
@@ -385,8 +388,8 @@ class TestConcurrentGuardInvocation:
                 "error_message": None, "session_id": None,
             }
 
-        executor._tq.get_latest_stage_run = AsyncMock(side_effect=mock_get_latest)
-        executor._tq.get_stage_structured_output = AsyncMock(
+        executor._sm.get_latest_stage_run = AsyncMock(side_effect=mock_get_latest)
+        executor._sm.get_stage_structured_output = AsyncMock(
             return_value=cached_output,
         )
 
@@ -408,7 +411,7 @@ class TestConcurrentGuardInvocation:
             assert output == cached_output
 
         # Agent never called (both hit the guard)
-        executor._tq.record_stage_executing.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
         executor._registry.increment_agent_instances.assert_not_called()
 
         # get_latest_stage_run was called twice (once per coroutine)
@@ -434,11 +437,11 @@ class TestGuardWithFalsyOutput:
         `existing or {}` returns {} (same as empty dict)."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 900, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value={})
+        executor._sm.get_stage_structured_output = AsyncMock(return_value={})
 
         output, sid = await executor._execute_planned_stage(
             "task-empty-output", 0, "analyze", "agent", {}, iteration=1,
@@ -446,18 +449,18 @@ class TestGuardWithFalsyOutput:
 
         assert output == {}
         assert sid == 900
-        executor._tq.record_stage_executing.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_guard_with_none_returns_empty_dict(self) -> None:
         """None from get_stage_structured_output returns {} via fallback."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 910, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value=None)
+        executor._sm.get_stage_structured_output = AsyncMock(return_value=None)
 
         output, sid = await executor._execute_planned_stage(
             "task-none-output", 0, "analyze", "agent", {}, iteration=1,
@@ -472,11 +475,11 @@ class TestGuardWithFalsyOutput:
         executor = _make_executor()
 
         expected = {"key": "value", "nested": {"a": 1}}
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 920, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(
+        executor._sm.get_stage_structured_output = AsyncMock(
             return_value=expected,
         )
 
@@ -493,11 +496,11 @@ class TestGuardWithFalsyOutput:
         executor = _make_executor()
 
         expected = {"count": 0, "enabled": False, "name": ""}
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 930, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(
+        executor._sm.get_stage_structured_output = AsyncMock(
             return_value=expected,
         )
 
@@ -529,11 +532,11 @@ class TestStageKeyConstruction:
         """The stage_key passed to get_latest_stage_run matches the format."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 1000, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value={"ok": True})
+        executor._sm.get_stage_structured_output = AsyncMock(return_value={"ok": True})
 
         await executor._execute_planned_stage(
             "task-key", 3, "implement", "implementation-agent",
@@ -541,7 +544,7 @@ class TestStageKeyConstruction:
         )
 
         # Verify get_latest_stage_run was called with correct stage_key
-        call_args = executor._tq.get_latest_stage_run.call_args
+        call_args = executor._sm.get_latest_stage_run.call_args
         assert call_args[0][0] == "task-key"
         assert call_args[0][1] == "3:implement:implementation-agent"
         assert call_args[0][2] == 2  # iteration
@@ -551,18 +554,18 @@ class TestStageKeyConstruction:
         """Agent names with hyphens and dots produce valid stage keys."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 1010, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value={"ok": True})
+        executor._sm.get_stage_structured_output = AsyncMock(return_value={"ok": True})
 
         await executor._execute_planned_stage(
             "task-1", 0, "analyze", "analyze-agent-v2.1",
             {}, iteration=1,
         )
 
-        stage_key = executor._tq.get_latest_stage_run.call_args[0][1]
+        stage_key = executor._sm.get_latest_stage_run.call_args[0][1]
         assert stage_key == "0:analyze:analyze-agent-v2.1"
 
 
@@ -585,11 +588,11 @@ class TestGuardExecutionOrderTracking:
         executor = _make_executor()
         executor._execution_order = {"task-eo": 5}
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 1100, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value={"done": True})
+        executor._sm.get_stage_structured_output = AsyncMock(return_value={"done": True})
 
         output, sid = await executor._execute_planned_stage(
             "task-eo", 0, "analyze", "agent",
@@ -597,7 +600,7 @@ class TestGuardExecutionOrderTracking:
         )
 
         # Guard fired: execution_order was never used
-        executor._tq.record_stage_executing.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
         # The _execution_order dict should not have been modified by the guard
         assert executor._execution_order == {"task-eo": 5}
 
@@ -669,11 +672,11 @@ class TestCreateRerunStageNotCalledForCompleted:
         """Guard blocks create_rerun_stage for completed stages at any run."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 1200 + run_number, "status": "completed", "run": run_number,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(
+        executor._sm.get_stage_structured_output = AsyncMock(
             return_value={"run": run_number},
         )
 
@@ -682,8 +685,8 @@ class TestCreateRerunStageNotCalledForCompleted:
             {}, iteration=1,
         )
 
-        executor._tq.create_rerun_stage.assert_not_called()
-        executor._tq.record_stage_executing.assert_not_called()
+        executor._sm.create_rerun_stage.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
         assert output["run"] == run_number
 
 
@@ -712,11 +715,11 @@ class TestGuardWithMissingId:
         executor = _make_executor()
 
         # Row missing the 'id' key (edge case: corrupted driver response)
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value=None)
+        executor._sm.get_stage_structured_output = AsyncMock(return_value=None)
 
         with pytest.raises(KeyError, match="id"):
             await executor._execute_planned_stage(
@@ -724,7 +727,7 @@ class TestGuardWithMissingId:
             )
 
         # Critical: even though it crashed, record_stage_executing was never called
-        executor._tq.record_stage_executing.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
         executor._registry.increment_agent_instances.assert_not_called()
 
     @pytest.mark.asyncio
@@ -732,11 +735,11 @@ class TestGuardWithMissingId:
         """When latest['id'] is explicitly None, guard still fires."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": None, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value={"ok": True})
+        executor._sm.get_stage_structured_output = AsyncMock(return_value={"ok": True})
 
         output, sid = await executor._execute_planned_stage(
             "task-noneid", 0, "analyze", "agent", {}, iteration=1,
@@ -744,7 +747,7 @@ class TestGuardWithMissingId:
 
         assert sid is None
         assert output == {"ok": True}
-        executor._tq.record_stage_executing.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
 
 
 # ===========================================================================
@@ -765,51 +768,51 @@ class TestAllStatusTransitionsVsGuard:
         """failed and rate_limited create a rerun stage."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 1300, "status": status, "run": 1,
             "error_message": "some error", "session_id": "sess-1",
         })
-        executor._tq.create_rerun_stage = AsyncMock(return_value=1301)
-        executor._tq.record_stage_executing = AsyncMock()
+        executor._sm.create_rerun_stage = AsyncMock(return_value=1301)
+        executor._sm.record_stage_executing = AsyncMock()
         executor._registry.increment_agent_instances = AsyncMock()
         executor._registry.decrement_agent_instances = AsyncMock()
         executor._execute_agent = AsyncMock(return_value={
             "_subtype": "success", "_is_error": False,
         })
-        executor._tq.store_stage_output = AsyncMock()
+        executor._sm.store_stage_output = AsyncMock()
 
         output, sid = await executor._execute_planned_stage(
             f"task-{status}", 0, "analyze", "agent",
             {}, iteration=1,
         )
 
-        executor._tq.create_rerun_stage.assert_called_once()
-        executor._tq.record_stage_executing.assert_called_once()
+        executor._sm.create_rerun_stage.assert_called_once()
+        executor._sm.record_stage_executing.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_pending_status_reuses_existing_row(self) -> None:
         """pending status reuses the existing row (run unchanged)."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 1310, "status": "pending", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.record_stage_executing = AsyncMock()
+        executor._sm.record_stage_executing = AsyncMock()
         executor._registry.increment_agent_instances = AsyncMock()
         executor._registry.decrement_agent_instances = AsyncMock()
         executor._execute_agent = AsyncMock(return_value={
             "_subtype": "success", "_is_error": False,
         })
-        executor._tq.store_stage_output = AsyncMock()
+        executor._sm.store_stage_output = AsyncMock()
 
         output, sid = await executor._execute_planned_stage(
             "task-pending", 0, "analyze", "agent",
             {}, iteration=1, stage_id=1310,
         )
 
-        executor._tq.create_rerun_stage.assert_not_called()
-        executor._tq.record_stage_executing.assert_called_once()
+        executor._sm.create_rerun_stage.assert_not_called()
+        executor._sm.record_stage_executing.assert_called_once()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("status", ["executing", "max_turns"])
@@ -817,17 +820,17 @@ class TestAllStatusTransitionsVsGuard:
         """executing and max_turns fall through to the default run=1 path."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 1320, "status": status, "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.record_stage_executing = AsyncMock()
+        executor._sm.record_stage_executing = AsyncMock()
         executor._registry.increment_agent_instances = AsyncMock()
         executor._registry.decrement_agent_instances = AsyncMock()
         executor._execute_agent = AsyncMock(return_value={
             "_subtype": "success", "_is_error": False,
         })
-        executor._tq.store_stage_output = AsyncMock()
+        executor._sm.store_stage_output = AsyncMock()
 
         output, sid = await executor._execute_planned_stage(
             f"task-{status}", 0, "analyze", "agent",
@@ -835,20 +838,20 @@ class TestAllStatusTransitionsVsGuard:
         )
 
         # Should NOT call create_rerun_stage (not a retry)
-        executor._tq.create_rerun_stage.assert_not_called()
+        executor._sm.create_rerun_stage.assert_not_called()
         # But should proceed to execute
-        executor._tq.record_stage_executing.assert_called_once()
+        executor._sm.record_stage_executing.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_completed_is_only_status_that_blocks(self) -> None:
         """Only 'completed' triggers the guard — explicitly verify."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 1330, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value={"blocked": True})
+        executor._sm.get_stage_structured_output = AsyncMock(return_value={"blocked": True})
 
         output, sid = await executor._execute_planned_stage(
             "task-blocked", 0, "analyze", "agent",
@@ -857,8 +860,8 @@ class TestAllStatusTransitionsVsGuard:
 
         # Guard fired
         assert output == {"blocked": True}
-        executor._tq.record_stage_executing.assert_not_called()
-        executor._tq.create_rerun_stage.assert_not_called()
+        executor._sm.record_stage_executing.assert_not_called()
+        executor._sm.create_rerun_stage.assert_not_called()
 
 
 # ===========================================================================
@@ -875,11 +878,11 @@ class TestGuardLogMessage:
         """The log message includes a descriptive 'msg' field."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 1400, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value={})
+        executor._sm.get_stage_structured_output = AsyncMock(return_value={})
 
         with patch("aquarco_supervisor.pipeline.executor.log") as mock_log:
             await executor._execute_planned_stage(
@@ -901,11 +904,11 @@ class TestGuardLogMessage:
         """The first positional arg to log.warning is 'completed_stage_guard'."""
         executor = _make_executor()
 
-        executor._tq.get_latest_stage_run = AsyncMock(return_value={
+        executor._sm.get_latest_stage_run = AsyncMock(return_value={
             "id": 1410, "status": "completed", "run": 1,
             "error_message": None, "session_id": None,
         })
-        executor._tq.get_stage_structured_output = AsyncMock(return_value={})
+        executor._sm.get_stage_structured_output = AsyncMock(return_value={})
 
         with patch("aquarco_supervisor.pipeline.executor.log") as mock_log:
             await executor._execute_planned_stage(

@@ -43,10 +43,20 @@ def test_select_pipeline(
     db = AsyncMock(spec=Database)
     poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
 
+    # Without repo rules all labels fall back to the default pipeline
     assert poller._select_pipeline(["feature"]) == "feature-pipeline"
-    assert poller._select_pipeline(["enhancement"]) == "feature-pipeline"
-    assert poller._select_pipeline(["bug"]) == "bugfix-pipeline"
+    assert poller._select_pipeline(["bug"]) == "feature-pipeline"
     assert poller._select_pipeline(["unrelated"]) == "feature-pipeline"
+
+    # With repo rules the matching rule's pipeline is returned
+    repo_rules = {
+        "feature": {"issueLabels": ["feature", "enhancement"], "baseBranch": "development", "pipeline": "feature-pipeline"},
+        "bugfix":  {"issueLabels": ["bug"],                    "baseBranch": "release",     "pipeline": "bugfix-pipeline"},
+    }
+    assert poller._select_pipeline(["feature"],    repo_rules) == "feature-pipeline"
+    assert poller._select_pipeline(["enhancement"],repo_rules) == "feature-pipeline"
+    assert poller._select_pipeline(["bug"],        repo_rules) == "bugfix-pipeline"
+    assert poller._select_pipeline(["unrelated"],  repo_rules) == "feature-pipeline"
 
 
 @pytest.mark.asyncio
@@ -66,7 +76,17 @@ async def test_process_issue_creates_task(
         "url": "https://github.com/owner/repo/issues/42",
         "labels": [{"name": "bug"}],
     }
-    result = await poller._process_issue(issue, "my-repo", "owner/repo")
+    repo = {
+        **SAMPLE_REPO,
+        "git_flow_config": {
+            "enabled": True,
+            "branches": {},
+            "rules": {
+                "bugfix": {"issueLabels": ["bug"], "baseBranch": "release", "pipeline": "bugfix-pipeline"},
+            },
+        },
+    }
+    result = await poller._process_issue(issue, "my-repo", "owner/repo", repo)
     assert result is True
     tq.create_task.assert_called_once()
     call_kwargs = tq.create_task.call_args[1]

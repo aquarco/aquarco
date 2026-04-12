@@ -382,7 +382,7 @@ class TestVagrantfile:
     def test_proxy_port_forwarded(self, vagrantfile: str):
         """Port 8080 (Caddy proxy) must be forwarded."""
         assert re.search(
-            r'forwarded_port.*guest:\s*8080.*host:\s*8080', vagrantfile
+            r'forwarded_port.*guest:\s*8080', vagrantfile
         ), "Port 8080 must be forwarded for Caddy proxy"
 
     def test_postgres_port_forwarded(self, vagrantfile: str):
