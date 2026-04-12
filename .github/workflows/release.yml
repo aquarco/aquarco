@@ -58,9 +58,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── 2. Create GitHub release and publish Homebrew formula ────────────────────
-  homebrew:
-    name: Publish Homebrew formula
+  # ── 2. Create GitHub release ──────────────────────────────────────────────────
+  create-release:
+    name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: docker
     permissions:
@@ -77,28 +77,112 @@ jobs:
             --notes "Release ${{ github.ref_name }}" \
             --verify-tag
 
-      - name: Compute SHA256 of release tarball
+  # ── 3. Build macOS CLI binary and upload to release ───────────────────────────
+  build-cli:
+    name: Build macOS CLI binary
+    runs-on: macos-14
+    needs: create-release
+    permissions:
+      contents: write
+    outputs:
+      sha256: ${{ steps.sha256.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PyInstaller and CLI
+        run: pip install pyinstaller cli/
+
+      - name: Patch build type to production
+        run: |
+          sed -i '' \
+            's/BUILD_TYPE: str = "development"/BUILD_TYPE: str = "production"/' \
+            cli/src/aquarco_cli/_build.py
+
+      - name: Build standalone binary
+        run: |
+          pyinstaller \
+            --onefile \
+            --name aquarco-bin \
+            cli/src/aquarco_cli/main.py
+
+      - name: Assemble release tarball
+        run: |
+          STAGING="aquarco-staging"
+          mkdir -p "$STAGING"
+
+          # Standalone binary
+          cp dist/aquarco-bin "$STAGING/"
+          chmod +x "$STAGING/aquarco-bin"
+
+          # Wrapper script — resolves symlinks so env vars point to the right dir
+          cat > "$STAGING/aquarco" << 'WRAPPER'
+          #!/bin/bash
+          SOURCE="${BASH_SOURCE[0]}"
+          while [ -L "$SOURCE" ]; do
+            DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+            SOURCE="$(readlink "$SOURCE")"
+            [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+          done
+          SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+          export AQUARCO_VAGRANT_DIR="$SCRIPT_DIR/vagrant"
+          export AQUARCO_DOCKER_MODE="production"
+          exec "$SCRIPT_DIR/aquarco-bin" "$@"
+          WRAPPER
+          chmod +x "$STAGING/aquarco"
+
+          # Source tree needed by the VM via vboxsf synced folder
+          cp -r vagrant docker config db supervisor "$STAGING/"
+          mkdir -p "$STAGING/logs"
+
+          # Pack — flat layout so `binary "aquarco"` resolves at the top level
+          (cd "$STAGING" && tar -czf ../aquarco-macos-arm64.tar.gz *)
+
+      - name: Upload tarball to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" aquarco-macos-arm64.tar.gz
+
+      - name: Compute SHA256
         id: sha256
         run: |
-          URL="https://github.com/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.tar.gz"
-          SHA=$(curl -sL "$URL" | shasum -a 256 | awk '{print $1}')
+          SHA=$(shasum -a 256 aquarco-macos-arm64.tar.gz | awk '{print $1}')
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Stamp SHA256 in formula
+  # ── 4. Publish Homebrew cask to tap ──────────────────────────────────────────
+  homebrew:
+    name: Publish Homebrew cask
+    runs-on: ubuntu-latest
+    needs: build-cli
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stamp tag and SHA256 in cask
         run: |
-          sed -i 's|sha256 "PLACEHOLDER_SHA256"|sha256 "${{ steps.sha256.outputs.sha256 }}"|' homebrew/aquarco.rb
+          sed -i \
+            -e 's|PLACEHOLDER_TAG|${{ github.ref_name }}|' \
+            -e 's|sha256 "PLACEHOLDER_SHA256"|sha256 "${{ needs.build-cli.outputs.sha256 }}"|' \
+            homebrew/aquarco.rb
 
-      - name: Push formula to homebrew tap
+      - name: Push cask to homebrew tap
         env:
           TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
         run: |
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/aquarco/homebrew-tap.git" /tmp/tap
-          mkdir -p /tmp/tap/Formula
-          cp homebrew/aquarco.rb /tmp/tap/Formula/aquarco.rb
+          mkdir -p /tmp/tap/Casks
+          cp homebrew/aquarco.rb /tmp/tap/Casks/aquarco.rb
           cd /tmp/tap
           git config user.email "github-actions@github.com"
           git config user.name "github-actions[bot]"
-          git add Formula/aquarco.rb
+          # Remove old formula if it exists
+          git rm --ignore-unmatch Formula/aquarco.rb
+          git add Casks/aquarco.rb
           git commit -m "Update aquarco to ${{ github.ref_name }}"
           git push
