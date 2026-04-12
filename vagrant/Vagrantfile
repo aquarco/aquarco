@@ -6,6 +6,20 @@ Vagrant.configure("2") do |config|
   config.vm.box = "bento/ubuntu-24.04"  # Ubuntu 24.04 LTS
   config.vm.hostname = "aquarco"
 
+  # Disable the default /vagrant sync — no host↔VM file sharing
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  # -------------------------------------------------------------------------
+  # Dev mode — set AQUARCO_DEV=1 (or use: aquarco init --dev)
+  # -------------------------------------------------------------------------
+  if ENV['AQUARCO_DEV'] == '1'
+    config.vm.synced_folder "..", "/home/agent/aquarco", type: "virtualbox"
+    config.vm.synced_folder "../logs", "/var/log/aquarco-export",
+      type: "virtualbox",
+      create: true,
+      mount_options: ["dmode=755", "fmode=644"]
+  end
+
   # VirtualBox provider settings
   config.vm.provider "virtualbox" do |vb|
     vb.name = "aquarco"
@@ -49,18 +63,6 @@ Vagrant.configure("2") do |config|
   #config.vm.network "forwarded_port", guest: 3004, host: 3004, id: "repo4-fe"
   #config.vm.network "forwarded_port", guest: 4004, host: 4004, id: "repo4-api"
   #config.vm.network "forwarded_port", guest: 5436, host: 5436, id: "repo4-pg"
-
-  # -------------------------------------------------------------------------
-  # Synced folders
-  # -------------------------------------------------------------------------
-  # Mount the aquarco repo into the VM so agents work on live source
-  config.vm.synced_folder "..", "/home/agent/aquarco", type: "virtualbox"
-
-  # Export logs to host for observability without SSH
-  config.vm.synced_folder "../logs", "/var/log/aquarco-export",
-    type: "virtualbox",
-    create: true,
-    mount_options: ["dmode=755", "fmode=644"]
 
   # -------------------------------------------------------------------------
   # Provisioning

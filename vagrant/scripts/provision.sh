@@ -16,6 +16,9 @@ DATA_DIR="/var/lib/aquarco"
 AGENT_USER="agent"
 AGENT_HOME="/home/${AGENT_USER}"
 
+# Dev mode: set AQUARCO_DEV=1 to mount sources and use editable installs
+DEV_MODE="${AQUARCO_DEV:-0}"
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 log() {
@@ -134,11 +137,16 @@ fi
 
 if ! id "${AGENT_USER}" &>/dev/null; then
   log "Creating agent user..."
-  useradd -m -s /bin/bash -G docker,vboxsf "${AGENT_USER}"
+  useradd -m -s /bin/bash -G docker "${AGENT_USER}"
+  if [[ "${DEV_MODE}" == "1" ]]; then
+    usermod -aG vboxsf "${AGENT_USER}" 2>/dev/null || true
+  fi
 else
   log "User '${AGENT_USER}' already exists"
-  # Ensure group memberships are correct (sudo group not needed — sudoers.d controls access)
-  usermod -aG docker,vboxsf "${AGENT_USER}" 2>/dev/null || true
+  usermod -aG docker "${AGENT_USER}" 2>/dev/null || true
+  if [[ "${DEV_MODE}" == "1" ]]; then
+    usermod -aG vboxsf "${AGENT_USER}" 2>/dev/null || true
+  fi
 fi
 
 # Ensure sudoers entry is always up to date (idempotent, covers already-provisioned VMs)
@@ -226,8 +234,11 @@ fi
 # ─── 11. Network tracking ─────────────────────────────────────────────────────
 
 log "Setting up network tracking..."
-# Use the mounted path since Vagrant uploads provisioners to /tmp
-bash "${AGENT_HOME}/aquarco/vagrant/scripts/setup-network-tracking.sh"
+if [[ "${DEV_MODE}" == "1" ]]; then
+  bash "${AGENT_HOME}/aquarco/vagrant/scripts/setup-network-tracking.sh"
+else
+  bash "${SCRIPT_DIR}/setup-network-tracking.sh"
+fi
 
 # ─── 11b. Install Python supervisor package ──────────────────────────────────
 
@@ -236,9 +247,18 @@ apt-get install -y -qq python3-pip python3-venv
 python3 -m venv "${AGENT_HOME}/.venv"
 chown -R "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}/.venv"
 chmod -R u+w "${AGENT_HOME}/.venv/lib/"
-su - "${AGENT_USER}" -c "${AGENT_HOME}/.venv/bin/pip install -e /home/agent/aquarco/supervisor/python/" || {
-  log "WARNING: pip install failed; supervisor CLI may not be available"
-}
+
+if [[ "${DEV_MODE}" == "1" ]]; then
+  log "  [dev] editable install from mounted source..."
+  su - "${AGENT_USER}" -c "${AGENT_HOME}/.venv/bin/pip install -e /home/agent/aquarco/supervisor/python/" || {
+    log "WARNING: pip install failed; supervisor CLI may not be available"
+  }
+else
+  log "  [prod] installing aquarco-supervisor from PyPI..."
+  su - "${AGENT_USER}" -c "${AGENT_HOME}/.venv/bin/pip install aquarco-supervisor" || {
+    log "WARNING: pip install failed; supervisor CLI may not be available"
+  }
+fi
 
 # Lock the supervisor venv so agents cannot accidentally mutate it.
 # NOTE: To upgrade supervisor dependencies, temporarily restore write
@@ -258,31 +278,109 @@ log "Agent venv ready at ${AGENT_HOME}/.agent-venv"
 # ─── 12. Systemd service for supervisor ───────────────────────────────────────
 
 log "Installing aquarco-supervisor (Python) systemd service..."
-SYSTEMD_SRC="${AGENT_HOME}/aquarco/supervisor/systemd/aquarco-supervisor-python.service"
 SYSTEMD_DEST="/etc/systemd/system/aquarco-supervisor-python.service"
 
 # Disable the old bash supervisor service if it exists
 systemctl disable --now aquarco-supervisor.service 2>/dev/null || true
 rm -f /etc/systemd/system/aquarco-supervisor.service
 
-if [[ -f "${SYSTEMD_SRC}" ]]; then
-  cp "${SYSTEMD_SRC}" "${SYSTEMD_DEST}"
+if [[ "${DEV_MODE}" == "1" ]]; then
+  SYSTEMD_SRC="${AGENT_HOME}/aquarco/supervisor/systemd/aquarco-supervisor-python.service"
+  if [[ -f "${SYSTEMD_SRC}" ]]; then
+    cp "${SYSTEMD_SRC}" "${SYSTEMD_DEST}"
+  else
+    log "WARNING: ${SYSTEMD_SRC} not found; skipping service install"
+  fi
+else
+  # Production: write service file inline (config lives at /etc/aquarco/)
+  cat > "${SYSTEMD_DEST}" <<'SVCUNIT'
+[Unit]
+Description=Aquarco Agent Supervisor (Python)
+After=aquarco-stack.service docker.service network.target
+Wants=aquarco-stack.service
+
+[Service]
+Type=simple
+User=agent
+Group=agent
+ExecStart=/home/agent/.venv/bin/aquarco-supervisor run --config /etc/aquarco/supervisor.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=60
+WorkingDirectory=/home/agent
+Environment=PATH=/home/agent/.venv/bin:/usr/local/bin:/usr/bin:/bin:/home/agent/.npm-global/bin
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/aquarco/secrets.env
+MemoryMax=4G
+TasksMax=128
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/agent /tmp
+RuntimeDirectory=aquarco
+LogsDirectory=aquarco aquarco/agents
+StateDirectory=aquarco
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aquarco-supervisor-python
+
+[Install]
+WantedBy=multi-user.target
+SVCUNIT
+fi
+
+if [[ -f "${SYSTEMD_DEST}" ]]; then
   systemctl daemon-reload
   systemctl enable aquarco-supervisor-python.service
   systemctl start aquarco-supervisor-python.service || true
   log "Supervisor (Python) service enabled and started"
-else
-  log "WARNING: ${SYSTEMD_SRC} not found; skipping service install"
 fi
 
 # ─── 12a. Claude auth helper service ─────────────────────────────────────
 
 log "Installing aquarco-claude-auth systemd service..."
-CLAUDE_AUTH_SRC="${AGENT_HOME}/aquarco/supervisor/systemd/aquarco-claude-auth.service"
 CLAUDE_AUTH_DEST="/etc/systemd/system/aquarco-claude-auth.service"
 
-if [[ -f "${CLAUDE_AUTH_SRC}" ]]; then
-  cp "${CLAUDE_AUTH_SRC}" "${CLAUDE_AUTH_DEST}"
+if [[ "${DEV_MODE}" == "1" ]]; then
+  CLAUDE_AUTH_SRC="${AGENT_HOME}/aquarco/supervisor/systemd/aquarco-claude-auth.service"
+  if [[ -f "${CLAUDE_AUTH_SRC}" ]]; then
+    cp "${CLAUDE_AUTH_SRC}" "${CLAUDE_AUTH_DEST}"
+  else
+    log "WARNING: ${CLAUDE_AUTH_SRC} not found; skipping claude-auth service install"
+  fi
+else
+  # Production: script is installed by the pip package to ~/.local/bin or .venv/bin
+  cat > "${CLAUDE_AUTH_DEST}" <<'AUTHUNIT'
+[Unit]
+Description=Aquarco Claude Auth Helper
+After=network.target
+
+[Service]
+Type=simple
+User=agent
+Group=agent
+ExecStartPre=+/bin/bash -c "mkdir -p /home/agent/.claude && chown -R agent:agent /home/agent/.claude && chmod 700 /home/agent/.claude"
+ExecStart=/home/agent/.venv/bin/aquarco-claude-auth
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=/home/agent
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/home/agent/.local/bin:/home/agent/.npm-global/bin
+MemoryMax=512M
+TasksMax=128
+NoNewPrivileges=true
+ProtectSystem=full
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aquarco-claude-auth
+
+[Install]
+WantedBy=multi-user.target
+AUTHUNIT
+fi
+
+if [[ -f "${CLAUDE_AUTH_DEST}" ]]; then
   mkdir -p /var/lib/aquarco/claude-ipc
   chown agent:agent /var/lib/aquarco/claude-ipc
   chmod 0770 /var/lib/aquarco/claude-ipc
@@ -290,8 +388,6 @@ if [[ -f "${CLAUDE_AUTH_SRC}" ]]; then
   systemctl enable aquarco-claude-auth.service
   systemctl start aquarco-claude-auth.service || true
   log "Claude auth helper service enabled and started"
-else
-  log "WARNING: ${CLAUDE_AUTH_SRC} not found; skipping claude-auth service install"
 fi
 
 # ─── 12b. System Docker Compose stack (auto-start on boot) ──────────────────
@@ -336,12 +432,14 @@ log "System Docker Compose stack enabled and started"
 
 # ─── 13. Make all supervisor scripts executable ───────────────────────────────
 
-log "Setting executable permissions on scripts..."
-SCRIPTS_BASE="${AGENT_HOME}/aquarco"
-if [[ -d "${SCRIPTS_BASE}" ]]; then
-  find "${SCRIPTS_BASE}/supervisor/scripts" \
-       "${SCRIPTS_BASE}/vagrant/scripts" \
-       -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+if [[ "${DEV_MODE}" == "1" ]]; then
+  log "Setting executable permissions on scripts..."
+  SCRIPTS_BASE="${AGENT_HOME}/aquarco"
+  if [[ -d "${SCRIPTS_BASE}" ]]; then
+    find "${SCRIPTS_BASE}/supervisor/scripts" \
+         "${SCRIPTS_BASE}/vagrant/scripts" \
+         -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+  fi
 fi
 
 # ─── 14. Log rotation ─────────────────────────────────────────────────────────
@@ -373,13 +471,15 @@ cat > /etc/logrotate.d/aquarco <<'LOGROTATE'
 }
 LOGROTATE
 
-# ─── 15. Log export cron job ──────────────────────────────────────────────────
+# ─── 15. Log export cron job (dev only — requires host-mounted log folder) ────
 
-log "Installing log-export cron job..."
-cat > /etc/cron.d/aquarco-export-logs <<'CRON'
+if [[ "${DEV_MODE}" == "1" ]]; then
+  log "Installing log-export cron job..."
+  cat > /etc/cron.d/aquarco-export-logs <<'CRON'
 # Export aquarco logs to shared folder every 5 minutes for host visibility
 */5 * * * * root rsync -a --delete /var/log/aquarco/ /var/log/aquarco-export/ 2>/dev/null
 CRON
+fi
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
 

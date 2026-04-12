@@ -40,40 +40,6 @@ Always check `prd.json` for current requirements, architecture decisions, and st
 - **Runtime**: Docker Compose only (no Kubernetes/k3s)
 - **CI/CD**: Scripts managed by scripting agent
 
-## Host ↔ VM File Sync & Hot Reload
-
-Source code lives on the macOS host and is synced into the VirtualBox VM via a
-shared folder (`vboxsf`). The mount is configured in `vagrant/Vagrantfile`:
-
-```
-config.vm.synced_folder "..", "/home/agent/aquarco", type: "virtualbox"
-```
-
-**Important:** `vboxsf` does **not** propagate filesystem events (inotify/fswatch)
-from host to guest. All file watchers inside the VM must use **polling** to detect
-changes.
-
-### Hot Reload Status per Component
-
-| Component | Container/Service | Hot Reload | Mechanism | Polling Env Var |
-|-----------|-------------------|------------|-----------|-----------------|
-| **Caddy (Proxy)** | `caddy` (Docker) | ✅ Auto | Caddyfile mounted read-only; use `caddy reload` or Admin API (`:2019`) to apply changes | — |
-| **Web (Next.js)** | `web` (Docker) | ✅ Works | `next dev` + watchpack | `WATCHPACK_POLLING=true` |
-| **API (GraphQL)** | `api` (Docker) | ✅ Works | `tsx watch` + chokidar | `CHOKIDAR_USEPOLLING=true` |
-| **PostgreSQL** | `postgres` (Docker) | N/A | yoyo-migrations applied on each `docker compose up` | — |
-| **Supervisor** | systemd service | ❌ Manual | Config reload via `SIGHUP`; **code changes require restart** | — |
-| **Monitoring** | Prometheus/Grafana/Loki | ❌ Manual | Container restart required | — |
-
-- **Web & API** — edit files on the host; containers detect changes via polling
-  (default interval ~1-5 s) and auto-rebuild. No restart needed.
-- **Supervisor** — after editing `supervisor/python/src/`, restart manually:
-  ```bash
-  vagrant ssh d2a20a4 -- -t "sudo systemctl restart aquarco-supervisor-python"
-  ```
-- **Monitoring** — after config changes, restart the stack:
-  ```bash
-  vagrant ssh d2a20a4 -- -t "cd /home/agent/aquarco/docker && sudo docker compose -f compose.yml -f compose.monitoring.yml restart prometheus grafana loki"
-  ```
 
 ## Configuration Layout
 
