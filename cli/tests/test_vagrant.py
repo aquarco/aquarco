@@ -143,6 +143,48 @@ class TestVagrantHelperWithVmName:
         assert args == ["vagrant", "up", "myvm", "--provision"]
 
 
+class TestProductionDockerMode:
+    """Test that AQUARCO_DOCKER_MODE is injected in production builds."""
+
+    @patch("aquarco_cli.vagrant.subprocess.run")
+    @patch("aquarco_cli.vagrant.BUILD_TYPE", "production")
+    def test_docker_mode_set_in_production(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="1234,default,state,running\n", stderr="",
+        )
+        helper = VagrantHelper(vagrant_dir=Path("/fake/vagrant"))
+        helper.status()
+        env = mock_run.call_args[1]["env"]
+        assert env["AQUARCO_DOCKER_MODE"] == "production"
+
+    @patch("aquarco_cli.vagrant.subprocess.run")
+    @patch("aquarco_cli.vagrant.BUILD_TYPE", "development")
+    def test_docker_mode_not_set_in_development(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="1234,default,state,running\n", stderr="",
+        )
+        helper = VagrantHelper(vagrant_dir=Path("/fake/vagrant"))
+        helper.status()
+        env = mock_run.call_args[1]["env"]
+        assert "AQUARCO_DOCKER_MODE" not in env
+
+    @patch.dict("os.environ", {"AQUARCO_DOCKER_MODE": "custom"})
+    @patch("aquarco_cli.vagrant.subprocess.run")
+    @patch("aquarco_cli.vagrant.BUILD_TYPE", "production")
+    def test_docker_mode_not_overridden_if_already_set(self, mock_run):
+        """setdefault() should not override an existing AQUARCO_DOCKER_MODE."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="1234,default,state,running\n", stderr="",
+        )
+        helper = VagrantHelper(vagrant_dir=Path("/fake/vagrant"))
+        helper.status()
+        env = mock_run.call_args[1]["env"]
+        assert env["AQUARCO_DOCKER_MODE"] == "custom"
+
+
 class TestVagrantHelperCwd:
     """Test that vagrant commands use the correct working directory."""
 

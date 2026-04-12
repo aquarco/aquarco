@@ -75,6 +75,57 @@ class TestCliConfig:
         assert result == tmp_path.resolve()
 
 
+    def test_resolve_vagrant_dir_production_onedir_layout(self, tmp_path):
+        """Production build: resolve vagrant dir from sys.executable's onedir layout.
+
+        The binary lives at <install>/aquarco/aquarco, so parent.parent is <install>.
+        vagrant/ should be found at <install>/vagrant/.
+        """
+        # Simulate onedir layout: <install>/aquarco/aquarco (the binary)
+        install_root = tmp_path / "install"
+        binary_dir = install_root / "aquarco"
+        binary_dir.mkdir(parents=True)
+        fake_binary = binary_dir / "aquarco"
+        fake_binary.write_text("# fake binary")
+
+        # Create vagrant/Vagrantfile at <install>/vagrant/
+        vagrant_dir = install_root / "vagrant"
+        vagrant_dir.mkdir()
+        (vagrant_dir / "Vagrantfile").write_text("# Vagrant config")
+
+        config = CliConfig(vagrant_dir="")
+        with (
+            patch("aquarco_cli.config.BUILD_TYPE", "production"),
+            patch("sys.executable", str(fake_binary)),
+        ):
+            result = config.resolve_vagrant_dir()
+
+        assert result == vagrant_dir.resolve()
+
+    def test_resolve_vagrant_dir_production_no_vagrantfile_falls_through(self, tmp_path):
+        """Production build without vagrant/Vagrantfile at the install root
+        should fall through to the cwd-walk fallback (not use the install root)."""
+        install_root = tmp_path / "install"
+        binary_dir = install_root / "aquarco"
+        binary_dir.mkdir(parents=True)
+        fake_binary = binary_dir / "aquarco"
+        fake_binary.write_text("# fake binary")
+
+        # No vagrant/Vagrantfile at install root — production branch should NOT match
+        config = CliConfig(vagrant_dir="")
+        with (
+            patch("aquarco_cli.config.BUILD_TYPE", "production"),
+            patch("sys.executable", str(fake_binary)),
+            patch("aquarco_cli.config.Path.cwd", return_value=tmp_path),
+        ):
+            result = config.resolve_vagrant_dir()
+
+        # The production install path (<install>/vagrant) should NOT be returned
+        # because there is no Vagrantfile there; the function falls through to
+        # the cwd-walk or cwd fallback.
+        assert result != (install_root / "vagrant").resolve()
+
+
 class TestLazySingleton:
     def setup_method(self):
         reset_config()
