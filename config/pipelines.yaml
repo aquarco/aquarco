@@ -205,8 +205,6 @@ categories:
 pipelines:
   - name: feature-pipeline
     version: "1.0.0"
-    trigger:
-      labels: [feature, enhancement]
     stages:
       - name: analysis
         category: analyze
@@ -257,8 +255,6 @@ pipelines:
 
   - name: bugfix-pipeline
     version: "1.0.0"
-    trigger:
-      labels: [bug]
     stages:
       - name: analysis
         category: analyze
@@ -294,8 +290,6 @@ pipelines:
 
   - name: pr-review-pipeline
     version: "1.0.0"
-    trigger:
-      events: [pr_opened, pr_updated]
     stages:
       - name: review
         category: review
