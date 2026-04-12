@@ -20,7 +20,8 @@ cask "aquarco" do
   depends_on cask: "virtualbox"
   depends_on cask: "vagrant"
 
-  binary "aquarco"
+  # onedir layout: aquarco/aquarco is the PyInstaller entry point
+  binary "aquarco/aquarco"
 
   postflight do
     # Strip Gatekeeper quarantine so macOS doesn't block the unsigned binary

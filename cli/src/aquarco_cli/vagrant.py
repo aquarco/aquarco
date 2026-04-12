@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Sequence
 
+from aquarco_cli._build import BUILD_TYPE
 from aquarco_cli.config import get_config
 
 
@@ -41,6 +42,8 @@ class VagrantHelper:
             cmd = ["vagrant", *args]
 
         env = {**os.environ, "AQUARCO_PORT": str(get_config().port)}
+        if BUILD_TYPE == "production":
+            env.setdefault("AQUARCO_DOCKER_MODE", "production")
         kwargs: dict = {"cwd": str(self.vagrant_dir), "env": env}
 
         if stream:

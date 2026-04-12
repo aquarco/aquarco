@@ -106,8 +106,8 @@ jobs:
       - name: Build standalone binary
         run: |
           pyinstaller \
-            --onefile \
-            --name aquarco-bin \
+            --onedir \
+            --name aquarco \
             cli/src/aquarco_cli/main.py
 
       - name: Assemble release tarball
@@ -115,25 +115,10 @@ jobs:
           STAGING="aquarco-staging"
           mkdir -p "$STAGING"
 
-          # Standalone binary
-          cp dist/aquarco-bin "$STAGING/"
-          chmod +x "$STAGING/aquarco-bin"
-
-          # Wrapper script — resolves symlinks so env vars point to the right dir
-          cat > "$STAGING/aquarco" << 'WRAPPER'
-          #!/bin/bash
-          SOURCE="${BASH_SOURCE[0]}"
-          while [ -L "$SOURCE" ]; do
-            DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-            SOURCE="$(readlink "$SOURCE")"
-            [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
-          done
-          SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-          export AQUARCO_VAGRANT_DIR="$SCRIPT_DIR/vagrant"
-          export AQUARCO_DOCKER_MODE="production"
-          exec "$SCRIPT_DIR/aquarco-bin" "$@"
-          WRAPPER
-          chmod +x "$STAGING/aquarco"
+          # onedir output — fast startup, no per-run extraction
+          # Layout: aquarco/aquarco (binary) + aquarco/_internal/ (libs)
+          # vagrant/ and other source dirs sit alongside at the same level
+          cp -r dist/aquarco "$STAGING/"
 
           # Source tree needed by the VM via vboxsf synced folder
           cp -r vagrant docker config db supervisor "$STAGING/"

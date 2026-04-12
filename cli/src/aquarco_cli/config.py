@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from aquarco_cli._build import BUILD_TYPE
 
 
 def _load_saved_port() -> int:
@@ -66,12 +69,21 @@ class CliConfig:
 
         Resolution order:
         1. Explicit AQUARCO_VAGRANT_DIR env var
-        2. ``vagrant/`` subdirectory of the repo root (auto-detected, up to
+        2. Production install: ``vagrant/`` sibling of the binary's parent dir
+        3. ``vagrant/`` subdirectory of the repo root (auto-detected, up to
            :attr:`_MAX_PARENT_DEPTH` levels)
-        3. Current working directory as last resort
+        4. Current working directory as last resort
         """
         if self.vagrant_dir:
             return Path(self.vagrant_dir).resolve()
+
+        # Production install (onedir layout): binary is at <install>/aquarco/aquarco
+        # so vagrant/ lives at <install>/vagrant/
+        if BUILD_TYPE == "production":
+            install_root = Path(sys.executable).parent.parent
+            candidate = install_root / "vagrant" / "Vagrantfile"
+            if candidate.exists():
+                return (install_root / "vagrant").resolve()
 
         # Walk up from cwd looking for vagrant/Vagrantfile (bounded)
         current = Path.cwd()
