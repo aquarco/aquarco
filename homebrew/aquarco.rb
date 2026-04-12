@@ -27,5 +27,8 @@ cask "aquarco" do
     # Strip Gatekeeper quarantine so macOS doesn't block the unsigned binary
     system_command "/usr/bin/xattr",
                    args: ["-dr", "com.apple.quarantine", staged_path.to_s]
+    # Warm up the dyld shared cache so the first user invocation is fast
+    system_command "#{staged_path}/aquarco/aquarco", args: ["--help"],
+                   print_stdout: false, print_stderr: false
   end
 end
