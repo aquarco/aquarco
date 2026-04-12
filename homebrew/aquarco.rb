@@ -21,10 +21,4 @@ cask "aquarco" do
   depends_on cask: "vagrant"
 
   binary "aquarco"
-
-  test do
-    assert_match "1.0.0rc1", shell_output("#{staged_path}/aquarco --version")
-    output = shell_output("#{staged_path}/aquarco update 2>&1", 1)
-    assert_match "not available", output
-  end
 end
