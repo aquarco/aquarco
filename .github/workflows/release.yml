@@ -16,10 +16,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -29,10 +29,10 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build and push API image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./api
           push: true
@@ -42,7 +42,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push Web image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./web
           push: true
@@ -52,7 +52,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push Migrations image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./db
           push: true
@@ -69,7 +69,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Create GitHub Release
         env:
@@ -90,10 +90,10 @@ jobs:
     outputs:
       sha256: ${{ steps.sha256.outputs.sha256 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -150,7 +150,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Stamp tag and SHA256 in cask
         run: |
@@ -174,3 +174,32 @@ jobs:
           git add Casks/aquarco.rb
           git commit -m "Update aquarco to ${{ github.ref_name }}"
           git push
+
+  # ── 5. Smoke-test the installed Homebrew cask ─────────────────────────────────
+  test-cask:
+    name: Smoke test Homebrew cask
+    runs-on: macos-14
+    needs: homebrew
+    timeout-minutes: 40
+    steps:
+      - name: Tap and install cask
+        run: |
+          brew tap aquarco/aquarco
+          brew install --cask aquarco
+
+      - name: Provision VM
+        run: aquarco init
+        timeout-minutes: 25
+
+      - name: Assert status returns healthy JSON
+        run: |
+          output=$(aquarco status --json)
+          echo "$output"
+          echo "$output" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          assert 'dashboardStats' in d, f'unexpected response: {d}'
+          stats = d['dashboardStats']
+          assert 'totalTasks' in stats, f'missing totalTasks: {stats}'
+          print('OK — all services running')
+          "
