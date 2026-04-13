@@ -34,6 +34,7 @@ class VagrantHelper:
         stream: bool = False,
         check: bool = True,
         capture: bool = True,
+        input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         # Insert vm_name right after the subcommand verb (args[0])
         if self.vm_name and args:
@@ -46,7 +47,11 @@ class VagrantHelper:
             env.setdefault("AQUARCO_DOCKER_MODE", "production")
         kwargs: dict = {"cwd": str(self.vagrant_dir), "env": env}
 
-        if stream:
+        if input is not None:
+            result = subprocess.run(
+                cmd, input=input, capture_output=True, text=True, **kwargs  # noqa: S603
+            )
+        elif stream:
             # Stream stdout/stderr to the terminal in real time
             result = subprocess.run(cmd, **kwargs)  # noqa: S603
         elif capture:
@@ -90,7 +95,7 @@ class VagrantHelper:
         """Re-provision the VM.  Streams output."""
         self._run(["provision"], stream=True)
 
-    def ssh(self, command: str, *, stream: bool = False) -> subprocess.CompletedProcess[str]:
+    def ssh(self, command: str, *, stream: bool = False, input: str | None = None) -> subprocess.CompletedProcess[str]:
         """Run a command inside the VM via ``vagrant ssh -c``.
 
         .. warning::
@@ -99,7 +104,7 @@ class VagrantHelper:
             pass unsanitised user input — all current call-sites use hardcoded
             command strings.
         """
-        return self._run(["ssh", "-c", command], stream=stream, check=True)
+        return self._run(["ssh", "-c", command], stream=stream, check=True, input=input)
 
     def is_running(self) -> bool:
         try:
