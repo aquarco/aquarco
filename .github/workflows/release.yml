@@ -134,8 +134,12 @@ jobs:
       - name: Install PyInstaller and CLI
         run: pip install pyinstaller cli/
 
-      - name: Patch build type to production
+      - name: Patch version and build type
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i '' \
+            "s/__version__ = \".*\"/__version__ = \"${VERSION}\"/" \
+            cli/src/aquarco_cli/__init__.py
           sed -i '' \
             's/BUILD_TYPE: str = "development"/BUILD_TYPE: str = "production"/' \
             cli/src/aquarco_cli/_build.py
