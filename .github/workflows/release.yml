@@ -6,6 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      tag:
+        description: 'Release tag to target (e.g. v1.0.0rc1)'
+        type: string
+        required: true
       skip_docker:
         description: 'Skip Docker build and push (images already published)'
         type: boolean
@@ -13,6 +17,7 @@ on:
 
 env:
   REGISTRY: aquarco
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   # ── 1. Build and push Docker images ──────────────────────────────────────────
@@ -33,7 +38,7 @@ jobs:
 
       - name: Extract version from tag (strip leading v)
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -83,9 +88,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            --title "Aquarco ${{ github.ref_name }}" \
-            --notes "Release ${{ github.ref_name }}" \
+          gh release create "${{ env.RELEASE_TAG }}" \
+            --title "Aquarco ${{ env.RELEASE_TAG }}" \
+            --notes "Release ${{ env.RELEASE_TAG }}" \
             --verify-tag
 
   # ── 3. Build macOS CLI binary and upload to release ───────────────────────────
@@ -142,7 +147,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${{ github.ref_name }}" aquarco-macos-arm64.tar.gz
+          gh release upload "${{ env.RELEASE_TAG }}" aquarco-macos-arm64.tar.gz
 
       - name: Compute SHA256
         id: sha256
@@ -163,7 +168,7 @@ jobs:
       - name: Stamp tag and SHA256 in cask
         run: |
           sed -i \
-            -e 's|PLACEHOLDER_TAG|${{ github.ref_name }}|' \
+            -e 's|PLACEHOLDER_TAG|${{ env.RELEASE_TAG }}|' \
             -e 's|sha256 "PLACEHOLDER_SHA256"|sha256 "${{ needs.build-cli.outputs.sha256 }}"|' \
             homebrew/aquarco.rb
 
@@ -180,7 +185,7 @@ jobs:
           # Remove old formula if it exists
           git rm --ignore-unmatch Formula/aquarco.rb
           git add Casks/aquarco.rb
-          git commit -m "Update aquarco to ${{ github.ref_name }}"
+          git commit -m "Update aquarco to ${{ env.RELEASE_TAG }}"
           git push
 
   # ── 5. Smoke-test the installed Homebrew cask ─────────────────────────────────
