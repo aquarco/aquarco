@@ -98,6 +98,7 @@ jobs:
     name: Build macOS CLI binary
     runs-on: macos-14
     needs: create-release
+    if: always() && needs.create-release.result == 'success'
     permissions:
       contents: write
     outputs:
@@ -160,6 +161,7 @@ jobs:
     name: Publish Homebrew cask
     runs-on: ubuntu-latest
     needs: build-cli
+    if: always() && needs.build-cli.result == 'success'
     permissions:
       contents: write
     steps:
@@ -193,6 +195,7 @@ jobs:
     name: Smoke test Homebrew cask
     runs-on: macos-14
     needs: homebrew
+    if: always() && needs.homebrew.result == 'success'
     timeout-minutes: 40
     steps:
       - name: Tap and install cask
