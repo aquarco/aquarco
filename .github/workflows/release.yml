@@ -151,6 +151,11 @@ jobs:
             --name aquarco \
             cli/src/aquarco_cli/main.py
 
+      - name: Stamp version in versions.env
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i '' "s/PLACEHOLDER_VERSION/${VERSION}/g" docker/versions.env
+
       - name: Assemble release tarball
         run: |
           STAGING="aquarco-staging"
