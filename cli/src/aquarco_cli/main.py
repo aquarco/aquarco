@@ -5,7 +5,7 @@ from __future__ import annotations
 import typer
 
 from aquarco_cli import __version__
-from aquarco_cli.commands import auth, backup, init, repos, run, status, ui, update
+from aquarco_cli.commands import auth, backup, init, repos, run, status, ui, update, vm
 
 app = typer.Typer(
     name="aquarco",
@@ -40,6 +40,9 @@ app.add_typer(repos.app, name="repos", help="Manage repositories.")
 app.add_typer(run.app, name="run", help="Create a task for agent execution.")
 app.add_typer(status.app, name="status", help="Task overview and details.")
 app.add_typer(ui.app, name="ui", help="Start or stop the web UI.")
+app.add_typer(vm.start_app, name="start", help="Start the Aquarco VM.")
+app.add_typer(vm.stop_app, name="stop", help="Stop the Aquarco VM.")
+app.add_typer(vm.destroy_app, name="destroy", help="Destroy the Aquarco VM.")
 
 
 if __name__ == "__main__":

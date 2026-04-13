@@ -106,6 +106,10 @@ class VagrantHelper:
         """
         return self._run(["ssh", "-c", command], stream=stream, check=True, input=input)
 
+    def destroy(self) -> None:
+        """Destroy the VM. Streams output."""
+        self._run(["destroy", "--force"], stream=True)
+
     def is_running(self) -> bool:
         try:
             return self.status() == "running"
