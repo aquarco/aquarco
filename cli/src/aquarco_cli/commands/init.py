@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from pathlib import Path
 
 import typer
 
+from aquarco_cli._build import BUILD_TYPE
 from aquarco_cli.config import get_config, reset_config
 from aquarco_cli.console import print_error, print_info, print_success
 from aquarco_cli.health import print_health_table
@@ -71,7 +73,23 @@ def init(
     if not ok:
         raise typer.Exit(code=1)
 
-    # 2. Locate Vagrantfile and bring VM up
+    # 2. In production, sync Vagrantfile + scripts to ~/.aquarco/vagrant/ so that
+    #    the working directory survives brew reinstalls (the .vagrant/ state dir
+    #    lives there and must not move when the Caskroom path changes).
+    if BUILD_TYPE == "production":
+        install_root = Path(sys.executable).parent.parent
+        src_vagrant = install_root / "vagrant"
+        dst_vagrant = Path.home() / ".aquarco" / "vagrant"
+        if src_vagrant.is_dir():
+            dst_vagrant.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_vagrant / "Vagrantfile", dst_vagrant / "Vagrantfile")
+            src_scripts = src_vagrant / "scripts"
+            if src_scripts.is_dir():
+                dst_scripts = dst_vagrant / "scripts"
+                if dst_scripts.exists():
+                    shutil.rmtree(dst_scripts)
+                shutil.copytree(src_scripts, dst_scripts)
+
     vagrant = VagrantHelper()
     print_info(f"Using Vagrantfile in {vagrant.vagrant_dir}")
 

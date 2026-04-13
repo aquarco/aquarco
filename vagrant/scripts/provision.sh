@@ -191,6 +191,23 @@ chmod 700 "${DATA_DIR}/backups"
 chmod 700 "/etc/aquarco"
 chmod 700 "${AGENT_HOME}/.claude"
 
+# ─── 8b. Postgres credentials ─────────────────────────────────────────────────
+# Generate once; idempotent — never overwrites an existing file so the DB
+# password stays stable across re-provisions.
+
+log "Checking Postgres credentials..."
+if [[ ! -f /etc/aquarco/docker-secrets.env ]]; then
+  POSTGRES_PASSWORD=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32)
+  cat > /etc/aquarco/docker-secrets.env <<EOF
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+DATABASE_URL=postgresql://aquarco:${POSTGRES_PASSWORD}@postgres:5432/aquarco
+EOF
+  chmod 600 /etc/aquarco/docker-secrets.env
+  log "Postgres credentials generated at /etc/aquarco/docker-secrets.env"
+else
+  log "Postgres credentials already exist — skipping"
+fi
+
 # ─── 9. Docker configuration ──────────────────────────────────────────────────
 
 log "Configuring Docker..."
@@ -412,8 +429,10 @@ Group=agent
 WorkingDirectory=/home/agent/aquarco/docker
 ExecStart=/bin/bash -c '\
   AQUARCO_ENV=$(cat /etc/aquarco/env 2>/dev/null || echo development); \
+  set -a; \
+  [ -f /etc/aquarco/docker-secrets.env ] && . /etc/aquarco/docker-secrets.env; \
   if [ "$AQUARCO_ENV" = "production" ]; then \
-    set -a; . /home/agent/aquarco/docker/versions.env; set +a; \
+    . /home/agent/aquarco/docker/versions.env; \
     exec /usr/bin/docker compose -f compose.yml -f compose.prod.yml up -d; \
   else \
     exec /usr/bin/docker compose up -d; \

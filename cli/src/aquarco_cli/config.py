@@ -78,8 +78,12 @@ class CliConfig:
             return Path(self.vagrant_dir).resolve()
 
         # Production install (onedir layout): binary is at <install>/aquarco/aquarco
-        # so vagrant/ lives at <install>/vagrant/
+        # Prefer ~/.aquarco/vagrant/ — a stable location that survives brew reinstalls.
+        # Fall back to the install-local copy only before the first `aquarco init`.
         if BUILD_TYPE == "production":
+            home_vagrant = Path.home() / ".aquarco" / "vagrant"
+            if (home_vagrant / "Vagrantfile").exists():
+                return home_vagrant.resolve()
             install_root = Path(sys.executable).parent.parent
             candidate = install_root / "vagrant" / "Vagrantfile"
             if candidate.exists():
