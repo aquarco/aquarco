@@ -184,7 +184,7 @@ jobs:
     steps:
       - name: Tap and install cask
         run: |
-          brew tap aquarco/aquarco
+          brew tap aquarco/tap
           brew install --cask aquarco
 
       - name: Provision VM
