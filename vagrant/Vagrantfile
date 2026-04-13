@@ -51,6 +51,11 @@ Vagrant.configure("2") do |config|
 
   # Upload docker compose files so provision.sh can place them in
   # /home/agent/aquarco/docker/ (non-dev mode only; dev mode uses synced folder)
+  #
+  # Always remove the destination first: Vagrant's file provisioner uses scp,
+  # which nests the source directory *inside* an existing destination on
+  # re-provision, causing provision.sh to read stale files from the first run.
+  config.vm.provision "shell", inline: "rm -rf /tmp/aquarco-docker", run: "always"
   config.vm.provision "file",
     source: "../docker",
     destination: "/tmp/aquarco-docker"

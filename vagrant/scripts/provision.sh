@@ -465,7 +465,9 @@ STACKUNIT
 
 systemctl daemon-reload
 systemctl enable aquarco-stack.service
-systemctl start aquarco-stack.service || true
+# Use restart (not start) so that re-provisions pick up an updated versions.env.
+# On a fresh VM this is equivalent to start; on a running VM it forces a reload.
+systemctl restart aquarco-stack.service || true
 log "System Docker Compose stack enabled and started"
 
 # ─── 13. Make all supervisor scripts executable ───────────────────────────────
