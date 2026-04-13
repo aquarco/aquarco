@@ -208,3 +208,23 @@ jobs:
           echo "got:      $got"
           echo "expected: $expected"
           [ "$got" = "$expected" ]
+
+  # ── 6. Smoke-test the Homebrew cask ──────────────────────────────────────────
+  test-homebrew-cask:
+    name: Smoke test Homebrew cask
+    runs-on: macos-14
+    needs: test-cask
+    if: always() && needs.test-cask.result == 'success'
+    steps:
+      - name: Tap and install cask
+        run: |
+          brew tap aquarco/tap
+          brew install --cask aquarco
+
+      - name: Assert version matches tag
+        run: |
+          got=$(aquarco --version)
+          expected="aquarco ${GITHUB_REF_NAME#v}"
+          echo "got:      $got"
+          echo "expected: $expected"
+          [ "$got" = "$expected" ]
