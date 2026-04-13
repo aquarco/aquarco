@@ -51,13 +51,12 @@ cask "aquarco" do
     system_command "#{staged_path}/aquarco/aquarco", args: ["--help"],
                    print_stdout: false, print_stderr: false
 
-    # On upgrade a backup was created by uninstall_preflight — restore it.
-    # On a fresh install there are no backups, so skip silently.
+    # On upgrade a backup was created by uninstall_preflight — inform the user
+    # to restore it. We don't auto-restore here because Vagrant/VirtualBox may
+    # not be on PATH in the postflight environment.
     backup_root = Pathname(Dir.home) / ".aquarco" / "backups"
     if backup_root.directory? && backup_root.children.any?(&:directory?)
-      system_command "#{staged_path}/aquarco/aquarco",
-                     args: ["init", "--from-backup", "latest"],
-                     print_stdout: true, print_stderr: true
+      ohai "A backup was found. Run `aquarco init --from-backup latest` to restore your VM."
     end
   end
 end
