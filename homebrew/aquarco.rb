@@ -36,6 +36,13 @@ cask "aquarco" do
     end
   end
 
+  # Only runs on: brew uninstall --zap aquarco
+  # Destroys the VM and wipes all user data under ~/.aquarco.
+  zap script:  { executable: which("aquarco"),
+                 args: ["destroy", "--yes"],
+                 must_succeed: false, print_stdout: true, print_stderr: true },
+      trash: "~/.aquarco"
+
   postflight do
     # Strip Gatekeeper quarantine so macOS doesn't block the unsigned binary
     system_command "/usr/bin/xattr",
