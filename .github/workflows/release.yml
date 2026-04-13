@@ -193,7 +193,9 @@ jobs:
 
       - name: Stamp tag and SHA256 in cask
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
           sed -i \
+            -e "s|PLACEHOLDER_VERSION|${VERSION}|" \
             -e 's|PLACEHOLDER_TAG|${{ github.ref_name }}|' \
             -e 's|sha256 "PLACEHOLDER_SHA256"|sha256 "${{ needs.build-cli.outputs.sha256 }}"|' \
             homebrew/aquarco.rb
