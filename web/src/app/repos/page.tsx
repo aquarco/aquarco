@@ -242,16 +242,14 @@ function RepoSettingsFields({
         onChange={(e) => onChange({ url: e.target.value })}
         placeholder="https://github.com/org/repo.git"
         data-testid={`${testIdPrefix}url`}
-        slotProps={{
-          input: {
-            endAdornment: showUrlClear && value.url ? (
-              <InputAdornment position="end">
-                <IconButton size="small" onClick={() => onChange({ url: '' })} edge="end">
-                  <ClearIcon fontSize="small" />
-                </IconButton>
-              </InputAdornment>
-            ) : undefined,
-          },
+        InputProps={{
+          endAdornment: showUrlClear && value.url ? (
+            <InputAdornment position="end">
+              <IconButton size="small" onClick={() => onChange({ url: '' })} edge="end">
+                <ClearIcon fontSize="small" />
+              </IconButton>
+            </InputAdornment>
+          ) : undefined,
         }}
       />
       <Box>

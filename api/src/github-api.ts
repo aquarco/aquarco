@@ -89,8 +89,15 @@ export async function createBranchAndPR(
     source: row.source as string,
   }))
 
-  // Parse the repo URL to get owner/repo
-  const repoUrl = repo.url as string
+  // Fetch the repo URL from the database and parse owner/repo
+  const repoRow = await pool.query<{ url: string }>(
+    'SELECT url FROM repositories WHERE name = $1',
+    [repoName]
+  )
+  if (repoRow.rows.length === 0) {
+    throw new Error(`Repository not found: ${repoName}`)
+  }
+  const repoUrl = repoRow.rows[0].url
   const match = repoUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/)
   if (!match) {
     throw new Error(`Cannot parse GitHub owner/repo from URL: ${repoUrl}`)

@@ -40,30 +40,6 @@ Vagrant.configure("2") do |config|
   config.vm.network "forwarded_port", guest: 8080, host: aquarco_port, id: "proxy"  # Caddy reverse proxy (single entry point)
   config.vm.network "forwarded_port", guest: 5432, host: 15432, id: "postgres"    # PostgreSQL (system) — host 15432 to avoid local PG conflict
 
-  # tools
-  config.vm.network "forwarded_port", guest: 8085, host: 8085, id: "claude-spend"
-
-  # -------------------------------------------------------------------------
-  # Port forwarding — Repo slots (added/removed dynamically by manage-ports.sh
-  # when repos are registered with the supervisor; these are placeholder slots)
-  # -------------------------------------------------------------------------
-  # Repo 1
-  #config.vm.network "forwarded_port", guest: 3001, host: 3001, id: "repo1-fe"
-  #config.vm.network "forwarded_port", guest: 4001, host: 4001, id: "repo1-api"
-  #config.vm.network "forwarded_port", guest: 5433, host: 5433, id: "repo1-pg"
-  # Repo 2
-  #config.vm.network "forwarded_port", guest: 3002, host: 3002, id: "repo2-fe"
-  #config.vm.network "forwarded_port", guest: 4002, host: 4002, id: "repo2-api"
-  #config.vm.network "forwarded_port", guest: 5434, host: 5434, id: "repo2-pg"
-  # Repo 3
-  #config.vm.network "forwarded_port", guest: 3003, host: 3003, id: "repo3-fe"
-  #config.vm.network "forwarded_port", guest: 4003, host: 4003, id: "repo3-api"
-  #config.vm.network "forwarded_port", guest: 5435, host: 5435, id: "repo3-pg"
-  # Repo 4
-  #config.vm.network "forwarded_port", guest: 3004, host: 3004, id: "repo4-fe"
-  #config.vm.network "forwarded_port", guest: 4004, host: 4004, id: "repo4-api"
-  #config.vm.network "forwarded_port", guest: 5436, host: 5436, id: "repo4-pg"
-
   # -------------------------------------------------------------------------
   # Provisioning
   # -------------------------------------------------------------------------
@@ -72,6 +48,12 @@ Vagrant.configure("2") do |config|
   config.vm.provision "file",
     source: "scripts/setup-network-tracking.sh",
     destination: "/tmp/setup-network-tracking.sh"
+
+  # Upload docker compose files so provision.sh can place them in
+  # /home/agent/aquarco/docker/ (non-dev mode only; dev mode uses synced folder)
+  config.vm.provision "file",
+    source: "../docker",
+    destination: "/tmp/aquarco-docker"
 
   config.vm.provision "shell",
     path: "scripts/provision.sh",

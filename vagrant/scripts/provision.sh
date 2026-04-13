@@ -188,8 +188,26 @@ chown -R "${AGENT_USER}:${AGENT_USER}" \
 
 chmod 755 "${DATA_DIR}" "${LOG_DIR}"
 chmod 700 "${DATA_DIR}/backups"
-chmod 700 "/etc/aquarco"
+# /etc/aquarco: root:agent 750 — root writes, agent reads (docker-secrets.env, env)
+chmod 750 "/etc/aquarco"
+chown root:agent "/etc/aquarco"
 chmod 700 "${AGENT_HOME}/.claude"
+
+# ─── 8a. Docker compose files (non-dev mode only) ────────────────────────────
+# In dev mode the synced folder at /home/agent/aquarco provides these files.
+# In production mode they are uploaded to /tmp/aquarco-docker by the Vagrantfile
+# file provisioner and installed here.
+
+if [[ "${DEV_MODE}" != "1" ]]; then
+  if [[ -d /tmp/aquarco-docker ]]; then
+    mkdir -p "${AGENT_HOME}/aquarco/docker"
+    cp -r /tmp/aquarco-docker/. "${AGENT_HOME}/aquarco/docker/"
+    chown -R "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}/aquarco"
+    log "Docker compose files installed to ${AGENT_HOME}/aquarco/docker/"
+  else
+    log "WARNING: /tmp/aquarco-docker not found; aquarco-stack.service may fail to start"
+  fi
+fi
 
 # ─── 8b. Postgres credentials ─────────────────────────────────────────────────
 # Generate once; idempotent — never overwrites an existing file so the DB
@@ -202,7 +220,8 @@ if [[ ! -f /etc/aquarco/docker-secrets.env ]]; then
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 DATABASE_URL=postgresql://aquarco:${POSTGRES_PASSWORD}@postgres:5432/aquarco
 EOF
-  chmod 600 /etc/aquarco/docker-secrets.env
+  chown root:agent /etc/aquarco/docker-secrets.env
+  chmod 640 /etc/aquarco/docker-secrets.env
   log "Postgres credentials generated at /etc/aquarco/docker-secrets.env"
 else
   log "Postgres credentials already exist — skipping"
@@ -433,7 +452,7 @@ ExecStart=/bin/bash -c '\
   [ -f /etc/aquarco/docker-secrets.env ] && . /etc/aquarco/docker-secrets.env; \
   if [ "$AQUARCO_ENV" = "production" ]; then \
     . /home/agent/aquarco/docker/versions.env; \
-    exec /usr/bin/docker compose -f compose.yml -f compose.prod.yml up -d; \
+    exec /usr/bin/docker compose -f compose.prod.yml up -d; \
   else \
     exec /usr/bin/docker compose up -d; \
   fi'

@@ -90,6 +90,15 @@ def init(
                     shutil.rmtree(dst_scripts)
                 shutil.copytree(src_scripts, dst_scripts)
 
+        # Copy docker compose files so the Vagrantfile file provisioner can
+        # upload them to the VM (source: "../docker" is relative to Vagrantfile)
+        src_docker = install_root / "docker"
+        dst_docker = Path.home() / ".aquarco" / "docker"
+        if src_docker.is_dir():
+            if dst_docker.exists():
+                shutil.rmtree(dst_docker)
+            shutil.copytree(src_docker, dst_docker)
+
     vagrant = VagrantHelper()
     print_info(f"Using Vagrantfile in {vagrant.vagrant_dir}")
 

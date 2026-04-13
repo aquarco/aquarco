@@ -1,4 +1,5 @@
-import { createTheme, type PaletteMode } from '@mui/material/styles'
+import { createTheme } from '@mui/material/styles'
+import type { PaletteMode } from '@mui/material'
 
 export function buildTheme(mode: PaletteMode = 'light') {
   return createTheme({

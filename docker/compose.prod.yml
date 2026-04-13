@@ -64,7 +64,7 @@ services:
   api:
     image: ${AQUARCO_REGISTRY}/api:${AQUARCO_API_VERSION:?AQUARCO_API_VERSION must be set}
     restart: unless-stopped
-    command: ["node", "dist/server.js"]
+    command: ["node", "dist/index.js"]
     networks:
       - aquarco
     ports:
@@ -92,14 +92,15 @@ services:
   web:
     image: ${AQUARCO_REGISTRY}/web:${AQUARCO_WEB_VERSION:?AQUARCO_WEB_VERSION must be set}
     restart: unless-stopped
-    command: ["npm", "run", "start"]
+    command: ["node", "server.js"]
     networks:
       - aquarco
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/graphql}
       NODE_ENV: production
+      HOSTNAME: "0.0.0.0"
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/"]
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/"]
       interval: 10s
       timeout: 5s
       retries: 5
