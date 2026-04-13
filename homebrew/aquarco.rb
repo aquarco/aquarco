@@ -23,6 +23,19 @@ cask "aquarco" do
   # onedir layout: aquarco/aquarco is the PyInstaller entry point
   binary "aquarco/aquarco"
 
+  # Runs before the old version is removed (upgrade) or before uninstall.
+  # stop backs up then halts; destroy backs up (if running) then removes the VM.
+  uninstall_preflight do
+    aquarco = which("aquarco")
+    if aquarco
+      # stop auto-backs-up then halts; destroy auto-backs-up (if running) then removes VM
+      system_command aquarco, args: ["stop"],
+                     must_succeed: false, print_stdout: true, print_stderr: true
+      system_command aquarco, args: ["destroy", "--yes"],
+                     must_succeed: false, print_stdout: true, print_stderr: true
+    end
+  end
+
   postflight do
     # Strip Gatekeeper quarantine so macOS doesn't block the unsigned binary
     system_command "/usr/bin/xattr",
@@ -30,5 +43,14 @@ cask "aquarco" do
     # Warm up the dyld shared cache so the first user invocation is fast
     system_command "#{staged_path}/aquarco/aquarco", args: ["--help"],
                    print_stdout: false, print_stderr: false
+
+    # On upgrade a backup was created by uninstall_preflight — restore it.
+    # On a fresh install there are no backups, so skip silently.
+    backup_root = Pathname(Dir.home) / ".aquarco" / "backups"
+    if backup_root.directory? && backup_root.children.any?(&:directory?)
+      system_command "#{staged_path}/aquarco/aquarco",
+                     args: ["init", "--from-backup", "latest"],
+                     print_stdout: true, print_stderr: true
+    end
   end
 end

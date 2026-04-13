@@ -66,6 +66,25 @@ def _backup_credentials(vagrant: VagrantHelper, dest: Path) -> bool:
     return found
 
 
+def perform_backup(vagrant: VagrantHelper, output: Path = DEFAULT_BACKUP_ROOT) -> None:
+    """Run a full backup (db + creds). Prints results; raises SystemExit on failure."""
+    timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    dest = output / timestamp
+    dest.mkdir(parents=True, exist_ok=True)
+    dest.chmod(0o700)
+
+    print_info("Backing up database...")
+    ok = _backup_db(vagrant, dest)
+    print_info("Backing up credentials...")
+    ok = _backup_credentials(vagrant, dest) and ok
+
+    if not ok:
+        print_warning(f"Backup completed with errors. Partial files in {dest}")
+        raise typer.Exit(code=1)
+
+    print_success(f"Backup complete: {dest}")
+
+
 @app.callback(invoke_without_command=True)
 def backup(
     db: bool = typer.Option(True, "--db/--no-db", help="Back up the PostgreSQL database."),
@@ -103,4 +122,4 @@ def backup(
         print_warning(f"Backup completed with errors. Partial files in {dest}")
         raise typer.Exit(code=1)
 
-    print_success(f"\nBackup complete: {dest}")
+    print_success(f"Backup complete: {dest}")
