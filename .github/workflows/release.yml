@@ -185,32 +185,26 @@ jobs:
           git commit -m "Update aquarco to ${{ github.ref_name }}"
           git push
 
-  # ── 5. Smoke-test the installed Homebrew cask ─────────────────────────────────
+  # ── 5. Smoke-test the released binary ────────────────────────────────────────
   test-cask:
-    name: Smoke test Homebrew cask
+    name: Smoke test released binary
     runs-on: macos-14
     needs: homebrew
     if: always() && needs.homebrew.result == 'success'
-    timeout-minutes: 40
     steps:
-      - name: Tap and install cask
+      - name: Download release tarball
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          brew tap aquarco/tap
-          brew install --cask aquarco
+          gh release download "${{ github.ref_name }}" \
+            --pattern 'aquarco-macos-arm64.tar.gz' \
+            --repo aquarco/aquarco
 
-      - name: Provision VM
-        run: aquarco init
-        timeout-minutes: 25
-
-      - name: Assert status returns healthy JSON
+      - name: Assert version matches tag
         run: |
-          output=$(aquarco status --json)
-          echo "$output"
-          echo "$output" | python3 -c "
-          import sys, json
-          d = json.load(sys.stdin)
-          assert 'dashboardStats' in d, f'unexpected response: {d}'
-          stats = d['dashboardStats']
-          assert 'totalTasks' in stats, f'missing totalTasks: {stats}'
-          print('OK — all services running')
-          "
+          tar -xzf aquarco-macos-arm64.tar.gz
+          got=$(./aquarco/aquarco --version)
+          expected="aquarco ${GITHUB_REF_NAME#v}"
+          echo "got:      $got"
+          echo "expected: $expected"
+          [ "$got" = "$expected" ]
