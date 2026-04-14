@@ -100,6 +100,15 @@ class CliConfig:
             if (parent / "Vagrantfile").exists():
                 return parent.resolve()
 
+        # For editable dev installs the package lives inside the repo tree.
+        # Walk up from __file__ so the vagrant dir is found even when the user
+        # runs aquarco from outside the project directory (e.g. from ~).
+        pkg_dir = Path(__file__).resolve().parent
+        for ancestor in [pkg_dir, *pkg_dir.parents[: self._MAX_PARENT_DEPTH]]:
+            candidate = ancestor / "vagrant" / "Vagrantfile"
+            if candidate.exists():
+                return (ancestor / "vagrant").resolve()
+
         return current
 
 
