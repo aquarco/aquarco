@@ -5,7 +5,7 @@ from __future__ import annotations
 import typer
 
 from aquarco_cli import __version__
-from aquarco_cli.commands import auth, backup, init, repos, run, status, ui, update, vm
+from aquarco_cli.commands import auth, backup, init, repos, restore, run, status, ui, update, vm
 
 app = typer.Typer(
     name="aquarco",
@@ -34,6 +34,7 @@ def main(
 # Register top-level commands
 app.add_typer(init.app, name="init", help="Bootstrap the Aquarco VM.")
 app.add_typer(backup.app, name="backup", help="Back up database and credentials.")
+app.add_typer(restore.app, name="restore", help="Restore database and credentials from a backup.")
 app.add_typer(update.app, name="update", help="Update VM to latest version.")
 app.add_typer(auth.app, name="auth", help="Manage Claude and GitHub authentication.")
 app.add_typer(repos.app, name="repos", help="Manage repositories.")
