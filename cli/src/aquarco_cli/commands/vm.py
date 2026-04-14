@@ -24,9 +24,19 @@ destroy_app = typer.Typer(
 )
 
 
+def _set_dev_vm(dev: bool) -> None:
+    """Set AQUARCO_VM_NAME=aquarco-dev when --dev is passed."""
+    if dev:
+        import os
+        os.environ.setdefault("AQUARCO_VM_NAME", "aquarco-dev")
+
+
 @start_app.callback(invoke_without_command=True)
-def start() -> None:
+def start(
+    dev: bool = typer.Option(False, "--dev", help="Target the development VM (aquarco-dev)."),
+) -> None:
     """Start the Aquarco VM."""
+    _set_dev_vm(dev)
     vagrant = VagrantHelper()
     if vagrant.is_running():
         print_info("VM is already running.")
@@ -41,8 +51,11 @@ def start() -> None:
 
 
 @stop_app.callback(invoke_without_command=True)
-def stop() -> None:
+def stop(
+    dev: bool = typer.Option(False, "--dev", help="Target the development VM (aquarco-dev)."),
+) -> None:
     """Stop the Aquarco VM."""
+    _set_dev_vm(dev)
     vagrant = VagrantHelper()
     if not vagrant.is_running():
         print_info("VM is already stopped.")
@@ -60,10 +73,12 @@ def stop() -> None:
 @destroy_app.callback(invoke_without_command=True)
 def destroy(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+    dev: bool = typer.Option(False, "--dev", help="Target the development VM (aquarco-dev)."),
 ) -> None:
     """Destroy the Aquarco VM. This is irreversible."""
     if not yes:
         typer.confirm("This will permanently destroy the VM. Continue?", abort=True)
+    _set_dev_vm(dev)
     vagrant = VagrantHelper()
     if vagrant.is_running():
         perform_backup(vagrant)

@@ -12,6 +12,7 @@ from typing import Optional
 import typer
 
 from aquarco_cli._build import BUILD_TYPE
+from aquarco_cli.commands.backup import perform_backup
 from aquarco_cli.config import get_config, reset_config
 from aquarco_cli.console import print_error, print_info, print_success, print_warning
 from aquarco_cli.health import print_health_table
@@ -117,7 +118,7 @@ def init(
     """One-command bootstrap of a working Aquarco environment."""
     if dev:
         import os
-        os.environ["AQUARCO_DEV"] = "1"
+        os.environ.setdefault("AQUARCO_VM_NAME", "aquarco-dev")
     # Save port configuration when --port is explicitly provided or config already exists
     config_file = Path.home() / ".aquarco.json"
     # Click's get_parameter_source returns ParameterSource.COMMANDLINE when user passed --port
@@ -174,6 +175,11 @@ def init(
 
     vagrant = VagrantHelper()
     print_info(f"Using Vagrantfile in {vagrant.vagrant_dir}")
+
+    # Back up before (re-)provisioning an already-running VM so no data is lost
+    if vagrant.is_running():
+        print_info("VM is already running — backing up before re-provisioning...")
+        perform_backup(vagrant)
 
     print_info("Starting VM with provisioning (this may take several minutes)...")
     try:

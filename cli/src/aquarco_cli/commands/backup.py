@@ -30,7 +30,8 @@ def _backup_db(vagrant: VagrantHelper, dest: Path) -> bool:
     """Stream pg_dump from the postgres container to a file on the host."""
     try:
         result = vagrant.ssh(
-            f"cd {COMPOSE_DIR} && docker compose exec -T postgres pg_dump -U aquarco aquarco",
+            f"sudo -u agent HOME=/home/agent bash -c "
+            f"'cd {COMPOSE_DIR} && docker compose exec -T postgres pg_dump -U aquarco aquarco'",
             stream=False,
         )
         out = dest / "aquarco.sql"
@@ -49,7 +50,7 @@ def _backup_credentials(vagrant: VagrantHelper, dest: Path) -> bool:
     for filename, vm_path in _CRED_FILES.items():
         try:
             result = vagrant.ssh(
-                f"test -f {vm_path} && cat {vm_path} || true",
+                f"sudo -u agent HOME=/home/agent bash -c 'test -f {vm_path} && cat {vm_path} || true'",
                 stream=False,
             )
             content = result.stdout.strip()
@@ -95,8 +96,15 @@ def backup(
         help="Directory on the host where the backup is stored. "
              f"Default: {DEFAULT_BACKUP_ROOT}",
     ),
+    dev: bool = typer.Option(
+        False, "--dev",
+        help="Target the development VM (aquarco-dev) instead of the production VM.",
+    ),
 ) -> None:
     """Back up the database and credentials to ~/.aquarco/backups/ on the host."""
+    if dev:
+        import os
+        os.environ.setdefault("AQUARCO_VM_NAME", "aquarco-dev")
     vagrant = VagrantHelper()
 
     if not vagrant.is_running():
