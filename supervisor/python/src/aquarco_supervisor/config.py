@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,11 @@ def load_config(config_file: str | Path) -> SupervisorConfig:
         config = SupervisorConfig.model_validate(raw)
     except Exception as e:
         raise ConfigValidationError(f"Config validation failed: {e}") from e
+
+    # Allow DATABASE_URL env var to override the config file value
+    if db_url := os.environ.get("DATABASE_URL"):
+        config.spec.database.url = db_url
+        log.info("database_url_from_env", component="config")
 
     _validate_config(config)
     return config
