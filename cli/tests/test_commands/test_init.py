@@ -33,6 +33,7 @@ class TestInitCommand:
     def test_successful_init(self, mock_which, mock_vagrant_cls, mock_health):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 0
         mock_vagrant.up.assert_called_once_with(provision=True)
@@ -44,6 +45,7 @@ class TestInitCommand:
     def test_init_unhealthy(self, mock_which, mock_vagrant_cls, mock_health):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 1
         assert "not healthy" in result.output.lower()
@@ -54,10 +56,36 @@ class TestInitCommand:
         from aquarco_cli.vagrant import VagrantError
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
         mock_vagrant.up.side_effect = VagrantError("VM failed to start")
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 1
         assert "failed" in result.output.lower()
+
+    @patch("aquarco_cli.commands.init.perform_backup")
+    @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.init.VagrantHelper")
+    @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
+    def test_reinit_running_vm_triggers_backup(self, mock_which, mock_vagrant_cls, mock_health, mock_backup):
+        mock_vagrant = mock_vagrant_cls.return_value
+        mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = True
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 0
+        mock_backup.assert_called_once_with(mock_vagrant)
+        mock_vagrant.up.assert_called_once_with(provision=True)
+
+    @patch("aquarco_cli.commands.init.perform_backup")
+    @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.init.VagrantHelper")
+    @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
+    def test_init_stopped_vm_skips_backup(self, mock_which, mock_vagrant_cls, mock_health, mock_backup):
+        mock_vagrant = mock_vagrant_cls.return_value
+        mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 0
+        mock_backup.assert_not_called()
 
     @patch("aquarco_cli.commands.init.shutil.which")
     def test_both_missing(self, mock_which):
@@ -66,6 +94,46 @@ class TestInitCommand:
         assert result.exit_code == 1
         assert "VirtualBox" in result.output
         assert "Vagrant" in result.output
+
+
+class TestInitDevMode:
+    @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.init.VagrantHelper")
+    @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
+    def test_dev_sets_vm_name_to_aquarco_dev(self, mock_which, mock_vagrant_cls, mock_health):
+        import os
+        mock_vagrant = mock_vagrant_cls.return_value
+        mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AQUARCO_VM_NAME", None)
+            runner.invoke(app, ["init", "--dev"])
+            assert os.environ.get("AQUARCO_VM_NAME") == "aquarco-dev"
+
+    @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.init.VagrantHelper")
+    @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
+    def test_dev_does_not_override_explicit_vm_name(self, mock_which, mock_vagrant_cls, mock_health):
+        import os
+        mock_vagrant = mock_vagrant_cls.return_value
+        mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
+        with patch.dict(os.environ, {"AQUARCO_VM_NAME": "my-custom-vm"}, clear=False):
+            runner.invoke(app, ["init", "--dev"])
+            assert os.environ.get("AQUARCO_VM_NAME") == "my-custom-vm"
+
+    @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.init.VagrantHelper")
+    @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
+    def test_no_dev_does_not_set_vm_name(self, mock_which, mock_vagrant_cls, mock_health):
+        import os
+        mock_vagrant = mock_vagrant_cls.return_value
+        mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AQUARCO_VM_NAME", None)
+            runner.invoke(app, ["init"])
+            assert "AQUARCO_VM_NAME" not in os.environ
 
 
 class TestInitFromBackup:
@@ -77,6 +145,7 @@ class TestInitFromBackup:
     def test_from_backup_latest(self, mock_which, mock_vagrant_cls, mock_health, mock_restore, mock_find):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
         mock_find.return_value = Path("/fake/backups/20260101T120000")
         result = runner.invoke(app, ["init", "--from-backup", "latest"])
         assert result.exit_code == 0
@@ -90,6 +159,7 @@ class TestInitFromBackup:
     def test_from_backup_explicit_path(self, mock_which, mock_vagrant_cls, mock_health, mock_restore, tmp_path):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
         result = runner.invoke(app, ["init", "--from-backup", str(tmp_path)])
         assert result.exit_code == 0
         mock_restore.assert_called_once_with(mock_vagrant, tmp_path)
@@ -101,6 +171,7 @@ class TestInitFromBackup:
     def test_from_backup_nonexistent_path(self, mock_which, mock_vagrant_cls, mock_health, mock_restore):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
         result = runner.invoke(app, ["init", "--from-backup", "/nonexistent/backup"])
         assert result.exit_code == 1
         assert "not found" in result.output
@@ -113,6 +184,7 @@ class TestInitFromBackup:
     def test_from_backup_no_backups_found(self, mock_which, mock_vagrant_cls, mock_health, mock_find):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
         result = runner.invoke(app, ["init", "--from-backup", "latest"])
         assert result.exit_code == 1
         assert "No backups found" in result.output
@@ -124,6 +196,7 @@ class TestInitFromBackup:
     def test_from_backup_restore_errors(self, mock_which, mock_vagrant_cls, mock_health, mock_restore, tmp_path):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
         result = runner.invoke(app, ["init", "--from-backup", str(tmp_path)])
         assert result.exit_code == 1
         assert "errors" in result.output
@@ -135,6 +208,7 @@ class TestInitFromBackup:
     def test_no_from_backup_skips_restore(self, mock_which, mock_vagrant_cls, mock_health, mock_restore):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 0
         mock_restore.assert_not_called()

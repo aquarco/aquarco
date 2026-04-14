@@ -64,6 +64,17 @@ class TestBackupDatabase:
         assert any("docker compose exec -T postgres" in cmd for cmd in cmds)
 
     @patch("aquarco_cli.commands.backup.VagrantHelper")
+    def test_db_backup_runs_as_agent_user(self, mock_cls, tmp_path):
+        vagrant = _make_vagrant()
+        vagrant.ssh.return_value.stdout = "dump"
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["backup", "--no-creds", "--output", str(tmp_path)])
+
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        assert any("sudo -u agent" in cmd and "pg_dump" in cmd for cmd in cmds)
+
+    @patch("aquarco_cli.commands.backup.VagrantHelper")
     def test_db_backup_file_permissions(self, mock_cls, tmp_path):
         vagrant = _make_vagrant()
         vagrant.ssh.return_value.stdout = "dump"
@@ -125,6 +136,23 @@ class TestBackupCredentials:
 
         # Warns but doesn't hard-fail for missing creds
         assert "skipping" in result.output.lower()
+
+    @patch("aquarco_cli.commands.backup.VagrantHelper")
+    def test_credentials_backup_runs_as_agent_user(self, mock_cls, tmp_path):
+        vagrant = _make_vagrant()
+
+        def _ssh(cmd, **_):
+            m = MagicMock()
+            m.stdout = "content"
+            return m
+
+        vagrant.ssh.side_effect = _ssh
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["backup", "--no-db", "--output", str(tmp_path)])
+
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        assert all("sudo -u agent" in cmd for cmd in cmds)
 
     @patch("aquarco_cli.commands.backup.VagrantHelper")
     def test_credential_files_are_mode_600(self, mock_cls, tmp_path):
@@ -196,6 +224,30 @@ class TestBackupBoth:
 
         assert result.exit_code == 0
         assert "complete" in result.output.lower()
+
+
+class TestBackupDevFlag:
+    @patch("aquarco_cli.commands.backup.VagrantHelper")
+    def test_dev_flag_sets_vm_name(self, mock_cls, tmp_path):
+        import os
+        vagrant = _make_vagrant()
+        vagrant.ssh.return_value.stdout = "content"
+        mock_cls.return_value = vagrant
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AQUARCO_VM_NAME", None)
+            runner.invoke(app, ["backup", "--dev", "--output", str(tmp_path)])
+            assert os.environ.get("AQUARCO_VM_NAME") == "aquarco-dev"
+
+    @patch("aquarco_cli.commands.backup.VagrantHelper")
+    def test_no_dev_flag_does_not_set_vm_name(self, mock_cls, tmp_path):
+        import os
+        vagrant = _make_vagrant()
+        vagrant.ssh.return_value.stdout = "content"
+        mock_cls.return_value = vagrant
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AQUARCO_VM_NAME", None)
+            runner.invoke(app, ["backup", "--output", str(tmp_path)])
+            assert "AQUARCO_VM_NAME" not in os.environ
 
 
 class TestBackupDefaultOutput:
