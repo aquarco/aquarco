@@ -27,7 +27,7 @@ def _make_backup_dir(root: Path, name: str = "20240101T120000", *, sql: str = "-
     if sql is not None:
         (d / "aquarco.sql").write_text(sql)
     if creds:
-        (d / "hosts.yml").write_text("gh-token")
+        (d / "github-token").write_text("gh-token")
         (d / "credentials.json").write_text('{"token": "claude"}')
     return d
 
@@ -171,7 +171,7 @@ class TestRestoreCredentials:
 
         assert result.exit_code == 0
         cmds_inputs = [(c.args[0], c.kwargs.get("input", "")) for c in vagrant.ssh.call_args_list]
-        assert any("hosts.yml" in cmd and "gh-token" in inp for cmd, inp in cmds_inputs)
+        assert any("github-token" in cmd and "gh-token" in inp for cmd, inp in cmds_inputs)
         assert any("credentials.json" in cmd and '"token": "claude"' in inp for cmd, inp in cmds_inputs)
 
     @patch("aquarco_cli.commands.restore.VagrantHelper")
@@ -251,7 +251,7 @@ class TestRestoreSelectiveFlags:
         runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
 
         cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
-        assert not any("hosts.yml" in cmd or "credentials.json" in cmd for cmd in cmds)
+        assert not any("github-token" in cmd or "credentials.json" in cmd for cmd in cmds)
 
     @patch("aquarco_cli.commands.restore.VagrantHelper")
     def test_success_message_shown(self, mock_cls, tmp_path):

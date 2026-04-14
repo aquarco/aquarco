@@ -19,9 +19,13 @@ DEFAULT_BACKUP_ROOT = Path.home() / ".aquarco" / "backups"
 # Docker Compose working dir inside the VM
 COMPOSE_DIR = "/home/agent/aquarco/docker"
 
-# Credential file paths inside the VM (as agent user)
+# Credential file paths inside the VM (as agent user).
+# github-token: raw OAuth token written by the API's device-flow handler to the
+#   agent-ssh shared volume (compose: ${AGENT_SSH_DIR:-/home/agent/.ssh}:/agent-ssh).
+#   The GraphQL API reads it from /agent-ssh/github-token (= /home/agent/.ssh/github-token).
+# credentials.json: Claude CLI OAuth tokens used by the claude-auth-helper IPC flow.
 _CRED_FILES = {
-    "hosts.yml": "/home/agent/.config/gh/hosts.yml",
+    "github-token": "/home/agent/.ssh/github-token",
     "credentials.json": "/home/agent/.claude/.credentials.json",
 }
 

@@ -18,9 +18,10 @@ DEFAULT_BACKUP_ROOT = Path.home() / ".aquarco" / "backups"
 # Docker Compose working dir inside the VM
 COMPOSE_DIR = "/home/agent/aquarco/docker"
 
-# Credential file paths inside the VM (as agent user)
+# Credential file paths inside the VM (as agent user).
+# Must mirror backup.py exactly so backup ↔ restore filenames align.
 _CRED_FILES = {
-    "hosts.yml": "/home/agent/.config/gh/hosts.yml",
+    "github-token": "/home/agent/.ssh/github-token",
     "credentials.json": "/home/agent/.claude/.credentials.json",
 }
 

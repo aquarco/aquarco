@@ -103,7 +103,7 @@ class TestBackupCredentials:
 
         def _ssh(cmd, **_):
             m = MagicMock()
-            if "hosts.yml" in cmd:
+            if "github-token" in cmd:
                 m.stdout = "gh-token-content"
             elif "credentials.json" in cmd:
                 m.stdout = '{"token": "claude-token"}'
@@ -117,7 +117,7 @@ class TestBackupCredentials:
         result = runner.invoke(app, ["backup", "--no-db", "--output", str(tmp_path)])
 
         assert result.exit_code == 0
-        assert (next(tmp_path.rglob("hosts.yml"))).read_text() == "gh-token-content"
+        assert (next(tmp_path.rglob("github-token"))).read_text() == "gh-token-content"
         assert (next(tmp_path.rglob("credentials.json"))).read_text() == '{"token": "claude-token"}'
 
     @patch("aquarco_cli.commands.backup.VagrantHelper")
@@ -186,7 +186,7 @@ class TestBackupBoth:
         assert result.exit_code == 0
         cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
         assert any("pg_dump" in cmd for cmd in cmds)
-        assert any("hosts.yml" in cmd for cmd in cmds)
+        assert any("github-token" in cmd for cmd in cmds)
 
     @patch("aquarco_cli.commands.backup.VagrantHelper")
     def test_backup_dir_has_timestamp_format(self, mock_cls, tmp_path):
