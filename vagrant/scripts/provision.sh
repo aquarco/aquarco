@@ -16,8 +16,8 @@ DATA_DIR="/var/lib/aquarco"
 AGENT_USER="agent"
 AGENT_HOME="/home/${AGENT_USER}"
 
-# Dev mode: set AQUARCO_DEV=1 to mount sources and use editable installs
-DEV_MODE="${AQUARCO_DEV:-0}"
+# Dev mode: set by the Vagrantfile via the DEV_MODE env variable.
+DEV_MODE="${DEV_MODE:-0}"
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -302,8 +302,8 @@ if [[ "${DEV_MODE}" == "1" ]]; then
     log "WARNING: pip install failed; supervisor CLI may not be available"
   }
 else
-  log "  [prod] installing aquarco-supervisor from PyPI..."
-  su - "${AGENT_USER}" -c "${AGENT_HOME}/.venv/bin/pip install aquarco-supervisor" || {
+  log "  [prod] installing aquarco-supervisor from bundled package..."
+  su - "${AGENT_USER}" -c "${AGENT_HOME}/.venv/bin/pip install /tmp/aquarco-supervisor-python/" || {
     log "WARNING: pip install failed; supervisor CLI may not be available"
   }
 fi
@@ -462,8 +462,8 @@ ExecStart=/bin/bash -c '\
   AQUARCO_ENV=$(cat /etc/aquarco/env 2>/dev/null || echo development); \
   set -a; \
   [ -f /etc/aquarco/docker-secrets.env ] && . /etc/aquarco/docker-secrets.env; \
+  [ -f /home/agent/aquarco/docker/versions.env ] && . /home/agent/aquarco/docker/versions.env; \
   if [ "$AQUARCO_ENV" = "production" ]; then \
-    . /home/agent/aquarco/docker/versions.env; \
     exec /usr/bin/docker compose -f compose.prod.yml up -d; \
   else \
     exec /usr/bin/docker compose -f compose.yml -f compose.dev.yml up -d; \

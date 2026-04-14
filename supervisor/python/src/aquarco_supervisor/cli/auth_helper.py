@@ -248,7 +248,10 @@ async def _watch_loop(
 
 # ── Typer command ─────────────────────────────────────────────────────────────
 
+_cli = typer.Typer(add_completion=False, invoke_without_command=True)
 
+
+@_cli.command()
 def auth_watch(
     ipc_dir: str = typer.Option(
         DEFAULT_IPC_DIR,

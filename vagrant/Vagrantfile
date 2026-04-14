@@ -71,6 +71,15 @@ Vagrant.configure("2") do |config|
         source: "../docker",
         destination: "/tmp/aquarco-docker"
 
+      # Upload supervisor Python package so provision.sh can install it locally
+      # (prod VM only; dev VM uses the synced source tree at /home/agent/aquarco)
+      unless is_dev
+        machine.vm.provision "shell", inline: "rm -rf /tmp/aquarco-supervisor-python", run: "always"
+        machine.vm.provision "file",
+          source: "../supervisor/python",
+          destination: "/tmp/aquarco-supervisor-python"
+      end
+
       machine.vm.provision "shell",
         path: "scripts/provision.sh",
         env: {

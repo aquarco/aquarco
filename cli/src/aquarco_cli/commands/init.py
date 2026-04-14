@@ -104,8 +104,7 @@ def init(
     ),
     dev: bool = typer.Option(
         False, "--dev",
-        help="Development mode: mount the aquarco source tree into the VM "
-        "(sets AQUARCO_DEV=1). Equivalent to exporting that variable before running.",
+        help="Development mode: mount the aquarco source tree into the VM.",
     ),
     from_backup: Optional[str] = typer.Option(
         None, "--from-backup",
@@ -172,6 +171,15 @@ def init(
             if dst_docker.exists():
                 shutil.rmtree(dst_docker)
             shutil.copytree(src_docker, dst_docker)
+
+        # Copy supervisor Python package so the Vagrantfile file provisioner can
+        # upload it to the VM (source: "../supervisor/python" is relative to Vagrantfile)
+        src_supervisor = install_root / "supervisor" / "python"
+        dst_supervisor = Path.home() / ".aquarco" / "supervisor" / "python"
+        if src_supervisor.is_dir():
+            if dst_supervisor.exists():
+                shutil.rmtree(dst_supervisor)
+            shutil.copytree(src_supervisor, dst_supervisor)
 
     vagrant = VagrantHelper()
     print_info(f"Using Vagrantfile in {vagrant.vagrant_dir}")

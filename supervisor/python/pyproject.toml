@@ -28,6 +28,7 @@ dev = [
 
 [project.scripts]
 aquarco-supervisor = "aquarco_supervisor.main:app"
+aquarco-claude-auth = "aquarco_supervisor.cli.auth_helper:_cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aquarco_supervisor"]
