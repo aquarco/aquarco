@@ -51,6 +51,7 @@ services:
   api:
     build:
       context: ../api
+      target: dev
     restart: unless-stopped
     working_dir: /app
     command: sh -c "npm run codegen && npm run dev"
@@ -85,6 +86,7 @@ services:
   web:
     build:
       context: ../web
+      target: dev
     restart: unless-stopped
     working_dir: /app
     command: sh -c "npm run dev"

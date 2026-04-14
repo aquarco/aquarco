@@ -8,6 +8,14 @@ COPY tsconfig.json ./
 COPY next.config.js ./
 RUN npm run build
 
+# Development stage — all deps for hot reload via next dev
+FROM node:20-alpine AS dev
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+EXPOSE 3000
+
+# Production stage — standalone Next.js output, minimal footprint
 FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production

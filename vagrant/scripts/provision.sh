@@ -227,6 +227,18 @@ else
   log "Postgres credentials already exist — skipping"
 fi
 
+# Generate secrets.env for the supervisor (DATABASE_URL pointing to localhost for host-side services)
+if [[ ! -f /etc/aquarco/secrets.env ]]; then
+  source /etc/aquarco/docker-secrets.env
+  PG_PASS="${POSTGRES_PASSWORD:-aquarco}"
+  cat > /etc/aquarco/secrets.env <<EOF
+DATABASE_URL=postgresql://aquarco:${PG_PASS}@localhost:5432/aquarco
+EOF
+  chown root:agent /etc/aquarco/secrets.env
+  chmod 640 /etc/aquarco/secrets.env
+  log "Supervisor secrets.env generated at /etc/aquarco/secrets.env"
+fi
+
 # ─── 9. Docker configuration ──────────────────────────────────────────────────
 
 log "Configuring Docker..."
@@ -454,9 +466,15 @@ ExecStart=/bin/bash -c '\
     . /home/agent/aquarco/docker/versions.env; \
     exec /usr/bin/docker compose -f compose.prod.yml up -d; \
   else \
-    exec /usr/bin/docker compose up -d; \
+    exec /usr/bin/docker compose -f compose.yml -f compose.dev.yml up -d; \
   fi'
-ExecStop=/usr/bin/docker compose down
+ExecStop=/bin/bash -c '\
+  AQUARCO_ENV=$(cat /etc/aquarco/env 2>/dev/null || echo development); \
+  if [ "$AQUARCO_ENV" = "production" ]; then \
+    /usr/bin/docker compose -f compose.prod.yml down; \
+  else \
+    /usr/bin/docker compose -f compose.yml -f compose.dev.yml down; \
+  fi'
 TimeoutStartSec=120
 
 [Install]
