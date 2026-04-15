@@ -24,6 +24,7 @@ export const GET_TASKS = gql`
         }
         createdAt
         updatedAt
+        completedAt
         pipeline
         totalCostUsd
         totalTokens

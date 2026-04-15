@@ -108,6 +108,7 @@ describe('Query.tokenUsageByModel', () => {
             tokens_output: 500,
             cache_read_tokens: 200,
             cache_write_tokens: 100,
+            cost_usd: 0.05,
           },
           {
             day: new Date('2026-04-01T00:00:00Z'),
@@ -116,6 +117,7 @@ describe('Query.tokenUsageByModel', () => {
             tokens_output: 800,
             cache_read_tokens: 0,
             cache_write_tokens: 300,
+            cost_usd: 0.12,
           },
         ],
       },
@@ -132,9 +134,11 @@ describe('Query.tokenUsageByModel', () => {
       tokensOutput: 500,
       cacheReadTokens: 200,
       cacheWriteTokens: 100,
+      costUsd: 0.05,
     })
     expect(result[1].model).toBe('claude-opus-4-6')
     expect(result[1].tokensInput).toBe(2000)
+    expect(result[1].costUsd).toBe(0.12)
   })
 
   it('should default days to 30 when not provided', async () => {
@@ -208,6 +212,16 @@ describe('Query.tokenUsageByModel', () => {
     expect(sql).toContain('ORDER BY')
   })
 
+  it('should include COALESCE(SUM(cost_usd), 0) in query', async () => {
+    const pool = mockPool([{ rows: [] }])
+    const ctx = makeCtx(pool)
+
+    await Query.tokenUsageByModel(null, { days: 30 }, ctx)
+
+    const sql = pool.query.mock.calls[0][0] as string
+    expect(sql).toContain('COALESCE(SUM(cost_usd), 0)')
+  })
+
   it('should COALESCE model to unknown in query', async () => {
     const pool = mockPool([{ rows: [] }])
     const ctx = makeCtx(pool)
@@ -229,6 +243,7 @@ describe('Query.tokenUsageByModel', () => {
             tokens_output: 0,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
+            cost_usd: 0,
           },
         ],
       },

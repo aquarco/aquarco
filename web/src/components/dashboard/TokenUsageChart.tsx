@@ -5,8 +5,9 @@ import Box from '@mui/material/Box'
 import Skeleton from '@mui/material/Skeleton'
 import Typography from '@mui/material/Typography'
 import {
-  BarChart,
+  ComposedChart,
   Bar,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -17,7 +18,7 @@ import {
   Pie,
   Cell,
 } from 'recharts'
-import { formatTokens } from '@/lib/spending'
+import { formatTokens, formatCost } from '@/lib/spending'
 
 interface TokenUsageByDay {
   day: string
@@ -26,6 +27,7 @@ interface TokenUsageByDay {
   tokensOutput: number
   cacheReadTokens: number
   cacheWriteTokens: number
+  costUsd: number
 }
 
 interface TokenUsageChartProps {
@@ -46,6 +48,7 @@ const TOKEN_LABELS: Record<string, string> = {
   output: 'Output',
   cacheRead: 'Cache Read',
   cacheWrite: 'Cache Write',
+  costUsd: 'Cost (USD)',
 }
 
 const MODEL_COLORS: Record<string, string> = {
@@ -94,19 +97,20 @@ function buildFullDayRange(days: number, startIsoDate: string): string[] {
 
 export function TokenUsageChart({ data, loading, days = 30 }: TokenUsageChartProps) {
   const { chartData, donutData } = useMemo(() => {
-    const dayMap = new Map<string, { input: number; output: number; cacheRead: number; cacheWrite: number }>()
+    const dayMap = new Map<string, { input: number; output: number; cacheRead: number; cacheWrite: number; costUsd: number }>()
     const modelMap = new Map<string, number>()
 
     for (const row of data ?? []) {
       const key = toUtcDateKey(row.day)
       if (!dayMap.has(key)) {
-        dayMap.set(key, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+        dayMap.set(key, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 })
       }
       const entry = dayMap.get(key)!
       entry.input += row.tokensInput
       entry.output += row.tokensOutput
       entry.cacheRead += row.cacheReadTokens
       entry.cacheWrite += row.cacheWriteTokens
+      entry.costUsd += row.costUsd ?? 0
 
       const total = row.tokensInput + row.tokensOutput + row.cacheReadTokens + row.cacheWriteTokens
       modelMap.set(row.model, (modelMap.get(row.model) ?? 0) + total)
@@ -118,7 +122,7 @@ export function TokenUsageChart({ data, loading, days = 30 }: TokenUsageChartPro
     const startDate = allKeys[0] ?? new Date().toISOString().slice(0, 10)
     const chartData = buildFullDayRange(days, startDate).map((isoDate) => ({
       day: formatDay(isoDate),
-      ...(dayMap.get(isoDate) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }),
+      ...(dayMap.get(isoDate) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 }),
     }))
 
     const donutData = Array.from(modelMap.entries())
@@ -152,22 +156,37 @@ export function TokenUsageChart({ data, loading, days = 30 }: TokenUsageChartPro
     <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
       <Box sx={{ flex: 1, minWidth: 0 }}>
         <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={chartData} barSize={8}>
+          <ComposedChart data={chartData} barSize={8}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="day" tick={{ fontSize: 12 }} />
-            <YAxis tickFormatter={(v: number) => formatTokens(v)} width={55} />
+            <YAxis yAxisId="tokens" tickFormatter={(v: number) => formatTokens(v)} width={55} />
+            <YAxis
+              yAxisId="cost"
+              orientation="right"
+              tickFormatter={(v: number) => `$${v.toFixed(2)}`}
+              width={60}
+            />
             <Tooltip
               formatter={(value: number, name: string) => [
-                formatTokens(value),
+                name === 'costUsd' ? formatCost(value) : formatTokens(value),
                 TOKEN_LABELS[name] ?? name,
               ]}
             />
             <Legend formatter={(name: string) => TOKEN_LABELS[name] ?? name} />
-            <Bar dataKey="input" stackId="t" fill={TOKEN_COLORS.input} name="input" />
-            <Bar dataKey="output" stackId="t" fill={TOKEN_COLORS.output} name="output" />
-            <Bar dataKey="cacheRead" stackId="t" fill={TOKEN_COLORS.cacheRead} name="cacheRead" />
-            <Bar dataKey="cacheWrite" stackId="t" fill={TOKEN_COLORS.cacheWrite} name="cacheWrite" />
-          </BarChart>
+            <Bar yAxisId="tokens" dataKey="input" stackId="t" fill={TOKEN_COLORS.input} name="input" />
+            <Bar yAxisId="tokens" dataKey="output" stackId="t" fill={TOKEN_COLORS.output} name="output" />
+            <Bar yAxisId="tokens" dataKey="cacheRead" stackId="t" fill={TOKEN_COLORS.cacheRead} name="cacheRead" />
+            <Bar yAxisId="tokens" dataKey="cacheWrite" stackId="t" fill={TOKEN_COLORS.cacheWrite} name="cacheWrite" />
+            <Line
+              yAxisId="cost"
+              type="monotone"
+              dataKey="costUsd"
+              stroke="#f57c00"
+              strokeWidth={2}
+              dot={false}
+              name="costUsd"
+            />
+          </ComposedChart>
         </ResponsiveContainer>
       </Box>
 

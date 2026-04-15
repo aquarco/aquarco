@@ -88,6 +88,7 @@ interface TokenUsageByDay {
   tokensOutput: number
   cacheReadTokens: number
   cacheWriteTokens: number
+  costUsd: number
 }
 
 type TokenType = 'total' | 'input' | 'output' | 'cacheRead' | 'cacheWrite'
@@ -120,6 +121,7 @@ const sampleRow: TokenUsageByDay = {
   tokensOutput: 500,
   cacheReadTokens: 200,
   cacheWriteTokens: 100,
+  costUsd: 0.05,
 }
 
 describe('getTokenValue', () => {
@@ -203,6 +205,7 @@ describe('chart data transformation', () => {
       tokensOutput: 500,
       cacheReadTokens: 200,
       cacheWriteTokens: 100,
+      costUsd: 0.05,
     },
     {
       day: '2026-04-01T00:00:00Z',
@@ -211,6 +214,7 @@ describe('chart data transformation', () => {
       tokensOutput: 800,
       cacheReadTokens: 0,
       cacheWriteTokens: 300,
+      costUsd: 0.12,
     },
     {
       day: '2026-04-02T00:00:00Z',
@@ -219,6 +223,7 @@ describe('chart data transformation', () => {
       tokensOutput: 200,
       cacheReadTokens: 100,
       cacheWriteTokens: 50,
+      costUsd: 0.03,
     },
   ]
 
@@ -281,5 +286,18 @@ describe('chart data transformation', () => {
     const result = transformData(singleModel, 'total')
     expect(result.models).toEqual(['claude-sonnet-4-6'])
     expect(result.chartData).toHaveLength(2)
+  })
+
+  it('should aggregate costUsd per day', () => {
+    // Build a dayMap of costUsd, same logic as the component
+    const dayMap = new Map<string, number>()
+    for (const row of testData) {
+      const key = row.day
+      dayMap.set(key, (dayMap.get(key) ?? 0) + row.costUsd)
+    }
+    // Day 1: 0.05 + 0.12 = 0.17
+    expect(dayMap.get('2026-04-01T00:00:00Z')).toBeCloseTo(0.17)
+    // Day 2: 0.03
+    expect(dayMap.get('2026-04-02T00:00:00Z')).toBeCloseTo(0.03)
   })
 })

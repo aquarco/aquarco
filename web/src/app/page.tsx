@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useReducer } from 'react'
 import { useQuery } from '@apollo/client'
 import { useRouter } from 'next/navigation'
 import Box from '@mui/material/Box'
@@ -21,7 +22,9 @@ import Divider from '@mui/material/Divider'
 import { DASHBOARD_STATS, GET_TASKS, TOKEN_USAGE_BY_MODEL } from '@/lib/graphql/queries'
 import { StatusChip } from '@/components/ui/StatusChip'
 import { TokenUsageChart } from '@/components/dashboard/TokenUsageChart'
-import { formatDate } from '@/lib/format'
+import { formatDate, formatElapsed } from '@/lib/format'
+import { formatCost, formatTokens } from '@/lib/spending'
+import { monoStyle } from '@/lib/theme'
 
 interface StatCardProps {
   label: string
@@ -56,10 +59,16 @@ interface TaskRow {
   pipeline: string
   repository: { name: string }
   createdAt: string
+  updatedAt: string
+  completedAt?: string | null
+  totalCostUsd?: number | null
+  totalTokens?: number | null
 }
 
 export default function DashboardPage() {
   const router = useRouter()
+  const [, tick] = useReducer((x: number) => x + 1, 0)
+  useEffect(() => { const id = setInterval(tick, 1000); return () => clearInterval(id) }, [])
 
   const {
     data: statsData,
@@ -224,17 +233,18 @@ export default function DashboardPage() {
           <TableHead>
             <TableRow>
               <TableCell>Title</TableCell>
-              <TableCell>Pipeline</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Repository</TableCell>
-              <TableCell>Created</TableCell>
+              <TableCell>Pipeline</TableCell>
+              <TableCell>Cost</TableCell>
+              <TableCell>Updated</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {tasksLoading
               ? [...Array(5)].map((_, i) => (
                   <TableRow key={i}>
-                    {[...Array(5)].map((_, j) => (
+                    {[...Array(6)].map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton variant="text" />
                       </TableCell>
@@ -250,12 +260,26 @@ export default function DashboardPage() {
                     data-testid={`task-row-${task.id}`}
                   >
                     <TableCell>{task.title}</TableCell>
-                    <TableCell>{task.pipeline}</TableCell>
                     <TableCell>
                       <StatusChip status={task.status} />
                     </TableCell>
                     <TableCell>{task.repository.name}</TableCell>
-                    <TableCell>{formatDate(task.createdAt)}</TableCell>
+                    <TableCell>{task.pipeline ?? '—'}</TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="warning.main" sx={{ ...monoStyle, fontSize: '0.8rem' }}>
+                        {formatCost(task.totalCostUsd)}
+                      </Typography>
+                      {task.totalTokens != null && task.totalTokens > 0 && (
+                        <Typography variant="caption" color="text.secondary" sx={{ ...monoStyle, fontSize: '0.7rem', display: 'block' }}>
+                          {formatTokens(task.totalTokens)}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell title={formatDate(task.updatedAt)}>
+                      {['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED', 'CLOSED'].includes(task.status?.toUpperCase())
+                        ? formatDate(task.completedAt || task.updatedAt)
+                        : formatElapsed(task.updatedAt)}
+                    </TableCell>
                   </TableRow>
                 ))}
           </TableBody>
