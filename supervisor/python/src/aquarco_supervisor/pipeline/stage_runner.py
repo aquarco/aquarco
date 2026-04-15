@@ -125,9 +125,14 @@ class StageRunner:
                 stage_iterations[stage_name] = 1
             base_iteration = stage_iterations[stage_name]
 
-            # On revisit (repeat > 1), create new iteration stage rows
+            # On revisit (repeat > 1), increment the iteration counter and
+            # create new stage rows.  This must happen here (at execution time)
+            # rather than at the jump site so that stages reached via linear
+            # fall-through (current_idx += 1) also get a fresh iteration row.
             if repeat_counts[stage_name] > 1:
-                base_iteration = stage_iterations[stage_name]
+                next_iter = stage_iterations.get(stage_name, 1) + 1
+                stage_iterations[stage_name] = next_iter
+                base_iteration = next_iter
                 for agent_name in agents:
                     sk, new_id = await self._sm.create_iteration_stage(
                         task_id, stage_num, category, agent_name,
@@ -206,9 +211,6 @@ class StageRunner:
                     if cond_result.jump_to and cond_result.jump_to in stages_by_name:
                         target_idx = stages_by_name[cond_result.jump_to]
                         target_name = cond_result.jump_to
-                        if repeat_counts.get(target_name, 0) > 0:
-                            next_iter = stage_iterations.get(target_name, 1) + 1
-                            stage_iterations[target_name] = next_iter
                         log.info(
                             "condition_jump",
                             task_id=task_id,
