@@ -1,0 +1,77 @@
+# Vagrantfile — Aquarco production VM
+# Ubuntu 24.04 LTS · VirtualBox NAT · single machine: aquarco
+#
+# Usage:
+#   cd vagrant/prod && vagrant up
+
+REPO_ROOT   = File.expand_path("../..", __dir__)
+SCRIPTS_DIR = File.expand_path("../scripts", __dir__)
+
+Vagrant.configure("2") do |config|
+  config.vm.define "aquarco", primary: true, autostart: true do |machine|
+    machine.vm.box      = "bento/ubuntu-24.04"
+    machine.vm.hostname = "aquarco"
+
+    # Disable the default /vagrant sync — no host↔VM file sharing
+    machine.vm.synced_folder ".", "/vagrant", disabled: true
+
+    # VirtualBox provider settings
+    machine.vm.provider "virtualbox" do |vb|
+      vb.name   = "aquarco"
+      vb.memory = 6144
+      vb.cpus   = 3
+      vb.gui    = false
+
+      vb.customize ["modifyvm", :id, "--ioapic",        "on"]
+      vb.customize ["modifyvm", :id, "--audio-enabled", "off"]
+      vb.customize ["modifyvm", :id, "--usb-ohci",      "off"]
+    end
+
+    # -------------------------------------------------------------------------
+    # Port forwarding
+    # -------------------------------------------------------------------------
+    aquarco_port = ENV.fetch("AQUARCO_PORT", "8080").to_i
+    machine.vm.network "forwarded_port", guest: 8080, host: aquarco_port, id: "proxy"     # Caddy reverse proxy
+    machine.vm.network "forwarded_port", guest: 5432, host: 15432,        id: "postgres"  # PostgreSQL (host 15432 avoids local PG conflict)
+
+    # -------------------------------------------------------------------------
+    # Provisioning — upload assets then run provision.sh
+    # -------------------------------------------------------------------------
+
+    # Sibling script required by provision.sh
+    machine.vm.provision "file",
+      source:      "#{SCRIPTS_DIR}/setup-network-tracking.sh",
+      destination: "/tmp/setup-network-tracking.sh"
+
+    # Docker Compose files
+    machine.vm.provision "shell", inline: "rm -rf /tmp/aquarco-docker", run: "always"
+    machine.vm.provision "file",
+      source:      "#{REPO_ROOT}/docker",
+      destination: "/tmp/aquarco-docker"
+
+    # Supervisor Python package
+    machine.vm.provision "shell", inline: "rm -rf /tmp/aquarco-supervisor-python", run: "always"
+    machine.vm.provision "file",
+      source:      "#{REPO_ROOT}/supervisor/python",
+      destination: "/tmp/aquarco-supervisor-python"
+
+    # Supervisor config
+    machine.vm.provision "shell", inline: "rm -f /tmp/aquarco-supervisor.yaml", run: "always"
+    machine.vm.provision "file",
+      source:      "#{REPO_ROOT}/supervisor/config/supervisor.yaml",
+      destination: "/tmp/aquarco-supervisor.yaml"
+
+    # Agent / pipeline config
+    machine.vm.provision "shell", inline: "rm -rf /tmp/aquarco-config", run: "always"
+    machine.vm.provision "file",
+      source:      "#{REPO_ROOT}/config",
+      destination: "/tmp/aquarco-config"
+
+    machine.vm.provision "shell",
+      path: "#{SCRIPTS_DIR}/provision.sh",
+      env: {
+        "AQUARCO_DOCKER_MODE" => ENV.fetch("AQUARCO_DOCKER_MODE", "development"),
+        "DEV_MODE"            => "0",
+      }
+  end
+end

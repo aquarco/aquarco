@@ -25,7 +25,7 @@ from aquarco_supervisor.cli.agents import VALID_CATEGORIES
 # Canonical category set
 # ---------------------------------------------------------------------------
 
-CANONICAL_CATEGORIES = {"analyze", "design", "document", "implement", "review", "test"}
+CANONICAL_CATEGORIES = {"analyze", "analyze-bug", "design", "document", "implement", "review", "test"}
 OLD_CATEGORY_NAMES = {"docs", "implementation"}
 
 

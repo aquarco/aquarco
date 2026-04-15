@@ -54,17 +54,17 @@ class TestCliConfig:
         assert config._MAX_PARENT_DEPTH == 10
 
     def test_resolve_vagrant_dir_with_vagrantfile_in_parent(self, tmp_path):
-        """When vagrant/Vagrantfile exists in a parent, it should be found."""
-        vagrant_dir = tmp_path / "vagrant"
-        vagrant_dir.mkdir()
-        (vagrant_dir / "Vagrantfile").write_text("# Vagrant config")
+        """When vagrant/prod/Vagrantfile exists in a parent, it should be found."""
+        prod_dir = tmp_path / "vagrant" / "prod"
+        prod_dir.mkdir(parents=True)
+        (prod_dir / "Vagrantfile").write_text("# Vagrant config")
         subdir = tmp_path / "sub" / "dir"
         subdir.mkdir(parents=True)
 
         config = CliConfig(vagrant_dir="")
         with patch("aquarco_cli.config.Path.cwd", return_value=subdir):
             result = config.resolve_vagrant_dir()
-        assert result == vagrant_dir.resolve()
+        assert result == prod_dir.resolve()
 
     def test_resolve_vagrant_dir_direct_vagrantfile(self, tmp_path):
         """When Vagrantfile is directly in a parent directory."""

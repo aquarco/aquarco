@@ -495,6 +495,7 @@ class TestInitPortPersistence:
         """When --port is explicitly provided, config is written."""
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
 
         config_file = tmp_path / ".aquarco.json"
         with patch("aquarco_cli.commands.init.Path.home", return_value=tmp_path):
@@ -513,6 +514,7 @@ class TestInitPortPersistence:
         """When config file already exists, port is updated."""
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
 
         config_file = tmp_path / ".aquarco.json"
         config_file.write_text(json.dumps({"port": 8080, "other": "value"}))
