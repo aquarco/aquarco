@@ -4,8 +4,19 @@
 # Usage:
 #   cd vagrant/prod && vagrant up
 
-REPO_ROOT   = File.expand_path("../..", __dir__)
-SCRIPTS_DIR = File.expand_path("../scripts", __dir__)
+# Detect whether we're running from the repo (vagrant/prod/Vagrantfile)
+# or from the flat deploy location (~/.aquarco/vagrant/Vagrantfile).
+# In production, `aquarco init` copies this file to ~/.aquarco/vagrant/
+# alongside docker/, supervisor/, config/ assets one level up.
+if File.basename(__dir__) == "prod"
+  # In-repo: vagrant/prod/ → repo root is two levels up, scripts are siblings
+  REPO_ROOT   = File.expand_path("../..", __dir__)
+  SCRIPTS_DIR = File.expand_path("../scripts", __dir__)
+else
+  # Production install: ~/.aquarco/vagrant/ → assets are one level up
+  REPO_ROOT   = File.expand_path("..", __dir__)
+  SCRIPTS_DIR = File.expand_path("scripts", __dir__)
+end
 
 Vagrant.configure("2") do |config|
   config.vm.define "aquarco", primary: true, autostart: true do |machine|
