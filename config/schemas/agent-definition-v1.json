@@ -16,7 +16,7 @@
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "enum": ["review", "implement", "test", "design", "document", "analyze"]
+            "enum": ["review", "implement", "test", "design", "document", "analyze", "analyze-bug"]
           },
           "description": "Task categories this agent handles (pipeline agents)"
         }
