@@ -31,6 +31,7 @@ function getColorForStatus(status: StatusValue): ChipProps['color'] {
       return 'success'
     case 'FAILED':
     case 'TIMEOUT':
+    case 'CANCELLED':
       return 'error'
     case 'BLOCKED':
       return 'warning'

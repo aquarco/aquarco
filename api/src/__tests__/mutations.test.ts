@@ -293,10 +293,10 @@ describe('Mutation.retryTask', () => {
 // ── cancelTask ─────────────────────────────────────────────────────────────────
 
 describe('Mutation.cancelTask', () => {
-  it('should set status to failed with cancellation message', async () => {
+  it('should set status to cancelled with cancellation message', async () => {
     const cancelledRow = {
       ...baseTaskRow,
-      status: 'failed',
+      status: 'cancelled',
       error_message: 'Task cancelled by user',
     }
     const pool = mockPool([{ rows: [cancelledRow] }])
@@ -305,7 +305,7 @@ describe('Mutation.cancelTask', () => {
     const result = await Mutation.cancelTask(null, { id: 'task-1' }, ctx)
 
     expect(result.errors).toHaveLength(0)
-    expect(result.task!.status).toBe('FAILED')
+    expect(result.task!.status).toBe('CANCELLED')
     expect(result.task!.errorMessage).toBe('Task cancelled by user')
   })
 

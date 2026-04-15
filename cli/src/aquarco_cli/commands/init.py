@@ -88,6 +88,18 @@ def _restore_from_backup(vagrant: VagrantHelper, backup_dir: Path) -> bool:
         except (VagrantError, subprocess.CalledProcessError, OSError) as exc:
             print_error(f"  Failed to restore database: {exc}")
             ok = False
+        else:
+            # Reset all repos to 'pending' — clone dirs don't exist on a fresh VM.
+            # Safe if dirs exist: clone_worker skips repos with a valid .git dir.
+            try:
+                vagrant.ssh(
+                    f"cd {_COMPOSE_DIR} && docker compose exec -T postgres psql -U aquarco aquarco"
+                    " -c \"UPDATE aquarco.repositories SET clone_status = 'pending',"
+                    " error_message = NULL WHERE clone_status IN ('ready', 'error');\"",
+                )
+                print_success("  Reset repository clone statuses to pending")
+            except (VagrantError, subprocess.CalledProcessError, OSError):
+                print_warning("  Could not reset clone statuses (clone worker will recover)")
     else:
         print_warning("  aquarco.sql: not in backup, skipping database restore")
 
@@ -180,6 +192,23 @@ def init(
             if dst_supervisor.exists():
                 shutil.rmtree(dst_supervisor)
             shutil.copytree(src_supervisor, dst_supervisor)
+
+        # Copy supervisor config so provision.sh can install it to /etc/aquarco/
+        src_supervisor_config = install_root / "supervisor" / "config" / "supervisor.yaml"
+        dst_supervisor_config = Path.home() / ".aquarco" / "supervisor" / "config" / "supervisor.yaml"
+        if src_supervisor_config.exists():
+            dst_supervisor_config.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_supervisor_config, dst_supervisor_config)
+
+        # Copy agent/pipeline config so the Vagrantfile file provisioner can
+        # upload it to the VM (source: "../config" is relative to Vagrantfile)
+        src_config = install_root / "config"
+        dst_config = Path.home() / ".aquarco" / "config"
+        if src_config.is_dir():
+            if dst_config.exists():
+                shutil.rmtree(dst_config)
+            shutil.copytree(src_config, dst_config,
+                            ignore=shutil.ignore_patterns("._*"))
 
     vagrant = VagrantHelper()
     print_info(f"Using Vagrantfile in {vagrant.vagrant_dir}")

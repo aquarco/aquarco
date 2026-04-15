@@ -48,10 +48,26 @@ def _restore_db(vagrant: VagrantHelper, src: Path) -> bool:
             input=sql,
         )
         print_success(f"Database ← {sql_file}")
-        return True
     except (VagrantError, subprocess.CalledProcessError, OSError) as exc:
         print_error(f"Database restore failed: {exc}")
         return False
+
+    # Reset all repos to 'pending' so the clone worker re-verifies them on this VM.
+    # Safe even if dirs already exist: clone_worker skips repos with a valid .git dir.
+    try:
+        vagrant.ssh(
+            f"sudo -u agent HOME=/home/agent bash -c "
+            f"'cd {COMPOSE_DIR} && docker compose exec -T postgres psql -U aquarco aquarco "
+            f"-c \"UPDATE aquarco.repositories SET clone_status = '\\''pending'\\'',"
+            f" error_message = NULL WHERE clone_status IN ('\\''ready'\\'',"
+            f" '\\''error'\\'');\"'",
+        )
+        print_success("  Reset repository clone statuses to pending")
+    except (VagrantError, subprocess.CalledProcessError, OSError):
+        # Non-fatal: clone worker will catch stale statuses on first run anyway
+        print_warning("  Could not reset clone statuses (clone worker will recover)")
+
+    return True
 
 
 def _restore_credentials(vagrant: VagrantHelper, src: Path) -> bool:

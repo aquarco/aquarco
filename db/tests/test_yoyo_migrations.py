@@ -27,6 +27,7 @@ EXPECTED_MIGRATIONS = [
     "000_consolidated_init",
     "001_add_git_flow_config",
     "002_drop_pipeline_trigger_config",
+    "003_add_cancelled_task_status",
 ]
 
 

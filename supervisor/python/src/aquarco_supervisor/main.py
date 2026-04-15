@@ -177,6 +177,9 @@ class Supervisor:
                 # Check timed-out tasks
                 await self._check_timed_out_tasks()
 
+                # Cancel in-flight asyncio tasks that were externally stopped
+                await self._check_externally_cancelled_tasks()
+
                 # Resume rate-limited tasks whose cooldown has elapsed
                 await self._resume_rate_limited_tasks()
 
@@ -328,6 +331,27 @@ class Supervisor:
                 in_flight_task.cancel()
                 log.info("task_timed_out_cancelled", task_id=task_id)
             await self._tq.fail_task(task_id, "Task execution timed out (90 min)")
+
+    async def _check_externally_cancelled_tasks(self) -> None:
+        """Cancel asyncio tasks that were externally stopped (e.g. user-initiated cancel).
+
+        When the API sets a task to CANCELLED while it is executing, the in-flight
+        asyncio coroutine keeps running until it finishes or times out. This method
+        detects the mismatch and cancels the coroutine immediately.
+        """
+        if not self._in_flight_by_task or not self._tq:
+            return
+        task_ids = list(self._in_flight_by_task.keys())
+        for task_id in task_ids:
+            asyncio_task = self._in_flight_by_task.get(task_id)
+            if asyncio_task is None or asyncio_task.done():
+                continue
+            task = await self._tq.get_task(task_id)
+            if task is None or task.status == TaskStatus.CANCELLED:
+                asyncio_task.cancel()
+                self._in_flight_by_task.pop(task_id, None)
+                log.info("task_externally_cancelled", task_id=task_id,
+                         status=task.status if task else "deleted")
 
     async def _resume_rate_limited_tasks(self) -> None:
         """Move rate-limited tasks back to pending after their per-row cooldown elapses."""

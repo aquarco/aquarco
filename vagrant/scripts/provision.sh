@@ -207,6 +207,28 @@ if [[ "${DEV_MODE}" != "1" ]]; then
   else
     log "WARNING: /tmp/aquarco-docker not found; aquarco-stack.service may fail to start"
   fi
+
+  # Install agent/pipeline config to /home/agent/aquarco/config/
+  if [[ -d /tmp/aquarco-config ]]; then
+    mkdir -p "${AGENT_HOME}/aquarco/config"
+    # Exclude macOS resource-fork sidecar files (._*) that end up in tarballs
+    find /tmp/aquarco-config -name '._*' -delete 2>/dev/null || true
+    cp -r /tmp/aquarco-config/. "${AGENT_HOME}/aquarco/config/"
+    chown -R "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}/aquarco/config"
+    log "Agent/pipeline config installed to ${AGENT_HOME}/aquarco/config/"
+  else
+    log "WARNING: /tmp/aquarco-config not found; supervisor will have no agents or pipelines"
+  fi
+
+  # Install supervisor config to /etc/aquarco/supervisor.yaml
+  if [[ -f /tmp/aquarco-supervisor.yaml ]]; then
+    cp /tmp/aquarco-supervisor.yaml /etc/aquarco/supervisor.yaml
+    chown root:agent /etc/aquarco/supervisor.yaml
+    chmod 640 /etc/aquarco/supervisor.yaml
+    log "Supervisor config installed to /etc/aquarco/supervisor.yaml"
+  else
+    log "WARNING: /tmp/aquarco-supervisor.yaml not found; supervisor will fail to start"
+  fi
 fi
 
 # ─── 8b. Postgres credentials ─────────────────────────────────────────────────

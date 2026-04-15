@@ -114,7 +114,7 @@ class TaskQueue:
                     started_at = COALESCE(started_at, NOW()), error_message = NULL
                 WHERE id = %(id)s
             """
-        elif status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.TIMEOUT):
+        elif status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.TIMEOUT, TaskStatus.CANCELLED):
             query = """
                 UPDATE tasks
                 SET status = %(status)s, updated_at = NOW(), completed_at = NOW()

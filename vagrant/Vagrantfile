@@ -78,6 +78,19 @@ Vagrant.configure("2") do |config|
         machine.vm.provision "file",
           source: "../supervisor/python",
           destination: "/tmp/aquarco-supervisor-python"
+
+        # Upload supervisor config so provision.sh can install it to /etc/aquarco/
+        machine.vm.provision "shell", inline: "rm -f /tmp/aquarco-supervisor.yaml", run: "always"
+        machine.vm.provision "file",
+          source: "../supervisor/config/supervisor.yaml",
+          destination: "/tmp/aquarco-supervisor.yaml"
+
+        # Upload agent/pipeline config so provision.sh can place it in
+        # /home/agent/aquarco/config/
+        machine.vm.provision "shell", inline: "rm -rf /tmp/aquarco-config", run: "always"
+        machine.vm.provision "file",
+          source: "../config",
+          destination: "/tmp/aquarco-config"
       end
 
       machine.vm.provision "shell",

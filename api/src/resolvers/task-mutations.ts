@@ -71,7 +71,7 @@ export const taskMutations = {
 
     if (dbStatus === 'executing') {
       extraSql = ', started_at = NOW()'
-    } else if (dbStatus === 'completed' || dbStatus === 'failed') {
+    } else if (dbStatus === 'completed' || dbStatus === 'failed' || dbStatus === 'cancelled') {
       extraSql = ', completed_at = NOW()'
     }
 
@@ -218,12 +218,12 @@ export const taskMutations = {
     try {
       const result = await ctx.pool.query<Record<string, unknown>>(
         `UPDATE tasks
-         SET status = 'failed',
+         SET status = 'cancelled',
              error_message = 'Task cancelled by user',
              completed_at = NOW(),
              updated_at = NOW()
          WHERE id = $1
-           AND status NOT IN ('completed', 'failed', 'timeout', 'closed')
+           AND status NOT IN ('completed', 'failed', 'timeout', 'closed', 'cancelled')
          RETURNING *`,
         [args.id]
       )

@@ -77,7 +77,7 @@ export function TaskActions({ taskId, status, onMutationComplete }: TaskActionsP
 
   const upper = status?.toUpperCase()
   const canRetry = upper === 'FAILED' || upper === 'RATE_LIMITED' || upper === 'TIMEOUT'
-  const canRerun = upper === 'COMPLETED' || upper === 'FAILED' || upper === 'CLOSED'
+  const canRerun = upper === 'COMPLETED' || upper === 'FAILED' || upper === 'CLOSED' || upper === 'CANCELLED'
   const canClose = upper === 'COMPLETED'
   const canCancel = upper === 'PENDING' || upper === 'QUEUED' || upper === 'EXECUTING'
   const canUnblock = upper === 'BLOCKED'

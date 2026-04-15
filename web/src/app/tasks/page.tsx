@@ -29,7 +29,7 @@ import { monoStyle } from '@/lib/theme'
 import { formatDate, formatElapsed } from '@/lib/format'
 import { formatCost, formatTokens } from '@/lib/spending'
 
-const TASK_STATUSES = ['PENDING', 'QUEUED', 'PLANNING', 'EXECUTING', 'COMPLETED', 'FAILED', 'TIMEOUT', 'BLOCKED']
+const TASK_STATUSES = ['PENDING', 'QUEUED', 'PLANNING', 'EXECUTING', 'COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED', 'BLOCKED']
 
 interface Task {
   id: string
@@ -187,7 +187,7 @@ export default function TasksPage() {
                       )}
                     </TableCell>
                     <TableCell title={formatDate(task.updatedAt)}>
-                      {['COMPLETED', 'FAILED', 'TIMEOUT', 'CLOSED'].includes(task.status?.toUpperCase())
+                      {['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED', 'CLOSED'].includes(task.status?.toUpperCase())
                         ? formatDate(task.completedAt || task.updatedAt)
                         : formatElapsed(task.updatedAt)}
                     </TableCell>

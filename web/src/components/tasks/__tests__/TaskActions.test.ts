@@ -18,7 +18,7 @@ function getAvailableActions(status: string) {
   const upper = status?.toUpperCase()
   return {
     canRetry: upper === 'FAILED' || upper === 'RATE_LIMITED' || upper === 'TIMEOUT',
-    canRerun: upper === 'COMPLETED' || upper === 'FAILED' || upper === 'CLOSED',
+    canRerun: upper === 'COMPLETED' || upper === 'FAILED' || upper === 'CLOSED' || upper === 'CANCELLED',
     canClose: upper === 'COMPLETED',
     canCancel: upper === 'PENDING' || upper === 'QUEUED' || upper === 'EXECUTING',
     canUnblock: upper === 'BLOCKED',
@@ -127,6 +127,17 @@ describe('TaskActions status logic', () => {
   describe('CLOSED status', () => {
     it('allows rerun only', () => {
       const actions = getAvailableActions('CLOSED')
+      expect(actions.canRerun).toBe(true)
+      expect(actions.canRetry).toBe(false)
+      expect(actions.canClose).toBe(false)
+      expect(actions.canCancel).toBe(false)
+      expect(actions.canUnblock).toBe(false)
+    })
+  })
+
+  describe('CANCELLED status', () => {
+    it('allows rerun only', () => {
+      const actions = getAvailableActions('CANCELLED')
       expect(actions.canRerun).toBe(true)
       expect(actions.canRetry).toBe(false)
       expect(actions.canClose).toBe(false)
