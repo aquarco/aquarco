@@ -137,7 +137,7 @@ class TestVagrantComposeAlignment:
 
     @pytest.fixture
     def vagrantfile(self) -> str:
-        return read_file("vagrant/Vagrantfile")
+        return read_file("vagrant/prod/Vagrantfile")
 
     @pytest.fixture
     def compose(self) -> dict:

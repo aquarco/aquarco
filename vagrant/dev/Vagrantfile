@@ -1,0 +1,69 @@
+# Vagrantfile — Aquarco development VM
+# Ubuntu 24.04 LTS · VirtualBox NAT · single machine: aquarco-dev
+#
+# Source tree and log directory are mounted into the VM (hot reload).
+#
+# Usage:
+#   cd vagrant/dev && vagrant up
+
+REPO_ROOT   = File.expand_path("../..", __dir__)
+SCRIPTS_DIR = File.expand_path("../scripts", __dir__)
+
+Vagrant.configure("2") do |config|
+  config.vm.define "aquarco-dev", primary: true, autostart: false do |machine|
+    machine.vm.box      = "bento/ubuntu-24.04"
+    machine.vm.hostname = "aquarco-dev"
+
+    # Disable the default /vagrant sync
+    machine.vm.synced_folder ".", "/vagrant", disabled: true
+
+    # Mount the source tree and log directory into the VM
+    machine.vm.synced_folder REPO_ROOT, "/home/agent/aquarco", type: "virtualbox"
+    machine.vm.synced_folder "#{REPO_ROOT}/logs", "/var/log/aquarco-export",
+      type:          "virtualbox",
+      create:        true,
+      mount_options: ["dmode=755", "fmode=644"]
+
+    # VirtualBox provider settings
+    machine.vm.provider "virtualbox" do |vb|
+      vb.name   = "aquarco-dev"
+      vb.memory = 6144
+      vb.cpus   = 3
+      vb.gui    = false
+
+      vb.customize ["modifyvm", :id, "--ioapic",        "on"]
+      vb.customize ["modifyvm", :id, "--audio-enabled", "off"]
+      vb.customize ["modifyvm", :id, "--usb-ohci",      "off"]
+    end
+
+    # -------------------------------------------------------------------------
+    # Port forwarding
+    # -------------------------------------------------------------------------
+    aquarco_port = ENV.fetch("AQUARCO_PORT", "8080").to_i
+    machine.vm.network "forwarded_port", guest: 8080, host: aquarco_port, id: "proxy"     # Caddy reverse proxy
+    machine.vm.network "forwarded_port", guest: 5432, host: 15432,        id: "postgres"  # PostgreSQL (host 15432 avoids local PG conflict)
+
+    # -------------------------------------------------------------------------
+    # Provisioning — upload assets then run provision.sh
+    # -------------------------------------------------------------------------
+
+    # Sibling script required by provision.sh
+    machine.vm.provision "file",
+      source:      "#{SCRIPTS_DIR}/setup-network-tracking.sh",
+      destination: "/tmp/setup-network-tracking.sh"
+
+    # Docker Compose files (provision.sh reads from /tmp/aquarco-docker even in
+    # dev mode; the synced folder covers the live source tree, not this step)
+    machine.vm.provision "shell", inline: "rm -rf /tmp/aquarco-docker", run: "always"
+    machine.vm.provision "file",
+      source:      "#{REPO_ROOT}/docker",
+      destination: "/tmp/aquarco-docker"
+
+    machine.vm.provision "shell",
+      path: "#{SCRIPTS_DIR}/provision.sh",
+      env: {
+        "AQUARCO_DOCKER_MODE" => ENV.fetch("AQUARCO_DOCKER_MODE", "development"),
+        "DEV_MODE"            => "1",
+      }
+  end
+end

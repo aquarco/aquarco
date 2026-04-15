@@ -85,17 +85,17 @@ class CliConfig:
             if (home_vagrant / "Vagrantfile").exists():
                 return home_vagrant.resolve()
             install_root = Path(sys.executable).parent.parent
-            candidate = install_root / "vagrant" / "Vagrantfile"
+            candidate = install_root / "vagrant" / "prod" / "Vagrantfile"
             if candidate.exists():
-                return (install_root / "vagrant").resolve()
+                return (install_root / "vagrant" / "prod").resolve()
 
-        # Walk up from cwd looking for vagrant/Vagrantfile (bounded)
+        # Walk up from cwd looking for vagrant/prod/Vagrantfile (bounded)
         current = Path.cwd()
         ancestors = [current, *current.parents]
         for parent in ancestors[: self._MAX_PARENT_DEPTH]:
-            candidate = parent / "vagrant" / "Vagrantfile"
+            candidate = parent / "vagrant" / "prod" / "Vagrantfile"
             if candidate.exists():
-                return (parent / "vagrant").resolve()
+                return (parent / "vagrant" / "prod").resolve()
             # Also check if Vagrantfile is directly in the directory
             if (parent / "Vagrantfile").exists():
                 return parent.resolve()
@@ -105,9 +105,9 @@ class CliConfig:
         # runs aquarco from outside the project directory (e.g. from ~).
         pkg_dir = Path(__file__).resolve().parent
         for ancestor in [pkg_dir, *pkg_dir.parents[: self._MAX_PARENT_DEPTH]]:
-            candidate = ancestor / "vagrant" / "Vagrantfile"
+            candidate = ancestor / "vagrant" / "prod" / "Vagrantfile"
             if candidate.exists():
-                return (ancestor / "vagrant").resolve()
+                return (ancestor / "vagrant" / "prod").resolve()
 
         return current
 

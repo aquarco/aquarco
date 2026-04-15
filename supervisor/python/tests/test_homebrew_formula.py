@@ -1,9 +1,10 @@
-"""Tests for the Homebrew formula (homebrew/aquarco.rb).
+"""Tests for the Homebrew cask (homebrew/aquarco.rb).
 
-Validates that the formula follows Homebrew conventions:
-- No unsupported `depends_on cask:` directives
-- A `caveats` block instructs users to install cask dependencies manually
-- Required formula dependencies are present
+Validates that the cask follows Homebrew conventions for a prebuilt binary:
+- Uses `cask` syntax (not Formula)
+- Declares cask dependencies on VirtualBox and Vagrant
+- Has required lifecycle hooks (postflight, uninstall_preflight, zap)
+- Installs the binary correctly
 """
 
 from __future__ import annotations
@@ -18,85 +19,66 @@ FORMULA_PATH = Path(__file__).resolve().parents[3] / "homebrew" / "aquarco.rb"
 
 @pytest.fixture
 def formula_text() -> str:
-    """Load the Homebrew formula source."""
+    """Load the Homebrew cask source."""
     return FORMULA_PATH.read_text()
 
 
-class TestHomebrewFormulaNoCaskDeps:
-    """Homebrew formulas cannot declare cask dependencies.
+class TestHomebrewCaskStructure:
+    """Basic structural checks — file must be a Homebrew Cask, not a Formula."""
 
-    The `depends_on cask:` syntax is not supported by Homebrew core and causes
-    `brew audit` failures.  These tests ensure the unsupported directives were
-    removed and stay removed.
-    """
+    def test_is_cask_not_formula(self, formula_text: str) -> None:
+        """File must use `cask` DSL, not `class ... < Formula`."""
+        assert re.search(r'^cask\s+"aquarco"\s+do\b', formula_text, re.MULTILINE)
+        assert not re.search(r"class\s+Aquarco\s*<\s*Formula", formula_text)
 
-    def test_no_depends_on_cask_vagrant(self, formula_text: str) -> None:
-        """Formula must not declare a cask dependency on Vagrant."""
-        assert 'depends_on cask: "vagrant"' not in formula_text
+    def test_has_version_stanza(self, formula_text: str) -> None:
+        """Cask must declare a version."""
+        assert re.search(r'^\s+version\s+', formula_text, re.MULTILINE)
 
-    def test_no_depends_on_cask_virtualbox(self, formula_text: str) -> None:
-        """Formula must not declare a cask dependency on VirtualBox."""
-        assert 'depends_on cask: "virtualbox"' not in formula_text
+    def test_has_sha256_stanza(self, formula_text: str) -> None:
+        """Cask must declare a sha256 checksum."""
+        assert re.search(r'^\s+sha256\s+', formula_text, re.MULTILINE)
 
-    def test_no_depends_on_cask_any(self, formula_text: str) -> None:
-        """Formula must not use `depends_on cask:` for any package."""
-        matches = re.findall(r"depends_on\s+cask:", formula_text)
-        assert matches == [], f"Found unsupported cask deps: {matches}"
+    def test_has_url_stanza(self, formula_text: str) -> None:
+        """Cask must declare a download URL."""
+        assert re.search(r'^\s+url\s+', formula_text, re.MULTILINE)
 
-
-class TestHomebrewFormulaCaveats:
-    """The formula should include a caveats block that tells users to install
-    VirtualBox and Vagrant manually via `brew install --cask`."""
-
-    def test_caveats_method_exists(self, formula_text: str) -> None:
-        """Formula must define a `def caveats` method."""
-        assert re.search(r"^\s+def caveats\b", formula_text, re.MULTILINE)
-
-    def test_caveats_mentions_virtualbox(self, formula_text: str) -> None:
-        """Caveats must mention VirtualBox so users know to install it."""
-        caveats_block = _extract_caveats(formula_text)
-        assert "virtualbox" in caveats_block.lower()
-
-    def test_caveats_mentions_vagrant(self, formula_text: str) -> None:
-        """Caveats must mention Vagrant so users know to install it."""
-        caveats_block = _extract_caveats(formula_text)
-        assert "vagrant" in caveats_block.lower()
-
-    def test_caveats_includes_install_commands(self, formula_text: str) -> None:
-        """Caveats should include the actual brew install commands."""
-        caveats_block = _extract_caveats(formula_text)
-        assert "brew install --cask virtualbox" in caveats_block
-        assert "brew install --cask vagrant" in caveats_block
+    def test_has_binary_stanza(self, formula_text: str) -> None:
+        """Cask must expose the binary via the `binary` stanza."""
+        assert re.search(r'^\s+binary\s+', formula_text, re.MULTILINE)
 
 
-class TestHomebrewFormulaDependencies:
-    """Verify that legitimate formula-level dependencies are still declared."""
+class TestHomebrewCaskDependencies:
+    """Cask must declare VirtualBox and Vagrant as cask dependencies."""
 
-    def test_depends_on_python(self, formula_text: str) -> None:
-        """Formula must depend on python@3.11."""
-        assert 'depends_on "python@3.11"' in formula_text
+    def test_depends_on_virtualbox(self, formula_text: str) -> None:
+        """Cask must depend on the VirtualBox cask."""
+        assert 'depends_on cask: "virtualbox"' in formula_text
 
-
-class TestHomebrewFormulaStructure:
-    """Basic structural checks on the formula."""
-
-    def test_class_inherits_formula(self, formula_text: str) -> None:
-        """Formula class must inherit from Formula."""
-        assert re.search(r"class\s+Aquarco\s*<\s*Formula", formula_text)
-
-    def test_test_block_exists(self, formula_text: str) -> None:
-        """Formula must contain a `test do` block."""
-        assert re.search(r"^\s+test do\b", formula_text, re.MULTILINE)
-
-    def test_install_block_exists(self, formula_text: str) -> None:
-        """Formula must contain a `def install` block."""
-        assert re.search(r"^\s+def install\b", formula_text, re.MULTILINE)
+    def test_depends_on_vagrant(self, formula_text: str) -> None:
+        """Cask must depend on the Vagrant cask."""
+        assert 'depends_on cask: "vagrant"' in formula_text
 
 
-def _extract_caveats(formula_text: str) -> str:
-    """Extract the caveats heredoc content from the formula."""
-    match = re.search(
-        r"def caveats.*?<<~EOS(.*?)EOS", formula_text, re.DOTALL
-    )
-    assert match, "Could not find caveats heredoc in formula"
-    return match.group(1)
+class TestHomebrewCaskLifecycle:
+    """Cask must define the required lifecycle hooks."""
+
+    def test_has_postflight(self, formula_text: str) -> None:
+        """Cask must have a postflight block (quarantine strip, warm-up)."""
+        assert re.search(r'^\s+postflight\s+do\b', formula_text, re.MULTILINE)
+
+    def test_postflight_strips_quarantine(self, formula_text: str) -> None:
+        """postflight must strip Gatekeeper quarantine from the binary."""
+        assert "com.apple.quarantine" in formula_text
+
+    def test_has_uninstall_preflight(self, formula_text: str) -> None:
+        """Cask must have an uninstall_preflight block to back up before removal."""
+        assert re.search(r'^\s+uninstall_preflight\s+do\b', formula_text, re.MULTILINE)
+
+    def test_has_zap_stanza(self, formula_text: str) -> None:
+        """Cask must have a zap stanza for full data removal."""
+        assert re.search(r'^\s+zap\s+', formula_text, re.MULTILINE)
+
+    def test_zap_removes_aquarco_dir(self, formula_text: str) -> None:
+        """zap must trash the ~/.aquarco user data directory."""
+        assert '"~/.aquarco"' in formula_text or "'~/.aquarco'" in formula_text

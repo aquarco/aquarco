@@ -167,7 +167,7 @@ def init(
         dst_vagrant = Path.home() / ".aquarco" / "vagrant"
         if src_vagrant.is_dir():
             dst_vagrant.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_vagrant / "Vagrantfile", dst_vagrant / "Vagrantfile")
+            shutil.copy2(src_vagrant / "prod" / "Vagrantfile", dst_vagrant / "Vagrantfile")
             src_scripts = src_vagrant / "scripts"
             if src_scripts.is_dir():
                 dst_scripts = dst_vagrant / "scripts"
@@ -176,7 +176,7 @@ def init(
                 shutil.copytree(src_scripts, dst_scripts)
 
         # Copy docker compose files so the Vagrantfile file provisioner can
-        # upload them to the VM (source: "../docker" is relative to Vagrantfile)
+        # upload them to the VM (REPO_ROOT/docker is resolved in Vagrantfile via __dir__)
         src_docker = install_root / "docker"
         dst_docker = Path.home() / ".aquarco" / "docker"
         if src_docker.is_dir():
@@ -185,7 +185,7 @@ def init(
             shutil.copytree(src_docker, dst_docker)
 
         # Copy supervisor Python package so the Vagrantfile file provisioner can
-        # upload it to the VM (source: "../supervisor/python" is relative to Vagrantfile)
+        # upload it to the VM (REPO_ROOT/supervisor/python is resolved in Vagrantfile via __dir__)
         src_supervisor = install_root / "supervisor" / "python"
         dst_supervisor = Path.home() / ".aquarco" / "supervisor" / "python"
         if src_supervisor.is_dir():
@@ -201,7 +201,7 @@ def init(
             shutil.copy2(src_supervisor_config, dst_supervisor_config)
 
         # Copy agent/pipeline config so the Vagrantfile file provisioner can
-        # upload it to the VM (source: "../config" is relative to Vagrantfile)
+        # upload it to the VM (REPO_ROOT/config is resolved in Vagrantfile via __dir__)
         src_config = install_root / "config"
         dst_config = Path.home() / ".aquarco" / "config"
         if src_config.is_dir():

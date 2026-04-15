@@ -377,7 +377,7 @@ class TestVagrantfile:
 
     @pytest.fixture
     def vagrantfile(self) -> str:
-        return read_file("vagrant/Vagrantfile")
+        return read_file("vagrant/prod/Vagrantfile")
 
     def test_proxy_port_forwarded(self, vagrantfile: str):
         """Port 8080 (Caddy proxy) must be forwarded."""

@@ -1358,7 +1358,7 @@ class TestRealAgentDefinitions:
         )
         schema = _pipeline_agent_schema()
         definitions = load_agent_definitions_from_files(pipeline_dir, schema=schema)
-        assert len(definitions) == 6  # analyze, design, implementation, review, test, docs
+        assert len(definitions) == 7  # analyze, analyze-bug, design, implementation, review, test, docs
 
     def test_system_definitions_valid(self) -> None:
         system_dir = (
@@ -1391,7 +1391,7 @@ class TestRealPipelineDefinitions:
         pipelines_file = Path(__file__).parent.parent.parent.parent / "config" / "pipelines.yaml"
         schema = _pipeline_schema()
         pipelines = load_pipeline_definitions_from_file(pipelines_file, schema=schema)
-        assert len(pipelines) == 3  # 3 pipelines in config
+        assert len(pipelines) == 4  # 4 pipelines in config
 
     def test_pipelines_have_versions(self) -> None:
         pipelines_file = Path(__file__).parent.parent.parent.parent / "config" / "pipelines.yaml"
