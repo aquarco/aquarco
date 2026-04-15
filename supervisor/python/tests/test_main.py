@@ -238,34 +238,109 @@ async def test_run_task_failure_calls_fail_task(sample_config: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_check_timed_out_tasks(sample_config: Any) -> None:
-    """_check_timed_out_tasks marks timed-out tasks as TIMEOUT."""
+async def test_check_externally_cancelled_cancels_inflight(sample_config: Any) -> None:
+    """_check_externally_cancelled_tasks cancels asyncio tasks whose DB status is CANCELLED."""
+    from aquarco_supervisor.models import Task, TaskStatus
+
     supervisor = Supervisor(sample_config, {})
 
     mock_tq = AsyncMock()
-    mock_tq.get_timed_out_tasks = AsyncMock(return_value=["task-abc", "task-xyz"])
-
+    cancelled_task = MagicMock(spec=Task)
+    cancelled_task.status = TaskStatus.CANCELLED
+    mock_tq.get_task = AsyncMock(return_value=cancelled_task)
     supervisor._tq = mock_tq
 
-    await supervisor._check_timed_out_tasks()
+    # Create a fake asyncio task that is not done
+    mock_asyncio_task = MagicMock()
+    mock_asyncio_task.done.return_value = False
+    supervisor._in_flight_by_task = {"task-cancel-1": mock_asyncio_task}
 
-    assert mock_tq.fail_task.await_count == 2
-    # update_task_status is no longer called — fail_task handles the status
-    mock_tq.update_task_status.assert_not_called()
+    await supervisor._check_externally_cancelled_tasks()
 
-    calls = mock_tq.fail_task.await_args_list
-    task_ids = [c.args[0] for c in calls]
-    assert "task-abc" in task_ids
-    assert "task-xyz" in task_ids
+    mock_asyncio_task.cancel.assert_called_once()
+    assert "task-cancel-1" not in supervisor._in_flight_by_task
 
 
 @pytest.mark.asyncio
-async def test_check_timed_out_tasks_no_tq(sample_config: Any) -> None:
-    """_check_timed_out_tasks does nothing if task queue not initialized."""
+async def test_check_externally_cancelled_skips_running_tasks(sample_config: Any) -> None:
+    """_check_externally_cancelled_tasks does NOT cancel tasks still in EXECUTING status."""
+    from aquarco_supervisor.models import Task, TaskStatus
+
+    supervisor = Supervisor(sample_config, {})
+
+    mock_tq = AsyncMock()
+    executing_task = MagicMock(spec=Task)
+    executing_task.status = TaskStatus.EXECUTING
+    mock_tq.get_task = AsyncMock(return_value=executing_task)
+    supervisor._tq = mock_tq
+
+    mock_asyncio_task = MagicMock()
+    mock_asyncio_task.done.return_value = False
+    supervisor._in_flight_by_task = {"task-running-1": mock_asyncio_task}
+
+    await supervisor._check_externally_cancelled_tasks()
+
+    mock_asyncio_task.cancel.assert_not_called()
+    assert "task-running-1" in supervisor._in_flight_by_task
+
+
+@pytest.mark.asyncio
+async def test_check_externally_cancelled_handles_deleted_task(sample_config: Any) -> None:
+    """_check_externally_cancelled_tasks cancels asyncio task when DB task is None (deleted)."""
+    supervisor = Supervisor(sample_config, {})
+
+    mock_tq = AsyncMock()
+    mock_tq.get_task = AsyncMock(return_value=None)
+    supervisor._tq = mock_tq
+
+    mock_asyncio_task = MagicMock()
+    mock_asyncio_task.done.return_value = False
+    supervisor._in_flight_by_task = {"task-deleted-1": mock_asyncio_task}
+
+    await supervisor._check_externally_cancelled_tasks()
+
+    mock_asyncio_task.cancel.assert_called_once()
+    assert "task-deleted-1" not in supervisor._in_flight_by_task
+
+
+@pytest.mark.asyncio
+async def test_check_externally_cancelled_skips_done_asyncio_tasks(sample_config: Any) -> None:
+    """_check_externally_cancelled_tasks skips asyncio tasks that are already done."""
+    supervisor = Supervisor(sample_config, {})
+
+    mock_tq = AsyncMock()
+    supervisor._tq = mock_tq
+
+    mock_asyncio_task = MagicMock()
+    mock_asyncio_task.done.return_value = True
+    supervisor._in_flight_by_task = {"task-done-1": mock_asyncio_task}
+
+    await supervisor._check_externally_cancelled_tasks()
+
+    mock_tq.get_task.assert_not_called()
+    mock_asyncio_task.cancel.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_check_externally_cancelled_no_tq(sample_config: Any) -> None:
+    """_check_externally_cancelled_tasks does nothing if task queue not initialized."""
     supervisor = Supervisor(sample_config, {})
     supervisor._tq = None
+    supervisor._in_flight_by_task = {"task-1": MagicMock()}
     # Should complete without error
-    await supervisor._check_timed_out_tasks()
+    await supervisor._check_externally_cancelled_tasks()
+
+
+@pytest.mark.asyncio
+async def test_check_externally_cancelled_empty_inflight(sample_config: Any) -> None:
+    """_check_externally_cancelled_tasks returns early when no in-flight tasks."""
+    supervisor = Supervisor(sample_config, {})
+    supervisor._tq = AsyncMock()
+    supervisor._in_flight_by_task = {}
+
+    await supervisor._check_externally_cancelled_tasks()
+
+    supervisor._tq.get_task.assert_not_called()
 
 
 @pytest.mark.asyncio

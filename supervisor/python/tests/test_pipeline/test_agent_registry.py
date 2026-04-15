@@ -149,8 +149,8 @@ def test_get_agent_timeout(tmp_path: Path) -> None:
         "default": {},
     }
     assert reg.get_agent_timeout("fast") == 10
-    assert reg.get_agent_timeout("default") == 30
-    assert reg.get_agent_timeout("unknown") == 30
+    assert reg.get_agent_timeout("default") == 60
+    assert reg.get_agent_timeout("unknown") == 60
 
 
 def test_get_agent_prompt_file(tmp_path: Path) -> None:
