@@ -607,3 +607,106 @@ class TestConditionGuardCompleteness:
                         f"Stage '{stage['name']}' has condition with both yes and no "
                         f"jumping to itself — infinite loop"
                     )
+
+    def test_single_jump_to_self_has_max_repeats(self, stages: list[dict]) -> None:
+        """A condition with only one jump key pointing to self must have maxRepeats.
+
+        Review finding: the original test only caught the case where BOTH yes and no
+        point to self.  A condition with only 'yes' (or only 'no') pointing to self
+        could still loop infinitely if the condition always evaluates the same way.
+        The maxRepeats guard is the safety net for this scenario.
+        """
+        for stage in stages:
+            for cond in stage.get("conditions", []):
+                for jump_key in ("yes", "no"):
+                    target = cond.get(jump_key)
+                    if target == stage["name"]:
+                        assert "maxRepeats" in cond, (
+                            f"Stage '{stage['name']}': condition {jump_key} points to self "
+                            f"without maxRepeats guard — potential infinite loop: {cond}"
+                        )
+
+
+# ---------------------------------------------------------------------------
+# Extended cross-pipeline validation (addresses review findings)
+# ---------------------------------------------------------------------------
+
+
+class TestCrossPipelineStageIntegrity:
+    """Additional cross-pipeline validations covering stage and condition integrity."""
+
+    @pytest.fixture()
+    def all_pipelines(self) -> list[dict]:
+        doc = _pipelines_doc()
+        pipelines = doc.get("pipelines", [])
+        if isinstance(pipelines, dict):
+            return list(pipelines.values())
+        return pipelines
+
+    def test_all_pipelines_have_at_least_one_stage(self, all_pipelines: list[dict]) -> None:
+        """Every pipeline must define at least one stage."""
+        for pipeline in all_pipelines:
+            stages = pipeline.get("stages", [])
+            assert len(stages) > 0, (
+                f"Pipeline '{pipeline['name']}' has no stages"
+            )
+
+    def test_all_pipeline_stages_have_category(self, all_pipelines: list[dict]) -> None:
+        """Every stage in every pipeline must specify a category."""
+        for pipeline in all_pipelines:
+            for stage in pipeline.get("stages", []):
+                assert "category" in stage, (
+                    f"Pipeline '{pipeline['name']}' stage '{stage.get('name', '?')}' "
+                    f"is missing a category"
+                )
+
+    def test_all_pipeline_stages_have_name(self, all_pipelines: list[dict]) -> None:
+        """Every stage in every pipeline must have a name."""
+        for pipeline in all_pipelines:
+            for i, stage in enumerate(pipeline.get("stages", [])):
+                assert "name" in stage, (
+                    f"Pipeline '{pipeline['name']}' stage index {i} is missing a name"
+                )
+
+    def test_stage_names_unique_within_pipeline(self, all_pipelines: list[dict]) -> None:
+        """Stage names must be unique within each pipeline."""
+        for pipeline in all_pipelines:
+            names = [s["name"] for s in pipeline.get("stages", []) if "name" in s]
+            assert len(names) == len(set(names)), (
+                f"Pipeline '{pipeline['name']}' has duplicate stage names: {names}"
+            )
+
+    def test_all_condition_jumps_reference_valid_stages_across_all_pipelines(
+        self, all_pipelines: list[dict]
+    ) -> None:
+        """yes/no jump targets must reference existing stage names in ALL pipelines."""
+        for pipeline in all_pipelines:
+            stage_names = {s["name"] for s in pipeline.get("stages", []) if "name" in s}
+            for stage in pipeline.get("stages", []):
+                for cond in stage.get("conditions", []):
+                    for jump_key in ("yes", "no"):
+                        target = cond.get(jump_key)
+                        if target is not None:
+                            assert target in stage_names, (
+                                f"Pipeline '{pipeline['name']}' stage '{stage['name']}': "
+                                f"condition {jump_key}='{target}' references non-existent stage"
+                            )
+
+    def test_all_conditions_have_max_repeats_across_all_pipelines(
+        self, all_pipelines: list[dict]
+    ) -> None:
+        """Every condition across ALL pipelines should have a maxRepeats guard."""
+        for pipeline in all_pipelines:
+            for stage in pipeline.get("stages", []):
+                for cond in stage.get("conditions", []):
+                    assert "maxRepeats" in cond, (
+                        f"Pipeline '{pipeline['name']}' stage '{stage['name']}': "
+                        f"condition missing maxRepeats guard: {cond}"
+                    )
+
+    def test_all_pipelines_have_version(self, all_pipelines: list[dict]) -> None:
+        """Every pipeline must specify a version string."""
+        for pipeline in all_pipelines:
+            assert "version" in pipeline, (
+                f"Pipeline '{pipeline['name']}' is missing a version field"
+            )
