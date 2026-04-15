@@ -45,3 +45,15 @@ Install: `pip install -e cli/` (requires Python 3.10+)
 | `aquarco ui db` | Start Adminer and open database admin |
 | `aquarco ui api` | Open GraphQL playground |
 | `aquarco ui stop` | Stop all UI services (web, adminer) |
+
+## Documentation
+
+For comprehensive guides on architecture, development, and operations, see the **[GitHub Wiki](https://github.com/aquarco/aquarco/wiki)**:
+
+- **[Quick-Start](https://github.com/aquarco/aquarco/wiki/Quick-Start)** — Step-by-step first-time setup
+- **[Architecture](https://github.com/aquarco/aquarco/wiki/Architecture)** — System design and Docker services
+- **[Agent-System](https://github.com/aquarco/aquarco/wiki/Agent-System)** — How agents work and are selected
+- **[Pipeline-System](https://github.com/aquarco/aquarco/wiki/Pipeline-System)** — Multi-stage execution and context
+- **[Dev-Setup](https://github.com/aquarco/aquarco/wiki/Dev-Setup)** — Contributing and development environment
+- **[Database](https://github.com/aquarco/aquarco/wiki/Database)** — Schema and migrations
+- **[Operations](https://github.com/aquarco/aquarco/wiki/Operations)** — Backup, restore, and monitoring

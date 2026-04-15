@@ -1,5 +1,31 @@
 # Changelog
 
+## [2026-04-15] — Structured GitHub Wiki Documentation (#130)
+
+### Added
+- **Comprehensive GitHub Wiki** — 16 new structured documentation pages covering all aspects of Aquarco:
+  - **Home.md** — Project overview and quick introduction
+  - **Quick-Start.md** — Step-by-step first-time setup guide
+  - **CLI-Reference.md** — Complete CLI command reference with all flags and options
+  - **Architecture.md** — Detailed system architecture, VM setup, and Docker services
+  - **File-Layout.md** — Repository directory structure and file organization
+  - **Components.md** — Individual Docker service documentation
+  - **Agent-System.md** — Agent definitions, discovery, and category-based selection
+  - **Pipeline-System.md** — Pipeline stages, lifecycle, context accumulation, and spending
+  - **Conditions-Engine.md** — Exit gate conditions syntax and evaluation
+  - **Git-Flow.md** — Git branching modes (Simple/Git Flow), naming conventions, and back-merge logic
+  - **Auth-Flows.md** — Claude PKCE and GitHub device OAuth flows
+  - **Database.md** — PostgreSQL schema, all 11 tables, and migrations
+  - **Dev-Setup.md** — Contributing guidelines, development mode, and testing
+  - **Operations.md** — Backup, restore, update procedures, and monitoring
+  - **_Sidebar.md** — Wiki navigation sidebar
+  - **_Footer.md** — Footer shown on every wiki page
+- **Wiki documentation standards** — CLAUDE.md updated with page index table, URL slug mapping, and conventions for adding new pages
+- **Comprehensive test coverage** — 269 tests validating wiki structure, content integrity, cross-links, and compliance with documentation standards
+
+### Changed
+- **CLAUDE.md** — Added "GitHub Wiki Structure" section documenting canonical page layout and update procedures
+
 ## [2026-04-12]
 
 ### Added
