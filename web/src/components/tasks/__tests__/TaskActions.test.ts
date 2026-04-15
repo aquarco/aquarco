@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest'
 function getAvailableActions(status: string) {
   const upper = status?.toUpperCase()
   return {
-    canRetry: upper === 'FAILED' || upper === 'RATE_LIMITED' || upper === 'TIMEOUT',
+    canContinue: upper === 'FAILED' || upper === 'RATE_LIMITED' || upper === 'TIMEOUT',
     canRerun: upper === 'COMPLETED' || upper === 'FAILED' || upper === 'CLOSED' || upper === 'CANCELLED',
     canClose: upper === 'COMPLETED',
     canCancel: upper === 'PENDING' || upper === 'QUEUED' || upper === 'EXECUTING',
@@ -29,9 +29,9 @@ function getAvailableActions(status: string) {
 
 describe('TaskActions status logic', () => {
   describe('FAILED status', () => {
-    it('allows retry and rerun', () => {
+    it('allows continue and rerun', () => {
       const actions = getAvailableActions('FAILED')
-      expect(actions.canRetry).toBe(true)
+      expect(actions.canContinue).toBe(true)
       expect(actions.canRerun).toBe(true)
     })
 
@@ -50,9 +50,9 @@ describe('TaskActions status logic', () => {
       expect(actions.canClose).toBe(true)
     })
 
-    it('disallows retry, cancel, unblock', () => {
+    it('disallows continue, cancel, unblock', () => {
       const actions = getAvailableActions('COMPLETED')
-      expect(actions.canRetry).toBe(false)
+      expect(actions.canContinue).toBe(false)
       expect(actions.canCancel).toBe(false)
       expect(actions.canUnblock).toBe(false)
     })
@@ -62,7 +62,7 @@ describe('TaskActions status logic', () => {
     it('allows cancel only', () => {
       const actions = getAvailableActions('PENDING')
       expect(actions.canCancel).toBe(true)
-      expect(actions.canRetry).toBe(false)
+      expect(actions.canContinue).toBe(false)
       expect(actions.canRerun).toBe(false)
       expect(actions.canClose).toBe(false)
       expect(actions.canUnblock).toBe(false)
@@ -73,7 +73,7 @@ describe('TaskActions status logic', () => {
     it('allows cancel only', () => {
       const actions = getAvailableActions('QUEUED')
       expect(actions.canCancel).toBe(true)
-      expect(actions.canRetry).toBe(false)
+      expect(actions.canContinue).toBe(false)
       expect(actions.canRerun).toBe(false)
       expect(actions.canClose).toBe(false)
       expect(actions.canUnblock).toBe(false)
@@ -84,7 +84,7 @@ describe('TaskActions status logic', () => {
     it('allows cancel only', () => {
       const actions = getAvailableActions('EXECUTING')
       expect(actions.canCancel).toBe(true)
-      expect(actions.canRetry).toBe(false)
+      expect(actions.canContinue).toBe(false)
       expect(actions.canRerun).toBe(false)
       expect(actions.canClose).toBe(false)
       expect(actions.canUnblock).toBe(false)
@@ -95,7 +95,7 @@ describe('TaskActions status logic', () => {
     it('allows unblock only', () => {
       const actions = getAvailableActions('BLOCKED')
       expect(actions.canUnblock).toBe(true)
-      expect(actions.canRetry).toBe(false)
+      expect(actions.canContinue).toBe(false)
       expect(actions.canRerun).toBe(false)
       expect(actions.canClose).toBe(false)
       expect(actions.canCancel).toBe(false)
@@ -103,9 +103,9 @@ describe('TaskActions status logic', () => {
   })
 
   describe('RATE_LIMITED status', () => {
-    it('allows retry only', () => {
+    it('allows continue only', () => {
       const actions = getAvailableActions('RATE_LIMITED')
-      expect(actions.canRetry).toBe(true)
+      expect(actions.canContinue).toBe(true)
       expect(actions.canRerun).toBe(false)
       expect(actions.canClose).toBe(false)
       expect(actions.canCancel).toBe(false)
@@ -114,9 +114,9 @@ describe('TaskActions status logic', () => {
   })
 
   describe('TIMEOUT status', () => {
-    it('allows retry only', () => {
+    it('allows continue only', () => {
       const actions = getAvailableActions('TIMEOUT')
-      expect(actions.canRetry).toBe(true)
+      expect(actions.canContinue).toBe(true)
       expect(actions.canRerun).toBe(false)
       expect(actions.canClose).toBe(false)
       expect(actions.canCancel).toBe(false)
@@ -128,7 +128,7 @@ describe('TaskActions status logic', () => {
     it('allows rerun only', () => {
       const actions = getAvailableActions('CLOSED')
       expect(actions.canRerun).toBe(true)
-      expect(actions.canRetry).toBe(false)
+      expect(actions.canContinue).toBe(false)
       expect(actions.canClose).toBe(false)
       expect(actions.canCancel).toBe(false)
       expect(actions.canUnblock).toBe(false)
@@ -139,7 +139,7 @@ describe('TaskActions status logic', () => {
     it('allows rerun only', () => {
       const actions = getAvailableActions('CANCELLED')
       expect(actions.canRerun).toBe(true)
-      expect(actions.canRetry).toBe(false)
+      expect(actions.canContinue).toBe(false)
       expect(actions.canClose).toBe(false)
       expect(actions.canCancel).toBe(false)
       expect(actions.canUnblock).toBe(false)
@@ -149,7 +149,7 @@ describe('TaskActions status logic', () => {
   describe('case insensitivity', () => {
     it('handles lowercase status', () => {
       const actions = getAvailableActions('failed')
-      expect(actions.canRetry).toBe(true)
+      expect(actions.canContinue).toBe(true)
     })
 
     it('handles mixed case status', () => {
@@ -162,7 +162,7 @@ describe('TaskActions status logic', () => {
   describe('unknown status', () => {
     it('shows no actions for unrecognized status', () => {
       const actions = getAvailableActions('UNKNOWN')
-      expect(actions.canRetry).toBe(false)
+      expect(actions.canContinue).toBe(false)
       expect(actions.canRerun).toBe(false)
       expect(actions.canClose).toBe(false)
       expect(actions.canCancel).toBe(false)

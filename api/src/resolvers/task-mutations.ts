@@ -90,7 +90,7 @@ export const taskMutations = {
     }
   },
 
-  async retryTask(_: unknown, args: { id: string }, ctx: Context) {
+  async continueTask(_: unknown, args: { id: string }, ctx: Context) {
     try {
       // Reset the latest failed/rate_limited stage
       await ctx.pool.query(

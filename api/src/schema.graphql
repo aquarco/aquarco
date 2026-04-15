@@ -44,7 +44,7 @@ type Mutation {
   # Task management
   createTask(input: CreateTaskInput!): TaskPayload!
   updateTaskStatus(id: ID!, status: TaskStatus!): TaskPayload!
-  retryTask(id: ID!): TaskPayload!
+  continueTask(id: ID!): TaskPayload!
   rerunTask(id: ID!): TaskPayload!
   closeTask(id: ID!): TaskPayload!
   cancelTask(id: ID!): TaskPayload!

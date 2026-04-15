@@ -130,9 +130,9 @@ export const UPDATE_TASK_STATUS = gql`
   }
 `
 
-export const RETRY_TASK = gql`
-  mutation RetryTask($id: ID!) {
-    retryTask(id: $id) {
+export const CONTINUE_TASK = gql`
+  mutation ContinueTask($id: ID!) {
+    continueTask(id: $id) {
       task {
         id
         status

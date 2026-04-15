@@ -255,7 +255,7 @@ export type Mutation = {
   rerunTask: TaskPayload;
   resetAgentModification: AgentDefinitionPayload;
   retryClone: RepositoryPayload;
-  retryTask: TaskPayload;
+  continueTask: TaskPayload;
   setAgentDisabled: AgentDefinitionPayload;
   setDrainMode: DrainStatus;
   unblockTask: TaskPayload;
@@ -322,7 +322,7 @@ export type MutationRetryCloneArgs = {
 };
 
 
-export type MutationRetryTaskArgs = {
+export type MutationContinueTaskArgs = {
   id: Scalars['ID']['input'];
 };
 
@@ -982,7 +982,7 @@ export type MutationResolvers<ContextType = Context, ParentType extends Resolver
   rerunTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationRerunTaskArgs, 'id'>>;
   resetAgentModification?: Resolver<ResolversTypes['AgentDefinitionPayload'], ParentType, ContextType, RequireFields<MutationResetAgentModificationArgs, 'name' | 'scope'>>;
   retryClone?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationRetryCloneArgs, 'name'>>;
-  retryTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationRetryTaskArgs, 'id'>>;
+  continueTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationContinueTaskArgs, 'id'>>;
   setAgentDisabled?: Resolver<ResolversTypes['AgentDefinitionPayload'], ParentType, ContextType, RequireFields<MutationSetAgentDisabledArgs, 'disabled' | 'name' | 'scope'>>;
   setDrainMode?: Resolver<ResolversTypes['DrainStatus'], ParentType, ContextType, RequireFields<MutationSetDrainModeArgs, 'enabled'>>;
   unblockTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationUnblockTaskArgs, 'id' | 'resolution'>>;

@@ -3,7 +3,7 @@
 /**
  * Task action buttons and unblock dialog for the task detail page.
  *
- * Provides Retry, Rerun, Close, Cancel, and Unblock actions based on
+ * Provides Continue, Rerun, Close, Cancel, and Unblock actions based on
  * the current task status.
  */
 
@@ -17,7 +17,7 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogActions from '@mui/material/DialogActions'
 import TextField from '@mui/material/TextField'
 import Alert from '@mui/material/Alert'
-import { RETRY_TASK, RERUN_TASK, CLOSE_TASK, CANCEL_TASK, UNBLOCK_TASK } from '@/lib/graphql/queries'
+import { CONTINUE_TASK, RERUN_TASK, CLOSE_TASK, CANCEL_TASK, UNBLOCK_TASK } from '@/lib/graphql/queries'
 
 interface TaskActionsProps {
   taskId: string
@@ -41,9 +41,9 @@ export function TaskActions({ taskId, status, onMutationComplete }: TaskActionsP
     }
   }
 
-  const [retryTask, { loading: retrying }] = useMutation(RETRY_TASK, {
+  const [continueTask, { loading: continuing }] = useMutation(CONTINUE_TASK, {
     variables: { id: taskId },
-    onCompleted: handleCompleted('retryTask'),
+    onCompleted: handleCompleted('continueTask'),
   })
 
   const [rerunTask, { loading: rerunning }] = useMutation(RERUN_TASK, {
@@ -76,7 +76,7 @@ export function TaskActions({ taskId, status, onMutationComplete }: TaskActionsP
   })
 
   const upper = status?.toUpperCase()
-  const canRetry = upper === 'FAILED' || upper === 'RATE_LIMITED' || upper === 'TIMEOUT'
+  const canContinue = upper === 'FAILED' || upper === 'RATE_LIMITED' || upper === 'TIMEOUT'
   const canRerun = upper === 'COMPLETED' || upper === 'FAILED' || upper === 'CLOSED' || upper === 'CANCELLED'
   const canClose = upper === 'COMPLETED'
   const canCancel = upper === 'PENDING' || upper === 'QUEUED' || upper === 'EXECUTING'
@@ -91,9 +91,9 @@ export function TaskActions({ taskId, status, onMutationComplete }: TaskActionsP
       )}
 
       <Stack direction="row" spacing={1}>
-        {canRetry && (
-          <Button variant="contained" color="warning" onClick={() => retryTask()} disabled={retrying} data-testid="btn-retry">
-            {retrying ? 'Retrying\u2026' : 'Retry'}
+        {canContinue && (
+          <Button variant="contained" color="warning" onClick={() => continueTask()} disabled={continuing} data-testid="btn-continue">
+            {continuing ? 'Continuing\u2026' : 'Continue'}
           </Button>
         )}
         {canRerun && (

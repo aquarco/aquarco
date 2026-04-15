@@ -238,9 +238,9 @@ describe('Mutation.updateTaskStatus', () => {
   })
 })
 
-// ── retryTask ──────────────────────────────────────────────────────────────────
+// ── continueTask ───────────────────────────────────────────────────────────────
 
-describe('Mutation.retryTask', () => {
+describe('Mutation.continueTask', () => {
   it('should reset task to pending with incremented retry_count', async () => {
     const retriedRow = { ...baseTaskRow, status: 'pending', retry_count: 1, error_message: null }
     const pool = mockPool([
@@ -249,7 +249,7 @@ describe('Mutation.retryTask', () => {
     ])
     const ctx = makeCtx(pool)
 
-    const result = await Mutation.retryTask(null, { id: 'task-1' }, ctx)
+    const result = await Mutation.continueTask(null, { id: 'task-1' }, ctx)
 
     expect(result.errors).toHaveLength(0)
     expect(result.task!.status).toBe('PENDING')
@@ -257,7 +257,7 @@ describe('Mutation.retryTask', () => {
     expect(result.task!.errorMessage).toBeNull()
   })
 
-  it('should only retry tasks in retryable statuses', async () => {
+  it('should only continue tasks in retryable statuses', async () => {
     const pool = mockPool([
       { rows: [] }, // stage reset
       { rows: [] }, // task UPDATE — no match (status guard)
@@ -265,7 +265,7 @@ describe('Mutation.retryTask', () => {
     ])
     const ctx = makeCtx(pool)
 
-    const result = await Mutation.retryTask(null, { id: 'task-1' }, ctx)
+    const result = await Mutation.continueTask(null, { id: 'task-1' }, ctx)
 
     expect(result.task).toBeNull()
     expect(result.errors[0].message).toContain('cannot be retried')
@@ -282,7 +282,7 @@ describe('Mutation.retryTask', () => {
     ])
     const ctx = makeCtx(pool)
 
-    const result = await Mutation.retryTask(null, { id: 'ghost' }, ctx)
+    const result = await Mutation.continueTask(null, { id: 'ghost' }, ctx)
 
     expect(result.task).toBeNull()
     expect(result.errors[0].field).toBe('id')
