@@ -66,7 +66,7 @@ async def execute_claude(
     prompt_file: Path,
     context: dict[str, Any],
     work_dir: str,
-    timeout_seconds: int = 1800,
+    timeout_seconds: int = 3600,
     allowed_tools: list[str] | None = None,
     denied_tools: list[str] | None = None,
     task_id: str = "",

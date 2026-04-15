@@ -174,9 +174,6 @@ class Supervisor:
                 # Dispatch pending tasks
                 await self._dispatch_pending_tasks()
 
-                # Check timed-out tasks
-                await self._check_timed_out_tasks()
-
                 # Cancel in-flight asyncio tasks that were externally stopped
                 await self._check_externally_cancelled_tasks()
 
@@ -314,23 +311,6 @@ class Supervisor:
             log.exception("task_execution_error", task_id=task_id)
             if self._tq:
                 await self._tq.fail_task(task_id, "Unhandled execution error")
-
-    async def _check_timed_out_tasks(self) -> None:
-        """Mark executing tasks that have exceeded the timeout."""
-        if not self._tq:
-            return
-        timed_out = await self._tq.get_timed_out_tasks(timeout_minutes=90)
-        for task_id in timed_out:
-            log.warning("task_timed_out", task_id=task_id)
-            # Cancel the in-flight asyncio coroutine before resetting DB state.
-            # Without this, the old coroutine keeps running while a new one is
-            # dispatched on the next loop tick, causing two coroutines to execute
-            # the same task concurrently and marking multiple stages EXECUTING.
-            in_flight_task = self._in_flight_by_task.pop(task_id, None)
-            if in_flight_task and not in_flight_task.done():
-                in_flight_task.cancel()
-                log.info("task_timed_out_cancelled", task_id=task_id)
-            await self._tq.fail_task(task_id, "Task execution timed out (90 min)")
 
     async def _check_externally_cancelled_tasks(self) -> None:
         """Cancel asyncio tasks that were externally stopped (e.g. user-initiated cancel).

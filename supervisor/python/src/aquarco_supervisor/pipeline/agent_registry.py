@@ -303,7 +303,7 @@ class AgentRegistry:
         """Get timeout in minutes for an agent."""
         spec = self._agents.get(agent_name, {})
         resources: dict[str, Any] = spec.get("resources", {})
-        timeout: int = resources.get("timeoutMinutes", 30)
+        timeout: int = resources.get("timeoutMinutes", 60)
         return timeout
 
     def get_agent_max_turns(self, agent_name: str) -> int:
