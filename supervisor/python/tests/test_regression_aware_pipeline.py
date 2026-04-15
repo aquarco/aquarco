@@ -1,0 +1,443 @@
+"""Tests for the regression-aware-pipeline and analyze-bug category/agent additions.
+
+Validates the new pipeline, category, and agent definition introduced in commit
+fa62ebbe9293. Covers:
+  - regression-aware-pipeline structure (stages, categories, conditions, jumps)
+  - analyze-bug category output schema in pipelines.yaml
+  - analyze-bug-agent.md frontmatter validation (categories, tools, resources)
+  - recommended_pipeline enum includes regression-aware-pipeline
+  - analyze-bug-agent tool deny list consistency with prompt constraints
+  - AGENT_MODE env var for analyze-bug-agent matches canonical category
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+import yaml
+
+from aquarco_supervisor.cli.agents import VALID_CATEGORIES, validate_definition
+from aquarco_supervisor.config import get_pipeline_config, load_pipelines
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+CANONICAL_CATEGORIES = {"analyze", "analyze-bug", "design", "document", "implement", "review", "test"}
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_yaml(relpath: str) -> dict:
+    return yaml.safe_load((_REPO_ROOT / relpath).read_text())
+
+
+def _load_json(relpath: str) -> dict:
+    return json.loads((_REPO_ROOT / relpath).read_text())
+
+
+def _pipelines_doc() -> dict:
+    return _load_yaml("config/pipelines.yaml")
+
+
+def _get_pipeline(name: str) -> dict | None:
+    doc = _pipelines_doc()
+    pipelines = doc.get("pipelines", [])
+    if isinstance(pipelines, dict):
+        pipelines = list(pipelines.values())
+    for p in pipelines:
+        if p.get("name") == name:
+            return p
+    return None
+
+
+def _get_category_def(name: str) -> dict | None:
+    doc = _pipelines_doc()
+    for cat in doc.get("categories", []):
+        if cat.get("name") == name:
+            return cat
+    return None
+
+
+# ---------------------------------------------------------------------------
+# regression-aware-pipeline structure
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionAwarePipelineStructure:
+    """Verify the regression-aware-pipeline has the correct stage layout."""
+
+    @pytest.fixture()
+    def pipeline(self) -> dict:
+        p = _get_pipeline("regression-aware-pipeline")
+        assert p is not None, "regression-aware-pipeline not found in pipelines.yaml"
+        return p
+
+    def test_pipeline_exists(self, pipeline: dict) -> None:
+        assert pipeline["name"] == "regression-aware-pipeline"
+
+    def test_pipeline_version(self, pipeline: dict) -> None:
+        assert pipeline["version"] == "1.0.0"
+
+    def test_stage_count(self, pipeline: dict) -> None:
+        assert len(pipeline["stages"]) == 8
+
+    def test_stage_order(self, pipeline: dict) -> None:
+        """Stages must follow the TDD-inspired order."""
+        expected = [
+            "bug-analysis",
+            "regression-test",
+            "fix-analysis",
+            "hotfix",
+            "review",
+            "fix-review-findings",
+            "verification-test",
+            "documentation",
+        ]
+        actual = [s["name"] for s in pipeline["stages"]]
+        assert actual == expected
+
+    def test_stage_categories(self, pipeline: dict) -> None:
+        """Each stage must use the correct canonical category."""
+        expected = {
+            "bug-analysis": "analyze-bug",
+            "regression-test": "test",
+            "fix-analysis": "analyze",
+            "hotfix": "implement",
+            "review": "review",
+            "fix-review-findings": "implement",
+            "verification-test": "test",
+            "documentation": "document",
+        }
+        for stage in pipeline["stages"]:
+            assert stage["category"] == expected[stage["name"]], (
+                f"Stage '{stage['name']}' has wrong category: "
+                f"expected '{expected[stage['name']]}', got '{stage['category']}'"
+            )
+
+    def test_all_stage_categories_are_canonical(self, pipeline: dict) -> None:
+        """Every stage category must be in the canonical set."""
+        for stage in pipeline["stages"]:
+            assert stage["category"] in CANONICAL_CATEGORIES, (
+                f"Stage '{stage['name']}': category '{stage['category']}' not canonical"
+            )
+
+    def test_bug_analysis_is_required(self, pipeline: dict) -> None:
+        stage = pipeline["stages"][0]
+        assert stage["name"] == "bug-analysis"
+        assert stage["required"] is True
+
+    def test_documentation_is_optional(self, pipeline: dict) -> None:
+        stage = pipeline["stages"][-1]
+        assert stage["name"] == "documentation"
+        assert stage["required"] is False
+
+
+# ---------------------------------------------------------------------------
+# regression-aware-pipeline conditions
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionAwarePipelineConditions:
+    """Verify conditions and stage jumps in the regression-aware-pipeline."""
+
+    @pytest.fixture()
+    def stages(self) -> dict[str, dict]:
+        p = _get_pipeline("regression-aware-pipeline")
+        assert p is not None
+        return {s["name"]: s for s in p["stages"]}
+
+    def test_regression_test_has_ai_condition(self, stages: dict[str, dict]) -> None:
+        """regression-test stage has AI condition checking for existing tests."""
+        conds = stages["regression-test"].get("conditions", [])
+        ai_conds = [c for c in conds if "ai" in c]
+        assert len(ai_conds) >= 1
+        assert "existing test" in ai_conds[0]["ai"].lower()
+
+    def test_regression_test_ai_self_loops(self, stages: dict[str, dict]) -> None:
+        """AI condition on regression-test loops back to itself when no existing test."""
+        conds = stages["regression-test"]["conditions"]
+        ai_cond = [c for c in conds if "ai" in c][0]
+        assert ai_cond.get("no") == "regression-test"
+
+    def test_regression_test_simple_condition(self, stages: dict[str, dict]) -> None:
+        """regression-test has simple condition requiring tests_added > 0 && tests_failed > 0."""
+        conds = stages["regression-test"]["conditions"]
+        simple_conds = [c for c in conds if "simple" in c]
+        assert len(simple_conds) >= 1
+        assert "tests_added > 0" in simple_conds[0]["simple"]
+        assert "tests_failed > 0" in simple_conds[0]["simple"]
+
+    def test_regression_test_max_repeats(self, stages: dict[str, dict]) -> None:
+        """All conditions on regression-test have maxRepeats guards."""
+        for cond in stages["regression-test"]["conditions"]:
+            assert "maxRepeats" in cond, f"Missing maxRepeats in condition: {cond}"
+
+    def test_review_has_ai_and_simple_conditions(self, stages: dict[str, dict]) -> None:
+        """Review stage has both AI and simple conditions."""
+        conds = stages["review"]["conditions"]
+        assert any("ai" in c for c in conds)
+        assert any("simple" in c for c in conds)
+
+    def test_review_ai_jumps_to_hotfix(self, stages: dict[str, dict]) -> None:
+        """Review AI condition jumps back to hotfix when risks not mitigated."""
+        conds = stages["review"]["conditions"]
+        ai_cond = [c for c in conds if "ai" in c][0]
+        assert ai_cond.get("no") == "hotfix"
+
+    def test_review_simple_condition_jumps_to_verification(self, stages: dict[str, dict]) -> None:
+        """Review simple condition skips fix-review-findings on pass."""
+        conds = stages["review"]["conditions"]
+        simple_cond = [c for c in conds if "simple" in c][0]
+        assert simple_cond.get("no") == "verification-test"
+
+    def test_fix_review_findings_loops_to_review(self, stages: dict[str, dict]) -> None:
+        """fix-review-findings always jumps back to review."""
+        conds = stages["fix-review-findings"]["conditions"]
+        assert len(conds) == 1
+        assert conds[0].get("yes") == "review"
+
+    def test_verification_test_jumps_to_hotfix_on_failure(self, stages: dict[str, dict]) -> None:
+        """verification-test goes back to hotfix when coverage/tests fail."""
+        conds = stages["verification-test"]["conditions"]
+        simple_cond = [c for c in conds if "simple" in c][0]
+        assert simple_cond.get("no") == "hotfix"
+        assert "coverage_percent >= 80" in simple_cond["simple"]
+        assert "tests_failed == 0" in simple_cond["simple"]
+
+
+# ---------------------------------------------------------------------------
+# analyze-bug category output schema
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyzeBugCategorySchema:
+    """Verify the analyze-bug category definition in pipelines.yaml."""
+
+    @pytest.fixture()
+    def category(self) -> dict:
+        cat = _get_category_def("analyze-bug")
+        assert cat is not None, "analyze-bug category not found in pipelines.yaml"
+        return cat
+
+    def test_category_exists(self, category: dict) -> None:
+        assert category["name"] == "analyze-bug"
+
+    def test_output_schema_is_object(self, category: dict) -> None:
+        schema = category["outputSchema"]
+        assert schema["type"] == "object"
+
+    def test_required_fields(self, category: dict) -> None:
+        schema = category["outputSchema"]
+        expected_required = {
+            "bug_summary",
+            "root_cause",
+            "affected_components",
+            "reproduction_steps",
+            "fix_approach",
+            "risks",
+        }
+        assert set(schema["required"]) == expected_required
+
+    def test_all_required_fields_have_properties(self, category: dict) -> None:
+        schema = category["outputSchema"]
+        props = set(schema.get("properties", {}).keys())
+        for field in schema["required"]:
+            assert field in props, f"Required field '{field}' missing from properties"
+
+    def test_bug_summary_is_string(self, category: dict) -> None:
+        props = category["outputSchema"]["properties"]
+        assert props["bug_summary"]["type"] == "string"
+
+    def test_root_cause_is_string(self, category: dict) -> None:
+        props = category["outputSchema"]["properties"]
+        assert props["root_cause"]["type"] == "string"
+
+    def test_affected_components_is_array(self, category: dict) -> None:
+        props = category["outputSchema"]["properties"]
+        assert props["affected_components"]["type"] == "array"
+        assert props["affected_components"]["items"]["type"] == "string"
+
+    def test_reproduction_steps_is_array(self, category: dict) -> None:
+        props = category["outputSchema"]["properties"]
+        assert props["reproduction_steps"]["type"] == "array"
+        assert props["reproduction_steps"]["items"]["type"] == "string"
+
+    def test_fix_approach_is_string(self, category: dict) -> None:
+        props = category["outputSchema"]["properties"]
+        assert props["fix_approach"]["type"] == "string"
+
+    def test_risks_is_array(self, category: dict) -> None:
+        props = category["outputSchema"]["properties"]
+        assert props["risks"]["type"] == "array"
+        assert props["risks"]["items"]["type"] == "string"
+
+
+# ---------------------------------------------------------------------------
+# recommended_pipeline enum includes regression-aware-pipeline
+# ---------------------------------------------------------------------------
+
+
+class TestRecommendedPipelineEnum:
+    """Verify the analyze category's recommended_pipeline enum is complete."""
+
+    @pytest.fixture()
+    def analyze_schema(self) -> dict:
+        cat = _get_category_def("analyze")
+        assert cat is not None
+        return cat["outputSchema"]
+
+    def test_regression_aware_pipeline_in_enum(self, analyze_schema: dict) -> None:
+        enum_values = analyze_schema["properties"]["recommended_pipeline"]["enum"]
+        assert "regression-aware-pipeline" in enum_values
+
+    def test_all_expected_pipelines_in_enum(self, analyze_schema: dict) -> None:
+        enum_values = set(analyze_schema["properties"]["recommended_pipeline"]["enum"])
+        expected = {
+            "feature-pipeline",
+            "bugfix-pipeline",
+            "pr-review-pipeline",
+            "regression-aware-pipeline",
+        }
+        assert enum_values == expected
+
+
+# ---------------------------------------------------------------------------
+# analyze-bug-agent.md frontmatter validation
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyzeBugAgentDefinition:
+    """Verify analyze-bug-agent.md frontmatter is valid."""
+
+    @pytest.fixture()
+    def agent_path(self) -> Path:
+        return _REPO_ROOT / "config" / "agents" / "definitions" / "pipeline" / "analyze-bug-agent.md"
+
+    @pytest.fixture()
+    def frontmatter(self, agent_path: Path) -> dict:
+        from aquarco_supervisor.pipeline.agent_registry import _parse_md_agent_file
+        fm, _ = _parse_md_agent_file(agent_path)
+        return fm
+
+    def test_agent_file_exists(self, agent_path: Path) -> None:
+        assert agent_path.exists()
+
+    def test_name(self, frontmatter: dict) -> None:
+        assert frontmatter["name"] == "analyze-bug-agent"
+
+    def test_version(self, frontmatter: dict) -> None:
+        assert frontmatter["version"] == "1.0.0"
+
+    def test_categories(self, frontmatter: dict) -> None:
+        assert frontmatter["categories"] == ["analyze-bug"]
+
+    def test_category_is_canonical(self, frontmatter: dict) -> None:
+        for cat in frontmatter["categories"]:
+            assert cat in CANONICAL_CATEGORIES
+
+    def test_model(self, frontmatter: dict) -> None:
+        assert frontmatter["model"] == "sonnet"
+
+    def test_priority(self, frontmatter: dict) -> None:
+        assert frontmatter["priority"] == 1
+
+    def test_allowed_tools(self, frontmatter: dict) -> None:
+        allowed = set(frontmatter["tools"]["allowed"])
+        assert allowed == {"Read", "Grep", "Glob", "Bash", "Agent"}
+
+    def test_denied_tools(self, frontmatter: dict) -> None:
+        denied = set(frontmatter["tools"]["denied"])
+        assert denied == {"Write", "Edit"}
+
+    def test_write_edit_denied(self, frontmatter: dict) -> None:
+        """Write and Edit must be denied — agent is read-only."""
+        denied = set(frontmatter["tools"]["denied"])
+        assert "Write" in denied
+        assert "Edit" in denied
+
+    def test_resource_limits(self, frontmatter: dict) -> None:
+        res = frontmatter["resources"]
+        assert res["maxTokens"] == 60000
+        assert res["timeoutMinutes"] == 20
+        assert res["maxConcurrent"] == 3
+        assert res["maxTurns"] == 25
+        assert res["maxCost"] == 1.5
+
+    def test_agent_mode_matches_category(self, frontmatter: dict) -> None:
+        """AGENT_MODE env var should match the canonical category name."""
+        env = frontmatter.get("environment", {})
+        assert env.get("AGENT_MODE") == "analyze-bug"
+
+    def test_passes_validate_definition(self, agent_path: Path) -> None:
+        """Agent definition passes the CLI validate_definition check."""
+        errors, record = validate_definition(agent_path)
+        cat_errors = [e for e in errors if "categories" in e.field]
+        assert not cat_errors, f"Category validation errors: {cat_errors}"
+
+
+# ---------------------------------------------------------------------------
+# analyze-bug-agent prompt consistency
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyzeBugAgentPrompt:
+    """Verify prompt content is consistent with tool configuration."""
+
+    @pytest.fixture()
+    def prompt_text(self) -> str:
+        agent_path = _REPO_ROOT / "config" / "agents" / "definitions" / "pipeline" / "analyze-bug-agent.md"
+        from aquarco_supervisor.pipeline.agent_registry import _parse_md_agent_file
+        _, prompt = _parse_md_agent_file(agent_path)
+        return prompt
+
+    def test_prompt_states_no_write_edit(self, prompt_text: str) -> None:
+        """Prompt should tell the agent it cannot write or edit files."""
+        assert "may not write or edit" in prompt_text.lower()
+
+    def test_prompt_mentions_structured_output(self, prompt_text: str) -> None:
+        """Prompt should mention StructuredOutput for capturing results."""
+        assert "StructuredOutput" in prompt_text
+
+    def test_prompt_does_not_reference_write_edit_tools(self, prompt_text: str) -> None:
+        """After the fix, prompt should not suggest using Write/Edit tools."""
+        # The contradictory constraint was fixed — prompt should not tell agent to use Write/Edit
+        assert "Use `Write` and `Edit`" not in prompt_text
+
+
+# ---------------------------------------------------------------------------
+# Pipeline loadability via config module
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionAwarePipelineLoading:
+    """Verify that load_pipelines and get_pipeline_config work with the real config."""
+
+    @pytest.fixture()
+    def pipelines(self) -> list:
+        return load_pipelines(_REPO_ROOT / "config" / "pipelines.yaml")
+
+    def test_regression_aware_pipeline_loads(self, pipelines: list) -> None:
+        names = [p.name for p in pipelines]
+        assert "regression-aware-pipeline" in names
+
+    def test_get_pipeline_config_returns_stages(self, pipelines: list) -> None:
+        stages = get_pipeline_config(pipelines, "regression-aware-pipeline")
+        assert stages is not None
+        assert len(stages) == 8
+
+    def test_pipeline_has_analyze_bug_category(self, pipelines: list) -> None:
+        p = [p for p in pipelines if p.name == "regression-aware-pipeline"][0]
+        assert "analyze-bug" in p.categories
+
+    def test_analyze_bug_output_schema_loaded(self, pipelines: list) -> None:
+        p = [p for p in pipelines if p.name == "regression-aware-pipeline"][0]
+        schema = p.categories.get("analyze-bug", {})
+        assert schema.get("type") == "object"
+        assert "bug_summary" in schema.get("required", [])
