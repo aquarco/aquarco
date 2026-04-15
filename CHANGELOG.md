@@ -1,5 +1,17 @@
 # Changelog
 
+## [2026-04-15] — Improve Stage Output UX (#139)
+
+### Changed
+- **Task detail page stage output** — enhanced Stage Output accordion section with three UX improvements:
+  - **Run ordinal suffix** — fixed `"(next run)"` to display `"(2nd run)"` for the second execution of a repeated stage
+  - **Stage name display** — shows human-readable pipeline stage names (e.g., `IMPLEMENT`, `FIX REVIEW FINDINGS`) instead of raw category strings, with fallback to category name for system-level stages
+  - **StatusChip alignment** — fixed-width status badge (120px min-width) with right alignment ensures all stage name labels start at the same horizontal position across accordion rows
+
+### Test Coverage
+- **32 new tests** in `web/src/components/tasks/__tests__/StageOutputSection.test.ts` covering run count logic, stage name resolution, and chip alignment
+- Component test coverage: **83%** (261 tests passed, 0 failures)
+
 ## [2026-04-15] — Structured GitHub Wiki Documentation (#130)
 
 ### Added
