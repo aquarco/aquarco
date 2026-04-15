@@ -29,7 +29,7 @@ app = typer.Typer(help="Agent discovery and validation commands.")
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-VALID_CATEGORIES = {"review", "implement", "test", "design", "document", "analyze"}
+VALID_CATEGORIES = {"review", "implement", "test", "design", "document", "analyze", "analyze-bug"}
 VALID_ROLES = {"planner", "condition-evaluator", "repo-descriptor"}
 VALID_OUTPUT_FORMATS = {"task-file", "github-pr-comment", "commit", "issue", "none"}
 KEBAB_CASE_RE = re.compile(r"^[a-z][a-z0-9-]*$")

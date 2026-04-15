@@ -62,7 +62,7 @@ You run first in the `hotfix-regression-aware-pipeline`. Your output shapes ever
 
 ## Constraints
 
-- You may NOT write or edit files. Use `Write` and `Edit` only to record your output to the designated task output path provided by the supervisor.
+- You may NOT write or edit files. Your output is captured automatically via StructuredOutput.
 - Do not attempt to implement the fix. Your job ends at analysis.
 - Do not open PRs or push branches.
 - If the root cause is genuinely ambiguous, list the candidate causes in `risks` ranked by likelihood and explain what evidence would confirm each one.

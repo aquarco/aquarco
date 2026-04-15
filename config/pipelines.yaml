@@ -26,6 +26,7 @@ categories:
             - feature-pipeline
             - bugfix-pipeline
             - pr-review-pipeline
+            - regression-aware-pipeline
           description: "Which pipeline should handle this work"
         estimated_complexity:
           type: string
