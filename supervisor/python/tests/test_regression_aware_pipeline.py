@@ -410,26 +410,24 @@ class TestAnalyzeBugAgentPrompt:
         # The contradictory constraint was fixed — prompt should not tell agent to use Write/Edit
         assert "Use `Write` and `Edit`" not in prompt_text
 
+    @pytest.mark.xfail(
+        strict=False,
+        reason=(
+            "Review finding: prompt says 'hotfix-regression-aware-pipeline' "
+            "but actual pipeline is 'regression-aware-pipeline'"
+        ),
+    )
     def test_prompt_pipeline_name_accuracy(self, prompt_text: str) -> None:
-        """Prompt references to the pipeline should use the correct name.
-
-        Review finding: prompt says 'hotfix-regression-aware-pipeline' but the
-        actual pipeline is 'regression-aware-pipeline'. This test documents the
-        known mismatch (marked xfail until the prompt is fixed).
-        """
+        """Prompt references to the pipeline should use the correct name."""
         import re
 
-        # Find all pipeline-name-like references in the prompt
         pipeline_refs = re.findall(r"\b[\w-]*regression-aware-pipeline\b", prompt_text)
         assert len(pipeline_refs) > 0, "Prompt should reference the regression-aware-pipeline"
         for ref in pipeline_refs:
-            # Known issue: prompt says hotfix-regression-aware-pipeline
-            # This assertion will fail until the prompt is corrected
-            if ref != "regression-aware-pipeline":
-                pytest.xfail(
-                    f"Pipeline name mismatch in prompt: '{ref}' should be "
-                    f"'regression-aware-pipeline' (review finding)"
-                )
+            assert ref == "regression-aware-pipeline", (
+                f"Pipeline name mismatch in prompt: '{ref}' should be "
+                f"'regression-aware-pipeline'"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -457,11 +455,12 @@ class TestAnalyzeBugCrossFileConsistency:
         schema_cats = set(schema["properties"]["categories"]["items"]["enum"])
         assert schema_cats == VALID_CATEGORIES
 
-    def test_schemas_match_valid_categories_constant(self) -> None:
-        """JSON schema enums must match the VALID_CATEGORIES Python constant."""
-        schema = _load_json("config/schemas/pipeline-agent-v1.json")
-        schema_cats = set(schema["properties"]["categories"]["items"]["enum"])
-        assert schema_cats == VALID_CATEGORIES
+    def test_analyze_bug_category_has_output_schema(self) -> None:
+        """pipelines.yaml analyze-bug category must define an outputSchema."""
+        cat = _get_category_def("analyze-bug")
+        assert cat is not None
+        assert "outputSchema" in cat, "analyze-bug category missing outputSchema"
+        assert cat["outputSchema"].get("type") == "object"
 
     def test_analyze_bug_in_pipelines_yaml_categories(self) -> None:
         """pipelines.yaml categories section includes analyze-bug."""
@@ -510,3 +509,101 @@ class TestRegressionAwarePipelineLoading:
         schema = p.categories.get("analyze-bug", {})
         assert schema.get("type") == "object"
         assert "bug_summary" in schema.get("required", [])
+
+
+# ---------------------------------------------------------------------------
+# Additional cross-pipeline consistency tests
+# ---------------------------------------------------------------------------
+
+
+class TestAllPipelineCategoriesConsistency:
+    """Verify every pipeline's stage categories are valid across all pipelines."""
+
+    @pytest.fixture()
+    def all_pipelines(self) -> list[dict]:
+        doc = _pipelines_doc()
+        pipelines = doc.get("pipelines", [])
+        if isinstance(pipelines, dict):
+            return list(pipelines.values())
+        return pipelines
+
+    @pytest.fixture()
+    def category_names(self) -> set[str]:
+        doc = _pipelines_doc()
+        return {c["name"] for c in doc.get("categories", [])}
+
+    def test_every_stage_category_defined_in_categories_section(
+        self, all_pipelines: list[dict], category_names: set[str]
+    ) -> None:
+        """Every stage category used across all pipelines must be defined in categories."""
+        for pipeline in all_pipelines:
+            for stage in pipeline.get("stages", []):
+                cat = stage["category"]
+                assert cat in category_names, (
+                    f"Pipeline '{pipeline['name']}' stage '{stage['name']}' uses "
+                    f"category '{cat}' not defined in categories section"
+                )
+
+    def test_every_category_used_by_at_least_one_pipeline(
+        self, all_pipelines: list[dict], category_names: set[str]
+    ) -> None:
+        """Every defined category should be used by at least one pipeline stage."""
+        used_cats: set[str] = set()
+        for pipeline in all_pipelines:
+            for stage in pipeline.get("stages", []):
+                used_cats.add(stage["category"])
+        unused = category_names - used_cats
+        assert not unused, f"Categories defined but never used by any pipeline: {unused}"
+
+    def test_all_pipelines_have_unique_names(self, all_pipelines: list[dict]) -> None:
+        """Pipeline names must be unique."""
+        names = [p["name"] for p in all_pipelines]
+        assert len(names) == len(set(names)), f"Duplicate pipeline names: {names}"
+
+
+# ---------------------------------------------------------------------------
+# Regression-aware-pipeline condition guard completeness
+# ---------------------------------------------------------------------------
+
+
+class TestConditionGuardCompleteness:
+    """Verify condition guards are complete and well-formed across all stages."""
+
+    @pytest.fixture()
+    def stages(self) -> list[dict]:
+        p = _get_pipeline("regression-aware-pipeline")
+        assert p is not None
+        return p["stages"]
+
+    def test_stages_with_conditions_all_have_max_repeats(self, stages: list[dict]) -> None:
+        """Every condition in the pipeline should have a maxRepeats guard to prevent infinite loops."""
+        for stage in stages:
+            for cond in stage.get("conditions", []):
+                assert "maxRepeats" in cond, (
+                    f"Stage '{stage['name']}': condition missing maxRepeats guard: {cond}"
+                )
+
+    def test_condition_jumps_reference_valid_stages(self, stages: list[dict]) -> None:
+        """All yes/no jump targets in conditions must reference existing stage names."""
+        stage_names = {s["name"] for s in stages}
+        for stage in stages:
+            for cond in stage.get("conditions", []):
+                for jump_key in ("yes", "no"):
+                    target = cond.get(jump_key)
+                    if target is not None:
+                        assert target in stage_names, (
+                            f"Stage '{stage['name']}': condition {jump_key}='{target}' "
+                            f"references non-existent stage"
+                        )
+
+    def test_no_stage_jumps_to_itself_unconditionally(self, stages: list[dict]) -> None:
+        """A stage should not have both yes and no pointing to itself (infinite loop)."""
+        for stage in stages:
+            for cond in stage.get("conditions", []):
+                yes_target = cond.get("yes")
+                no_target = cond.get("no")
+                if yes_target and no_target:
+                    assert not (yes_target == stage["name"] and no_target == stage["name"]), (
+                        f"Stage '{stage['name']}' has condition with both yes and no "
+                        f"jumping to itself — infinite loop"
+                    )
