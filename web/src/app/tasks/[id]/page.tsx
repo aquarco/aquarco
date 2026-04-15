@@ -119,7 +119,7 @@ export default function TaskDetailPage() {
       )}
 
       {/* Stage output */}
-      <StageOutputSection stages={stages} effectiveExecutingStages={effectiveExecutingStages} />
+      <StageOutputSection stages={stages} effectiveExecutingStages={effectiveExecutingStages} pipelineName={task.pipeline} />
 
       {/* Context inspector */}
       <ContextInspector context={task.context} />

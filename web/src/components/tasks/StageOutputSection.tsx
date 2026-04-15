@@ -6,6 +6,7 @@
  */
 
 import React from 'react'
+import { useQuery } from '@apollo/client'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import Card from '@mui/material/Card'
@@ -21,14 +22,24 @@ import { formatCost, formatTokens } from '@/lib/spending'
 import { StructuredOutputDisplay } from '@/components/tasks/StructuredOutputDisplay'
 import { StageDuration } from '@/components/tasks/StageDuration'
 import { parseLiveOutput } from '@/app/tasks/[id]/utils'
-import type { Stage } from '@/app/tasks/[id]/types'
+import { GET_PIPELINE_DEFINITIONS } from '@/lib/graphql/queries'
+import type { Stage, PipelineStageDefn } from '@/app/tasks/[id]/types'
 
 interface StageOutputSectionProps {
   stages: Stage[]
   effectiveExecutingStages: Set<number>
+  pipelineName: string
 }
 
-export function StageOutputSection({ stages, effectiveExecutingStages }: StageOutputSectionProps) {
+export function StageOutputSection({ stages, effectiveExecutingStages, pipelineName }: StageOutputSectionProps) {
+  const { data: pipeData } = useQuery(GET_PIPELINE_DEFINITIONS)
+  const pipelineDefs = (pipeData?.pipelineDefinitions ?? []) as Array<{
+    name: string
+    stages: PipelineStageDefn[]
+  }>
+  const defn = pipelineDefs.find((p) => p.name === pipelineName)
+  const defnStages = defn?.stages ?? []
+
   if (stages.length === 0) return null
 
   const runCountPerStageNumber = new Map<number, number>()
@@ -40,9 +51,11 @@ export function StageOutputSection({ stages, effectiveExecutingStages }: StageOu
     runCountPerStageNumber.set(stageNum, runCount)
 
     let runSuffix = ''
-    if (runCount === 2) runSuffix = ' (next run)'
+    if (runCount === 2) runSuffix = ' (2nd run)'
     else if (runCount === 3) runSuffix = ' (3rd run)'
     else if (runCount > 3) runSuffix = ` (${runCount}th run)`
+
+    const stageName = defnStages[stageNum]?.name ?? stage.category.toUpperCase()
 
     const effectiveStatus = stage.status === 'PENDING' && effectiveExecutingStages.has(stage.stageNumber)
       ? 'EXECUTING' : stage.status
@@ -58,9 +71,11 @@ export function StageOutputSection({ stages, effectiveExecutingStages }: StageOu
         <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 2, minHeight: 48 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ width: '100%', mr: 1 }}>
             <Stack direction="row" spacing={1.5} alignItems="center">
-              <StatusChip status={effectiveStatus} size="small" />
+              <Box sx={{ minWidth: 120, display: 'flex', justifyContent: 'flex-end' }}>
+                <StatusChip status={effectiveStatus} size="small" />
+              </Box>
               <Typography variant="body2" fontWeight={600}>
-                {stage.category}{runSuffix}
+                {stageName}{runSuffix}
               </Typography>
               {stage.agent && (
                 <Typography variant="caption" color="text.secondary">
