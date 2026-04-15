@@ -3,7 +3,7 @@
 /**
  * Task action buttons and unblock dialog for the task detail page.
  *
- * Provides Continue, Rerun, Close, Cancel, and Unblock actions based on
+ * Provides Continue, Run again, Close, Cancel, and Unblock actions based on
  * the current task status.
  */
 
@@ -17,7 +17,7 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogActions from '@mui/material/DialogActions'
 import TextField from '@mui/material/TextField'
 import Alert from '@mui/material/Alert'
-import { CONTINUE_TASK, RERUN_TASK, CLOSE_TASK, CANCEL_TASK, UNBLOCK_TASK } from '@/lib/graphql/queries'
+import { CONTINUE_TASK, RUN_AGAIN_TASK, CLOSE_TASK, CANCEL_TASK, UNBLOCK_TASK } from '@/lib/graphql/queries'
 
 interface TaskActionsProps {
   taskId: string
@@ -46,9 +46,9 @@ export function TaskActions({ taskId, status, onMutationComplete }: TaskActionsP
     onCompleted: handleCompleted('continueTask'),
   })
 
-  const [rerunTask, { loading: rerunning }] = useMutation(RERUN_TASK, {
+  const [runAgainTask, { loading: runningAgain }] = useMutation(RUN_AGAIN_TASK, {
     variables: { id: taskId },
-    onCompleted: handleCompleted('rerunTask'),
+    onCompleted: handleCompleted('runAgainTask'),
   })
 
   const [closeTask, { loading: closing }] = useMutation(CLOSE_TASK, {
@@ -77,7 +77,7 @@ export function TaskActions({ taskId, status, onMutationComplete }: TaskActionsP
 
   const upper = status?.toUpperCase()
   const canContinue = upper === 'FAILED' || upper === 'RATE_LIMITED' || upper === 'TIMEOUT'
-  const canRerun = upper === 'COMPLETED' || upper === 'FAILED' || upper === 'CLOSED' || upper === 'CANCELLED'
+  const canRunAgain = upper === 'COMPLETED' || upper === 'FAILED' || upper === 'CLOSED' || upper === 'CANCELLED'
   const canClose = upper === 'COMPLETED'
   const canCancel = upper === 'PENDING' || upper === 'QUEUED' || upper === 'EXECUTING'
   const canUnblock = upper === 'BLOCKED'
@@ -96,9 +96,9 @@ export function TaskActions({ taskId, status, onMutationComplete }: TaskActionsP
             {continuing ? 'Continuing\u2026' : 'Continue'}
           </Button>
         )}
-        {canRerun && (
-          <Button variant="contained" color="info" onClick={() => rerunTask()} disabled={rerunning} data-testid="btn-rerun">
-            {rerunning ? 'Creating\u2026' : 'Rerun'}
+        {canRunAgain && (
+          <Button variant="contained" color="info" onClick={() => runAgainTask()} disabled={runningAgain} data-testid="btn-run-again">
+            {runningAgain ? 'Creating\u2026' : 'Run again'}
           </Button>
         )}
         {canClose && (

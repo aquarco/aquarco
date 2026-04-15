@@ -252,7 +252,7 @@ export type Mutation = {
   modifyAgent: AgentDefinitionPayload;
   registerRepository: RepositoryPayload;
   removeRepository: RepositoryPayload;
-  rerunTask: TaskPayload;
+  runAgainTask: TaskPayload;
   resetAgentModification: AgentDefinitionPayload;
   retryClone: RepositoryPayload;
   continueTask: TaskPayload;
@@ -306,7 +306,7 @@ export type MutationRemoveRepositoryArgs = {
 };
 
 
-export type MutationRerunTaskArgs = {
+export type MutationRunAgainTaskArgs = {
   id: Scalars['ID']['input'];
 };
 
@@ -979,7 +979,7 @@ export type MutationResolvers<ContextType = Context, ParentType extends Resolver
   modifyAgent?: Resolver<ResolversTypes['AgentDefinitionPayload'], ParentType, ContextType, RequireFields<MutationModifyAgentArgs, 'name' | 'scope' | 'spec'>>;
   registerRepository?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationRegisterRepositoryArgs, 'input'>>;
   removeRepository?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationRemoveRepositoryArgs, 'name'>>;
-  rerunTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationRerunTaskArgs, 'id'>>;
+  runAgainTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationRunAgainTaskArgs, 'id'>>;
   resetAgentModification?: Resolver<ResolversTypes['AgentDefinitionPayload'], ParentType, ContextType, RequireFields<MutationResetAgentModificationArgs, 'name' | 'scope'>>;
   retryClone?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationRetryCloneArgs, 'name'>>;
   continueTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationContinueTaskArgs, 'id'>>;

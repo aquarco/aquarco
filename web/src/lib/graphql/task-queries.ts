@@ -162,9 +162,9 @@ export const CANCEL_TASK = gql`
   }
 `
 
-export const RERUN_TASK = gql`
-  mutation RerunTask($id: ID!) {
-    rerunTask(id: $id) {
+export const RUN_AGAIN_TASK = gql`
+  mutation RunAgainTask($id: ID!) {
+    runAgainTask(id: $id) {
       task {
         id
         status

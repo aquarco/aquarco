@@ -135,7 +135,7 @@ export const taskMutations = {
     }
   },
 
-  async rerunTask(_: unknown, args: { id: string }, ctx: Context) {
+  async runAgainTask(_: unknown, args: { id: string }, ctx: Context) {
     try {
       // Look up original task
       const original = await ctx.pool.query<Record<string, unknown>>(
@@ -149,7 +149,7 @@ export const taskMutations = {
       const sourceRef = (orig.source_ref as string) || args.id
 
       // Atomic insert: compute rerun number inside the INSERT using a CTE
-      // to avoid race conditions with concurrent rerunTask calls.
+      // to avoid race conditions with concurrent runAgainTask calls.
       const result = await ctx.pool.query<Record<string, unknown>>(
         `WITH locked_siblings AS (
            SELECT id FROM tasks WHERE parent_task_id = $1
@@ -180,7 +180,7 @@ export const taskMutations = {
       )
       return taskPayload(result.rows[0])
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to rerun task'
+      const message = err instanceof Error ? err.message : 'Failed to run task again'
       return errorPayload(null, message)
     }
   },

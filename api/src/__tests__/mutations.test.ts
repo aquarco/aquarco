@@ -591,10 +591,10 @@ describe('Mutation.unblockTask', () => {
   })
 })
 
-// ── rerunTask ──────────────────────────────────────────────────────────────────
+// ── runAgainTask ───────────────────────────────────────────────────────────────
 
-describe('Mutation.rerunTask', () => {
-  it('should create a new task as a rerun of the original', async () => {
+describe('Mutation.runAgainTask', () => {
+  it('should create a new task as a run-again of the original', async () => {
     const origRow = { ...baseTaskRow, id: 'orig-1', source_ref: 'issue-42' }
     const rerunRow = {
       ...baseTaskRow,
@@ -607,7 +607,7 @@ describe('Mutation.rerunTask', () => {
     ])
     const ctx = makeCtx(pool)
 
-    const result = await Mutation.rerunTask(null, { id: 'orig-1' }, ctx)
+    const result = await Mutation.runAgainTask(null, { id: 'orig-1' }, ctx)
 
     expect(result.errors).toHaveLength(0)
     expect(result.task).not.toBeNull()
@@ -623,7 +623,7 @@ describe('Mutation.rerunTask', () => {
     ])
     const ctx = makeCtx(pool)
 
-    await Mutation.rerunTask(null, { id: 'orig-1' }, ctx)
+    await Mutation.runAgainTask(null, { id: 'orig-1' }, ctx)
 
     // The INSERT query should use a CTE for atomicity
     const insertSql = pool.query.mock.calls[1][0] as string
@@ -640,7 +640,7 @@ describe('Mutation.rerunTask', () => {
     ])
     const ctx = makeCtx(pool)
 
-    await Mutation.rerunTask(null, { id: 'orig-1' }, ctx)
+    await Mutation.runAgainTask(null, { id: 'orig-1' }, ctx)
 
     // sourceRef param should be 'orig-1' (the task id)
     const insertParams = pool.query.mock.calls[1][1] as unknown[]
@@ -651,7 +651,7 @@ describe('Mutation.rerunTask', () => {
     const pool = mockPool([{ rows: [] }]) // SELECT: not found
     const ctx = makeCtx(pool)
 
-    const result = await Mutation.rerunTask(null, { id: 'nonexistent' }, ctx)
+    const result = await Mutation.runAgainTask(null, { id: 'nonexistent' }, ctx)
 
     expect(result.task).toBeNull()
     expect(result.errors[0].field).toBe('id')
@@ -666,7 +666,7 @@ describe('Mutation.rerunTask', () => {
       .mockRejectedValueOnce(new Error('unique_violation'))
     const ctx = makeCtx(pool)
 
-    const result = await Mutation.rerunTask(null, { id: 'orig-1' }, ctx)
+    const result = await Mutation.runAgainTask(null, { id: 'orig-1' }, ctx)
 
     expect(result.task).toBeNull()
     expect(result.errors[0].message).toContain('unique_violation')
