@@ -172,6 +172,41 @@ categories:
             - major_issues
             - blocking
           description: "Overall severity classification of all findings combined"
+  - name: analyze-bug
+    outputSchema:
+      type: object
+      required:
+        - bug_summary
+        - root_cause
+        - affected_components
+        - reproduction_steps
+        - fix_approach
+        - risks
+      properties:
+        bug_summary:
+          type: string
+          description: "Concise description of the bug"
+        root_cause:
+          type: string
+          description: "Identified root cause of the bug"
+        affected_components:
+          type: array
+          items:
+            type: string
+          description: "Components, services, or packages affected by the bug"
+        reproduction_steps:
+          type: array
+          items:
+            type: string
+          description: "Ordered steps to reproduce the bug"
+        fix_approach:
+          type: string
+          description: "Recommended approach to fix the bug"
+        risks:
+          type: array
+          items:
+            type: string
+          description: "Identified risks or side-effects of the fix"
   - name: test
     outputSchema:
       type: object
@@ -204,7 +239,7 @@ categories:
 
 pipelines:
   - name: feature-pipeline
-    version: "1.0.0"
+    version: "1.0.1"
     stages:
       - name: analysis
         category: analyze
@@ -218,7 +253,7 @@ pipelines:
         category: implement
         required: false
         conditions: 
-          - ai: All design.acceptance_criteria fulfilled?
+          - ai: All acceptance criteria fulfilled?
             "no": implementation
             maxRepeats: 5
 
@@ -226,7 +261,7 @@ pipelines:
         category: review
         required: true
         conditions:
-          - ai: All analysis.risks are avoided or mitigated?
+          - ai: All risks mitigated?
             "no": implementation
             maxRepeats: 5
           - simple: severity == major_issues || severity == blocking
@@ -254,7 +289,7 @@ pipelines:
         required: false
 
   - name: bugfix-pipeline
-    version: "1.0.0"
+    version: "1.0.1"
     stages:
       - name: analysis
         category: analyze
@@ -268,6 +303,9 @@ pipelines:
         category: review
         required: true
         conditions:
+          - ai: All risks mitigated?
+            "no": implementation
+            maxRepeats: 3
           - simple: severity == major_issues || severity == blocking
             "no": test # skip fix-review-findings
             maxRepeats: 3
@@ -279,7 +317,7 @@ pipelines:
           - simple: "true"
             "yes": review
             maxRepeats: 3
-      
+
       - name: test
         category: test
         required: true
@@ -288,14 +326,18 @@ pipelines:
             "no": test
             maxRepeats: 5
 
+      - name: documentation
+        category: document
+        required: false
+
   - name: pr-review-pipeline
-    version: "1.0.0"
+    version: "1.0.1"
     stages:
       - name: review
         category: review
         required: true
         conditions:
-          - simple: recommendation == request_changes
+          - simple: severity == major_issues || severity == blocking
             "no": test
             maxRepeats: 3
 
@@ -309,4 +351,70 @@ pipelines:
 
       - name: test
         category: test
+        required: true
+        conditions:
+          - simple: tests_added == 0 || (coverage_percent >= 80 && tests_failed == 0)
+            "no": test
+            maxRepeats: 5
+
+      - name: documentation
+        category: document
         required: false
+
+  - name: regression-aware-pipeline
+    version: "1.0.0"
+    stages:
+      - name: bug-analysis
+        category: analyze-bug
+        required: true
+
+      - name: regression-test
+        category: test
+        required: true
+        conditions:
+          - ai: Is there an existing test that reproduces the failure?
+            "no": regression-test
+            maxRepeats: 5
+          - simple: tests_added > 0 && tests_failed > 0
+            "no": regression-test
+            maxRepeats: 5
+
+      - name: fix-analysis
+        category: analyze
+        required: true
+
+      - name: hotfix
+        category: implement
+        required: true
+
+      - name: review
+        category: review
+        required: true
+        conditions:
+          - ai: All risks mitigated?
+            "no": hotfix
+            maxRepeats: 3
+          - simple: severity == major_issues || severity == blocking
+            "no": verification-test # skip fix-review-findings
+            maxRepeats: 3
+
+      - name: fix-review-findings
+        category: implement
+        required: false
+        conditions:
+          - simple: "true"
+            "yes": review
+            maxRepeats: 3
+
+      - name: verification-test
+        category: test
+        required: true
+        conditions:
+          - simple: coverage_percent >= 80 && tests_failed == 0
+            "no": hotfix
+            maxRepeats: 3
+
+      - name: documentation
+        category: document
+        required: false
+
