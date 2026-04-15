@@ -4,11 +4,11 @@
 
 ### Added
 - **`aquarco backup`** — back up the PostgreSQL database and credentials directly to the host at `~/.aquarco/backups/<timestamp>/`. The pg_dump and credential files are streamed from the VM over SSH, so backups survive VM rebuilds. Flags: `--no-db`, `--no-creds`, `--output/-o`.
-- **`aquarco init --dev`** — convenience flag that sets `AQUARCO_DEV=1` before starting the VM (equivalent to exporting the variable manually).
+- **`aquarco init --dev`** — convenience flag to start the VM in development mode (mounts the source tree, uses editable installs).
 
 ### Changed
-- **Vagrantfile** — synced folders are disabled by default. Set `AQUARCO_DEV=1` (or use `aquarco init --dev`) to re-enable the source tree and log-export mounts.
-- **`provision.sh`** — branches on `AQUARCO_DEV` for all source-dependent steps: editable pip install vs PyPI release, mounted vs inline systemd service files, `vboxsf` group membership, and log-export cron job.
+- **Vagrantfile** — synced folders are disabled by default. Use `aquarco init --dev` (or the `aquarco-dev` machine) to enable the source tree and log-export mounts.
+- **`provision.sh`** — branches on `DEV_MODE` for all source-dependent steps: editable pip install vs bundled package, mounted vs inline systemd service files, `vboxsf` group membership, and log-export cron job.
 
 ## [2026-04-09] — Implement Git Workflow Specification (#118)
 

@@ -464,6 +464,16 @@ ExecStart=/bin/bash -c '\
   [ -f /etc/aquarco/docker-secrets.env ] && . /etc/aquarco/docker-secrets.env; \
   [ -f /home/agent/aquarco/docker/versions.env ] && . /home/agent/aquarco/docker/versions.env; \
   if [ "$AQUARCO_ENV" = "production" ]; then \
+    /usr/bin/docker compose -f compose.prod.yml build; \
+  else \
+    /usr/bin/docker compose -f compose.yml -f compose.dev.yml build; \
+  fi'
+ExecStart=/bin/bash -c '\
+  AQUARCO_ENV=$(cat /etc/aquarco/env 2>/dev/null || echo development); \
+  set -a; \
+  [ -f /etc/aquarco/docker-secrets.env ] && . /etc/aquarco/docker-secrets.env; \
+  [ -f /home/agent/aquarco/docker/versions.env ] && . /home/agent/aquarco/docker/versions.env; \
+  if [ "$AQUARCO_ENV" = "production" ]; then \
     exec /usr/bin/docker compose -f compose.prod.yml up -d; \
   else \
     exec /usr/bin/docker compose -f compose.yml -f compose.dev.yml up -d; \
@@ -475,7 +485,7 @@ ExecStop=/bin/bash -c '\
   else \
     /usr/bin/docker compose -f compose.yml -f compose.dev.yml down; \
   fi'
-TimeoutStartSec=120
+TimeoutStartSec=600
 
 [Install]
 WantedBy=multi-user.target

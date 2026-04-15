@@ -60,7 +60,10 @@ def stop(
     if not vagrant.is_running():
         print_info("VM is already stopped.")
         return
-    perform_backup(vagrant)
+    try:
+        perform_backup(vagrant)
+    except typer.Exit:
+        typer.confirm("Backup had errors. Stop anyway?", abort=True)
     print_info("Stopping VM...")
     try:
         vagrant.halt()
@@ -81,7 +84,10 @@ def destroy(
     _set_dev_vm(dev)
     vagrant = VagrantHelper()
     if vagrant.is_running():
-        perform_backup(vagrant)
+        try:
+            perform_backup(vagrant)
+        except typer.Exit:
+            typer.confirm("Backup had errors. Destroy anyway?", abort=True)
     print_info("Destroying VM...")
     try:
         vagrant.destroy()
