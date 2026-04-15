@@ -578,3 +578,17 @@ async def test_update_task_status_planning(
     sql = call_args[0][0]
     assert "started_at" in sql
     assert "error_message = NULL" in sql
+
+
+@pytest.mark.asyncio
+async def test_update_task_status_cancelled(
+    task_queue: TaskQueue, mock_db: AsyncMock
+) -> None:
+    """CANCELLED status sets completed_at, same as COMPLETED/FAILED/TIMEOUT."""
+    await task_queue.update_task_status("task-1", TaskStatus.CANCELLED)
+
+    call_args = mock_db.execute.call_args
+    sql = call_args[0][0]
+    assert "completed_at = NOW()" in sql
+    params = call_args[0][1]
+    assert params["status"] == "cancelled"

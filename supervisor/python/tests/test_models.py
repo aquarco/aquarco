@@ -57,6 +57,23 @@ def test_task_status_values() -> None:
     assert TaskStatus.COMPLETED.value == "completed"
 
 
+def test_task_status_cancelled_exists() -> None:
+    """CANCELLED status was added and has the correct value."""
+    assert TaskStatus.CANCELLED.value == "cancelled"
+    # Verify it's a valid member of the enum
+    assert TaskStatus("cancelled") == TaskStatus.CANCELLED
+
+
+def test_task_status_all_values() -> None:
+    """All expected task statuses exist in the enum."""
+    expected = {
+        "pending", "queued", "planning", "executing", "completed",
+        "failed", "timeout", "cancelled", "rate_limited", "closed",
+    }
+    actual = {s.value for s in TaskStatus}
+    assert actual == expected
+
+
 def test_stage_config_name_field() -> None:
     stage = StageConfig(name="analysis", category="analyze")
     assert stage.name == "analysis"
