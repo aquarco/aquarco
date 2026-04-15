@@ -114,3 +114,37 @@ The `e2e` agent owns Playwright tests for three non-negotiable areas:
 - **User registration** — full signup flow, validation, duplicate handling
 - **User portfolio management** — create, view, edit, delete portfolios; auth guards
 - **Public pages smoke tests** — every public route renders without JS errors or failed requests
+
+## GitHub Wiki Structure
+
+The wiki is stored at `aquarco/aquarco.wiki.git` (separate from the main repo).
+Clone with: `git clone https://github.com/aquarco/aquarco.wiki.git wiki`
+
+### Page Index
+
+| Page file | URL slug | Topic |
+|-----------|----------|-------|
+| `Home.md` | `/wiki/Home` | Project intro, quick start, page index |
+| `Quick-Start.md` | `/wiki/Quick-Start` | Step-by-step first-time setup |
+| `CLI-Reference.md` | `/wiki/CLI-Reference` | All CLI commands and flags |
+| `Architecture.md` | `/wiki/Architecture` | VM, Docker services, networking |
+| `File-Layout.md` | `/wiki/File-Layout` | Repository directory structure |
+| `Components.md` | `/wiki/Components` | Individual Docker services |
+| `Agent-System.md` | `/wiki/Agent-System` | Agent definitions, discovery, selection |
+| `Pipeline-System.md` | `/wiki/Pipeline-System` | Stages, lifecycle, context, spending |
+| `Conditions-Engine.md` | `/wiki/Conditions-Engine` | Exit gate conditions syntax |
+| `Git-Flow.md` | `/wiki/Git-Flow` | Branch modes, naming, back-merges |
+| `Auth-Flows.md` | `/wiki/Auth-Flows` | Claude PKCE + GitHub device flows |
+| `Database.md` | `/wiki/Database` | Schema, all 11 tables, migrations |
+| `Dev-Setup.md` | `/wiki/Dev-Setup` | Contributing, dev mode, testing |
+| `Operations.md` | `/wiki/Operations` | Backup, restore, update, monitoring |
+| `_Sidebar.md` | (navigation) | Persistent wiki sidebar |
+| `_Footer.md` | (footer) | Footer shown on every page |
+
+### Conventions
+- Page filenames use Title-Case with hyphens (no underscores, no spaces).
+- Every page starts with an H1 matching its filename (e.g., `# CLI Reference`).
+- Cross-links use wiki double-bracket syntax: `[[Page-Name]]` or
+  `[[Page-Name|Link Text]]`.
+- When adding a new page: add entry to this table, add link to `_Sidebar.md`,
+  add entry to the `Home.md` page index.
