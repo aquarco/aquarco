@@ -410,6 +410,75 @@ class TestAnalyzeBugAgentPrompt:
         # The contradictory constraint was fixed — prompt should not tell agent to use Write/Edit
         assert "Use `Write` and `Edit`" not in prompt_text
 
+    def test_prompt_pipeline_name_accuracy(self, prompt_text: str) -> None:
+        """Prompt references to the pipeline should use the correct name.
+
+        Review finding: prompt says 'hotfix-regression-aware-pipeline' but the
+        actual pipeline is 'regression-aware-pipeline'. This test documents the
+        known mismatch (marked xfail until the prompt is fixed).
+        """
+        import re
+
+        # Find all pipeline-name-like references in the prompt
+        pipeline_refs = re.findall(r"\b[\w-]*regression-aware-pipeline\b", prompt_text)
+        assert len(pipeline_refs) > 0, "Prompt should reference the regression-aware-pipeline"
+        for ref in pipeline_refs:
+            # Known issue: prompt says hotfix-regression-aware-pipeline
+            # This assertion will fail until the prompt is corrected
+            if ref != "regression-aware-pipeline":
+                pytest.xfail(
+                    f"Pipeline name mismatch in prompt: '{ref}' should be "
+                    f"'regression-aware-pipeline' (review finding)"
+                )
+
+
+# ---------------------------------------------------------------------------
+# Cross-file consistency: analyze-bug category across all validation layers
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyzeBugCrossFileConsistency:
+    """Verify analyze-bug category is consistently defined across schemas,
+    VALID_CATEGORIES, and pipelines.yaml."""
+
+    def test_analyze_bug_in_valid_categories(self) -> None:
+        """VALID_CATEGORIES constant includes analyze-bug."""
+        assert "analyze-bug" in VALID_CATEGORIES
+
+    def test_analyze_bug_in_pipeline_agent_schema(self) -> None:
+        """pipeline-agent-v1.json enum includes analyze-bug."""
+        schema = _load_json("config/schemas/pipeline-agent-v1.json")
+        cat_enum = schema["properties"]["categories"]["items"]["enum"]
+        assert "analyze-bug" in cat_enum
+
+    def test_pipeline_agent_schema_matches_valid_categories(self) -> None:
+        """pipeline-agent-v1.json category enum must match VALID_CATEGORIES."""
+        schema = _load_json("config/schemas/pipeline-agent-v1.json")
+        schema_cats = set(schema["properties"]["categories"]["items"]["enum"])
+        assert schema_cats == VALID_CATEGORIES
+
+    def test_schemas_match_valid_categories_constant(self) -> None:
+        """JSON schema enums must match the VALID_CATEGORIES Python constant."""
+        schema = _load_json("config/schemas/pipeline-agent-v1.json")
+        schema_cats = set(schema["properties"]["categories"]["items"]["enum"])
+        assert schema_cats == VALID_CATEGORIES
+
+    def test_analyze_bug_in_pipelines_yaml_categories(self) -> None:
+        """pipelines.yaml categories section includes analyze-bug."""
+        doc = _pipelines_doc()
+        cat_names = {c["name"] for c in doc.get("categories", [])}
+        assert "analyze-bug" in cat_names
+
+    def test_all_pipeline_stage_categories_in_valid_set(self) -> None:
+        """Every stage category in regression-aware-pipeline is in VALID_CATEGORIES."""
+        pipeline = _get_pipeline("regression-aware-pipeline")
+        assert pipeline is not None
+        for stage in pipeline["stages"]:
+            assert stage["category"] in VALID_CATEGORIES, (
+                f"Stage '{stage['name']}' uses category '{stage['category']}' "
+                f"not in VALID_CATEGORIES"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Pipeline loadability via config module
