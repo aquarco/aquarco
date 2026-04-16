@@ -122,3 +122,63 @@ class TestConfigCLIIntegration:
         result = runner.invoke(app, ["config", "update", "--dev"])
         assert result.exit_code == 0
         mock_cls.assert_called_once_with(vm_name=_DEV_VM_NAME)
+
+    @patch("aquarco_cli.commands.config.VagrantHelper")
+    def test_config_export_vm_not_running(self, mock_cls: MagicMock) -> None:
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = False
+
+        result = runner.invoke(app, ["config", "export"])
+        assert result.exit_code == 1
+
+    @patch("aquarco_cli.commands.config.VagrantHelper")
+    def test_config_export_dev_flag(self, mock_cls: MagicMock) -> None:
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_vagrant.ssh.return_value = CompletedProcess(args=[], returncode=0)
+
+        result = runner.invoke(app, ["config", "export", "--dev"])
+        assert result.exit_code == 0
+        mock_cls.assert_called_once_with(vm_name=_DEV_VM_NAME)
+
+
+class TestRunHelperEdgeCases:
+    """Edge-case tests for _run() helper."""
+
+    @patch("aquarco_cli.commands.config.VagrantHelper")
+    def test_vagrant_error_exits_with_code_1(self, mock_cls: MagicMock) -> None:
+        from aquarco_cli.vagrant import VagrantError
+        from click.exceptions import Exit
+
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_vagrant.ssh.side_effect = VagrantError("SSH failed")
+
+        with pytest.raises(Exit) as exc_info:
+            _run("update", dev=False)
+        assert exc_info.value.exit_code == 1
+
+    @patch("aquarco_cli.commands.config.VagrantHelper")
+    def test_vagrant_error_on_export_exits_with_code_1(self, mock_cls: MagicMock) -> None:
+        from aquarco_cli.vagrant import VagrantError
+        from click.exceptions import Exit
+
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_vagrant.ssh.side_effect = VagrantError("connection refused")
+
+        with pytest.raises(Exit) as exc_info:
+            _run("export", dev=False)
+        assert exc_info.value.exit_code == 1
+
+    @patch.dict(os.environ, {"AQUARCO_VM_NAME": "custom-vm"})
+    @patch("aquarco_cli.commands.config.VagrantHelper")
+    def test_dev_flag_respects_existing_env_var(self, mock_cls: MagicMock) -> None:
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_vagrant.ssh.return_value = CompletedProcess(args=[], returncode=0)
+
+        _run("update", dev=True)
+
+        # When AQUARCO_VM_NAME is already set, it should use that value
+        mock_cls.assert_called_once_with(vm_name="custom-vm")
