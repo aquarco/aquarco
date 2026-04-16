@@ -4,4 +4,6 @@
 # Uncomment the line below to target the development VM (vagrant/dev/Vagrantfile)
 # instead of the production VM (vagrant/prod/Vagrantfile).
 #
+# Developemnt VM (vagrant/dev/Vagrantfile) is targetd whether AQUARCO_VM_NAME contains "dev"
+#
 # export AQUARCO_VM_NAME=aquarco-dev
