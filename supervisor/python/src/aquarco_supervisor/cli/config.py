@@ -14,6 +14,7 @@ import typer
 from ..agent_store import export_agent_definitions_to_files, sync_all_agent_definitions_to_db
 from ..config import load_config
 from ..database import Database
+from ..exceptions import ConfigError
 from ..logging import get_logger
 from ..pipeline_store import export_pipeline_definitions_to_file, sync_pipeline_definitions_to_db
 
@@ -44,7 +45,12 @@ def export(
 
 
 async def _update(config_path: str) -> None:
-    cfg = load_config(config_path)
+    try:
+        cfg = load_config(config_path)
+    except ConfigError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
     db = Database(cfg.spec.database.url)
     await db.connect()
     try:
@@ -68,11 +74,16 @@ async def _update(config_path: str) -> None:
         else:
             typer.echo("No pipelinesFile configured, skipping pipeline sync.", err=True)
     finally:
-        await db.disconnect()
+        await db.close()
 
 
 async def _export(config_path: str) -> None:
-    cfg = load_config(config_path)
+    try:
+        cfg = load_config(config_path)
+    except ConfigError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
     db = Database(cfg.spec.database.url)
     await db.connect()
     try:
@@ -87,4 +98,4 @@ async def _export(config_path: str) -> None:
         else:
             typer.echo("No pipelinesFile configured, skipping pipeline export.", err=True)
     finally:
-        await db.disconnect()
+        await db.close()

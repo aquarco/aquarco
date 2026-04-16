@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import typer
 
 from aquarco_cli.console import print_error, print_info
@@ -15,12 +17,14 @@ app = typer.Typer(
 _SUPERVISOR_CONFIG = "/home/agent/aquarco/supervisor/config/supervisor.yaml"
 _SUPERVISOR_CMD = "sudo -u agent HOME=/home/agent bash -c 'aquarco-supervisor config {subcommand} --config {config}'"
 
+_DEV_VM_NAME = "aquarco-dev"
+
 
 def _run(subcommand: str, dev: bool) -> None:
+    env_patch: dict[str, str] = {}
     if dev:
-        import os
-        os.environ.setdefault("AQUARCO_VM_NAME", "aquarco-dev")
-    vagrant = VagrantHelper()
+        env_patch["AQUARCO_VM_NAME"] = os.environ.get("AQUARCO_VM_NAME", _DEV_VM_NAME)
+    vagrant = VagrantHelper(vm_name=env_patch.get("AQUARCO_VM_NAME", ""))
     if not vagrant.is_running():
         print_error("VM is not running. Start it with 'aquarco init' first.")
         raise typer.Exit(code=1)
