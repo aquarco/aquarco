@@ -13,6 +13,7 @@ from typing import Any
 import typer
 
 from .cli.agents import app as agents_app
+from .cli.config import app as config_app
 from .exceptions import RateLimitError, RetryableError, _cooldown_for_error
 from .cli.auth_helper import auth_watch
 from .cli.repo_manager import repo_app
@@ -37,6 +38,7 @@ from .workers.pull_worker import PullWorker
 app = typer.Typer()
 app.add_typer(repo_app, name="repo")
 app.add_typer(agents_app, name="agents", help="Agent discovery and validation commands.")
+app.add_typer(config_app, name="config", help="Sync definitions between config files and the database.")
 app.command("status")(status)
 app.command("auth-watch")(auth_watch)
 log = get_logger("supervisor")
