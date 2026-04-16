@@ -16,10 +16,7 @@ _SUPERVISOR_CONFIG = "/home/agent/aquarco/supervisor/config/supervisor.yaml"
 _SUPERVISOR_CMD = "sudo -u agent HOME=/home/agent bash -c 'aquarco-supervisor config {subcommand} --config {config}'"
 
 
-def _run(subcommand: str, dev: bool) -> None:
-    if dev:
-        import os
-        os.environ.setdefault("AQUARCO_VM_NAME", "aquarco-dev")
+def _run(subcommand: str) -> None:
     vagrant = VagrantHelper()
     if not vagrant.is_running():
         print_error("VM is not running. Start it with 'aquarco init' first.")
@@ -33,18 +30,14 @@ def _run(subcommand: str, dev: bool) -> None:
 
 
 @app.command()
-def update(
-    dev: bool = typer.Option(False, "--dev", help="Target the development VM."),
-) -> None:
+def update() -> None:
     """Sync agent and pipeline definitions from config files into the database."""
     print_info("Syncing config files → database...")
-    _run("update", dev)
+    _run("update")
 
 
 @app.command()
-def export(
-    dev: bool = typer.Option(False, "--dev", help="Target the development VM."),
-) -> None:
+def export() -> None:
     """Export active agent and pipeline definitions from the database back to config files."""
     print_info("Exporting database → config files...")
-    _run("export", dev)
+    _run("export")

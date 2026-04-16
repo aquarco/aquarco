@@ -100,15 +100,8 @@ def backup(
         help="Directory on the host where the backup is stored. "
              f"Default: {DEFAULT_BACKUP_ROOT}",
     ),
-    dev: bool = typer.Option(
-        False, "--dev",
-        help="Target the development VM (aquarco-dev) instead of the production VM.",
-    ),
 ) -> None:
     """Back up the database and credentials to ~/.aquarco/backups/ on the host."""
-    if dev:
-        import os
-        os.environ.setdefault("AQUARCO_VM_NAME", "aquarco-dev")
     vagrant = VagrantHelper()
 
     if not vagrant.is_running():

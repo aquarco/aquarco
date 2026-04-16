@@ -114,10 +114,6 @@ def init(
         help="Host port for the Caddy reverse proxy (default: 8080). "
         "Saved to ~/.aquarco.json for future commands.",
     ),
-    dev: bool = typer.Option(
-        False, "--dev",
-        help="Development mode: mount the aquarco source tree into the VM.",
-    ),
     from_backup: Optional[str] = typer.Option(
         None, "--from-backup",
         metavar="BACKUP_DIR|latest",
@@ -127,9 +123,6 @@ def init(
     ),
 ) -> None:
     """One-command bootstrap of a working Aquarco environment."""
-    if dev:
-        import os
-        os.environ.setdefault("AQUARCO_VM_NAME", "aquarco-dev")
     # Save port configuration when --port is explicitly provided or config already exists
     config_file = Path.home() / ".aquarco.json"
     # Click's get_parameter_source returns ParameterSource.COMMANDLINE when user passed --port

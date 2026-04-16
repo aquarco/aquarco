@@ -102,18 +102,11 @@ def restore(
     ),
     db: bool = typer.Option(True, "--db/--no-db", help="Restore the PostgreSQL database."),
     creds: bool = typer.Option(True, "--creds/--no-creds", help="Restore GitHub and Claude credentials."),
-    dev: bool = typer.Option(
-        False, "--dev",
-        help="Target the development VM (aquarco-dev) instead of the production VM.",
-    ),
 ) -> None:
     """Restore database and credentials from a backup.
 
     Without --from-file the latest backup under ~/.aquarco/backups/ is used.
     """
-    if dev:
-        import os
-        os.environ.setdefault("AQUARCO_VM_NAME", "aquarco-dev")
     vagrant = VagrantHelper()
 
     if not vagrant.is_running():

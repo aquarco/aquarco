@@ -1,0 +1,7 @@
+# Copy this file to .envrc and run `direnv allow` to auto-set env vars on cd.
+# See https://direnv.net/ for installation.
+#
+# Uncomment the line below to target the development VM (vagrant/dev/Vagrantfile)
+# instead of the production VM (vagrant/prod/Vagrantfile).
+#
+# export AQUARCO_VM_NAME=aquarco-dev

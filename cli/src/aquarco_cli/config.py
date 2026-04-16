@@ -64,18 +64,26 @@ class CliConfig:
             else:
                 self.api_url = f"http://localhost:{self.port}/api/graphql"
 
+    @property
+    def _vagrant_subdir(self) -> str:
+        """Return 'dev' when AQUARCO_VM_NAME contains 'dev', else 'prod'."""
+        return "dev" if "dev" in self.vm_name else "prod"
+
     def resolve_vagrant_dir(self) -> Path:
         """Return the path to the directory containing the Vagrantfile.
 
         Resolution order:
         1. Explicit AQUARCO_VAGRANT_DIR env var
-        2. Production install: ``vagrant/`` sibling of the binary's parent dir
-        3. ``vagrant/`` subdirectory of the repo root (auto-detected, up to
-           :attr:`_MAX_PARENT_DEPTH` levels)
+        2. Production install: ``~/.aquarco/vagrant/`` (stable across brew reinstalls)
+        3. ``vagrant/<subdir>/`` subdirectory of the repo root (auto-detected, up to
+           :attr:`_MAX_PARENT_DEPTH` levels), where subdir is 'dev' or 'prod' based
+           on AQUARCO_VM_NAME
         4. Current working directory as last resort
         """
         if self.vagrant_dir:
             return Path(self.vagrant_dir).resolve()
+
+        subdir = self._vagrant_subdir
 
         # Production install (onedir layout): binary is at <install>/aquarco/aquarco
         # Prefer ~/.aquarco/vagrant/ — a stable location that survives brew reinstalls.
@@ -85,17 +93,17 @@ class CliConfig:
             if (home_vagrant / "Vagrantfile").exists():
                 return home_vagrant.resolve()
             install_root = Path(sys.executable).parent.parent
-            candidate = install_root / "vagrant" / "prod" / "Vagrantfile"
+            candidate = install_root / "vagrant" / subdir / "Vagrantfile"
             if candidate.exists():
-                return (install_root / "vagrant" / "prod").resolve()
+                return (install_root / "vagrant" / subdir).resolve()
 
-        # Walk up from cwd looking for vagrant/prod/Vagrantfile (bounded)
+        # Walk up from cwd looking for vagrant/<subdir>/Vagrantfile (bounded)
         current = Path.cwd()
         ancestors = [current, *current.parents]
         for parent in ancestors[: self._MAX_PARENT_DEPTH]:
-            candidate = parent / "vagrant" / "prod" / "Vagrantfile"
+            candidate = parent / "vagrant" / subdir / "Vagrantfile"
             if candidate.exists():
-                return (parent / "vagrant" / "prod").resolve()
+                return (parent / "vagrant" / subdir).resolve()
             # Also check if Vagrantfile is directly in the directory
             if (parent / "Vagrantfile").exists():
                 return parent.resolve()
@@ -105,9 +113,9 @@ class CliConfig:
         # runs aquarco from outside the project directory (e.g. from ~).
         pkg_dir = Path(__file__).resolve().parent
         for ancestor in [pkg_dir, *pkg_dir.parents[: self._MAX_PARENT_DEPTH]]:
-            candidate = ancestor / "vagrant" / "prod" / "Vagrantfile"
+            candidate = ancestor / "vagrant" / subdir / "Vagrantfile"
             if candidate.exists():
-                return (ancestor / "vagrant" / "prod").resolve()
+                return (ancestor / "vagrant" / subdir).resolve()
 
         return current
 
