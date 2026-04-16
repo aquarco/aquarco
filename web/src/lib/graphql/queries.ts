@@ -28,7 +28,7 @@ export const DASHBOARD_STATS = gql`
 export const TOKEN_USAGE_BY_MODEL = gql`
   query TokenUsageByModel($days: Int) {
     tokenUsageByModel(days: $days) {
-      day model tokensInput tokensOutput cacheReadTokens cacheWriteTokens
+      day model tokensInput tokensOutput cacheReadTokens cacheWriteTokens costUsd
     }
   }
 `

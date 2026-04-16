@@ -157,7 +157,8 @@ export const taskQueries = {
          COALESCE(SUM(tokens_input), 0)::int AS tokens_input,
          COALESCE(SUM(tokens_output), 0)::int AS tokens_output,
          COALESCE(SUM(cache_read_tokens), 0)::int AS cache_read_tokens,
-         COALESCE(SUM(cache_write_tokens), 0)::int AS cache_write_tokens
+         COALESCE(SUM(cache_write_tokens), 0)::int AS cache_write_tokens,
+         COALESCE(SUM(cost_usd), 0)::float AS cost_usd
        FROM stages
        WHERE started_at >= NOW() - ($1 || ' days')::INTERVAL
        GROUP BY 1, 2
@@ -171,6 +172,7 @@ export const taskQueries = {
       tokensOutput: row.tokens_output as number,
       cacheReadTokens: row.cache_read_tokens as number,
       cacheWriteTokens: row.cache_write_tokens as number,
+      costUsd: row.cost_usd as number,
     }))
   },
 }

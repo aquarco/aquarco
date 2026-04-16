@@ -275,6 +275,7 @@ type TokenUsageByDay {
   tokensOutput: Int!
   cacheReadTokens: Int!
   cacheWriteTokens: Int!
+  costUsd: Float!
 }
 
 type TaskConnection {
