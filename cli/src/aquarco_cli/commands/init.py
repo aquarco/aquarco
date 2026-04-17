@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -13,30 +12,18 @@ import typer
 
 from aquarco_cli._build import BUILD_TYPE
 from aquarco_cli.commands.backup import perform_backup
+from aquarco_cli.commands.restore import (
+    DEFAULT_BACKUP_ROOT,
+    restore_credentials,
+    restore_db,
+    run_migrations,
+)
 from aquarco_cli.config import get_config, reset_config
 from aquarco_cli.console import print_error, print_info, print_success, print_warning
 from aquarco_cli.health import print_health_table
 from aquarco_cli.vagrant import VagrantError, VagrantHelper
 
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
-
-# Default backup root on the host (mirrors aquarco backup)
-DEFAULT_BACKUP_ROOT = Path.home() / ".aquarco" / "backups"
-
-# Docker Compose dir inside the VM
-_COMPOSE_DIR = "/home/agent/aquarco/docker"
-
-# Credential files: backup filename → restore shell command (reads from stdin)
-_CRED_RESTORE = {
-    "hosts.yml": (
-        "sudo -u agent HOME=/home/agent bash -c "
-        "'mkdir -p ~/.config/gh && cat > ~/.config/gh/hosts.yml && chmod 600 ~/.config/gh/hosts.yml'"
-    ),
-    "credentials.json": (
-        "sudo -u agent HOME=/home/agent bash -c "
-        "'mkdir -p ~/.claude && cat > ~/.claude/.credentials.json && chmod 600 ~/.claude/.credentials.json'"
-    ),
-}
 
 
 def _check_prerequisite(binary: str, display_name: str, install_url: str) -> bool:
@@ -46,64 +33,6 @@ def _check_prerequisite(binary: str, display_name: str, install_url: str) -> boo
         )
         return False
     return True
-
-
-def _find_latest_backup() -> Path | None:
-    """Return the most recent timestamped subdirectory under DEFAULT_BACKUP_ROOT."""
-    if not DEFAULT_BACKUP_ROOT.is_dir():
-        return None
-    dirs = sorted(
-        [d for d in DEFAULT_BACKUP_ROOT.iterdir() if d.is_dir()],
-        reverse=True,
-    )
-    return dirs[0] if dirs else None
-
-
-def _restore_from_backup(vagrant: VagrantHelper, backup_dir: Path) -> bool:
-    """Restore credentials and database from *backup_dir* into the running VM."""
-    ok = True
-
-    # Credentials
-    for filename, ssh_cmd in _CRED_RESTORE.items():
-        src = backup_dir / filename
-        if not src.exists():
-            print_warning(f"  {filename}: not in backup, skipping")
-            continue
-        try:
-            vagrant.ssh(ssh_cmd, input=src.read_text())
-            print_success(f"  Restored {filename}")
-        except (VagrantError, subprocess.CalledProcessError, OSError) as exc:
-            print_error(f"  Failed to restore {filename}: {exc}")
-            ok = False
-
-    # Database
-    sql_file = backup_dir / "aquarco.sql"
-    if sql_file.exists():
-        try:
-            vagrant.ssh(
-                f"cd {_COMPOSE_DIR} && docker compose exec -T postgres psql -U aquarco aquarco",
-                input=sql_file.read_text(),
-            )
-            print_success("  Restored database")
-        except (VagrantError, subprocess.CalledProcessError, OSError) as exc:
-            print_error(f"  Failed to restore database: {exc}")
-            ok = False
-        else:
-            # Reset all repos to 'pending' — clone dirs don't exist on a fresh VM.
-            # Safe if dirs exist: clone_worker skips repos with a valid .git dir.
-            try:
-                vagrant.ssh(
-                    f"cd {_COMPOSE_DIR} && docker compose exec -T postgres psql -U aquarco aquarco"
-                    " -c \"UPDATE aquarco.repositories SET clone_status = 'pending',"
-                    " error_message = NULL WHERE clone_status IN ('ready', 'error');\"",
-                )
-                print_success("  Reset repository clone statuses to pending")
-            except (VagrantError, subprocess.CalledProcessError, OSError):
-                print_warning("  Could not reset clone statuses (clone worker will recover)")
-    else:
-        print_warning("  aquarco.sql: not in backup, skipping database restore")
-
-    return ok
 
 
 @app.callback(invoke_without_command=True)
@@ -220,8 +149,10 @@ def init(
 
     # 3. Restore from backup (if requested)
     if from_backup is not None:
+        from aquarco_cli.commands.restore import latest_backup
+
         if from_backup == "latest":
-            backup_dir = _find_latest_backup()
+            backup_dir = latest_backup(DEFAULT_BACKUP_ROOT)
             if backup_dir is None:
                 print_error(f"No backups found in {DEFAULT_BACKUP_ROOT}")
                 raise typer.Exit(code=1)
@@ -233,8 +164,14 @@ def init(
                 raise typer.Exit(code=1)
             print_info(f"Restoring from backup: {backup_dir}")
 
-        restored = _restore_from_backup(vagrant, backup_dir)
-        if not restored:
+        print_info("Restoring credentials...")
+        ok = restore_credentials(vagrant, backup_dir)
+        print_info("Restoring database...")
+        ok = restore_db(vagrant, backup_dir) and ok
+        if ok:
+            print_info("Running migrations...")
+            ok = run_migrations(vagrant) and ok
+        if not ok:
             print_error("Backup restore completed with errors (see above).")
             raise typer.Exit(code=1)
 
