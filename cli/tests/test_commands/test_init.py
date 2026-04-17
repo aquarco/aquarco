@@ -185,6 +185,9 @@ class TestInitFromBackup:
         mock_vagrant.is_running.return_value = False
         result = runner.invoke(app, ["init", "--from-backup", str(tmp_path)])
         assert result.exit_code == 1
+        # The key fix: when credentials fail, restore_db must NOT be called
+        # (short-circuit evaluation: ok=False means `ok and restore_db(...)` skips restore_db)
+        mock_db.assert_not_called()
 
     @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.init.VagrantHelper")
