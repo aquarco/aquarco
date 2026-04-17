@@ -1,5 +1,17 @@
 # Changelog
 
+## [2026-04-17] — Fix production migrations to use pre-built images (no source tree required)
+
+### Fixed
+- **Production migrations** — `run_migrations()` in `cli/src/aquarco_cli/commands/restore.py` now detects the VM environment (`/etc/aquarco/env`) and uses the appropriate Docker Compose file:
+  - **Production** — uses `compose.prod.yml` with pre-built registry images, eliminating the requirement for the source code tree to be present on the VM
+  - **Development** — uses regular `compose.yml` which builds images from the local `../db` source tree
+  - Replaced the previous approach of checking if the source tree directory existed with environment-based selection, ensuring migrations always run in production regardless of code availability
+- **Migration error handling** — defaulting to "development" mode when `/etc/aquarco/env` cannot be read ensures graceful degradation in edge cases
+
+### Test Coverage
+- Existing test coverage in `cli/tests/test_commands/test_restore.py` verified (28 tests passing, 91% coverage)
+
 ## [2026-04-17] — Fix GraphQL enum mappings and code quality issues
 
 ### Fixed
