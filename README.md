@@ -30,7 +30,14 @@ Install: `pip install -e cli/` (requires Python 3.10+)
 | `aquarco backup --no-db` | Back up credentials only |
 | `aquarco backup --no-creds` | Back up database only |
 | `aquarco backup -o <dir>` | Back up to a custom directory instead of the default |
+| `aquarco restore` | Restore database and credentials from a backup |
 | `aquarco update` | Update VM: Docker images, migrations, restart services (with drain mode support) |
+| `aquarco start` | Start the Aquarco VM |
+| `aquarco stop` | Stop the Aquarco VM (with pre-stop backup by default) |
+| `aquarco stop --no-backup` | Stop the VM without creating a backup |
+| `aquarco destroy` | Destroy the Aquarco VM (irreversible; with pre-destroy backup by default) |
+| `aquarco destroy -y` | Destroy the VM without confirmation prompt |
+| `aquarco destroy --no-backup` | Destroy the VM without creating a backup |
 | `aquarco auth` | Auto-detect unauthenticated services and run their login flows |
 | `aquarco auth claude` | Authenticate Claude via OAuth PKCE flow |
 | `aquarco auth github` | Authenticate GitHub via device flow |

@@ -1,5 +1,17 @@
 # Changelog
 
+## [2026-04-17] — Add `--no-backup` flags and fix migration permissions
+
+### Fixed
+- **Migration permissions** — migrations now run as the `agent` user with `HOME=/home/agent` instead of as root, allowing access to VirtualBox shared folders during restore operations
+
+### Added
+- **`--no-backup` flag on `aquarco stop`** — skip the automatic pre-stop backup by passing `--no-backup`
+- **`--no-backup` flag on `aquarco destroy`** — skip the automatic pre-destroy backup by passing `--no-backup`
+
+### Changed
+- **README CLI Reference** — added documentation for previously undocumented `aquarco start`, `aquarco stop`, and `aquarco destroy` commands with their respective flags
+
 ## [2026-04-17] — Fix GraphQL enum mappings and code quality issues
 
 ### Fixed
