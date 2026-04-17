@@ -232,6 +232,90 @@ class TestLatestBackupFunction:
         assert result is None
 
 
+class TestRestoreMigrations:
+    """Tests for run_migrations running as the agent user (VirtualBox shared folder fix)."""
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_migrations_run_as_agent_user(self, mock_cls, tmp_path):
+        """run_migrations must use 'sudo -u agent HOME=/home/agent' to access shared folders."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        migration_cmds = [cmd for cmd in cmds if "migrations" in cmd]
+        assert len(migration_cmds) >= 1, "Expected at least one migration SSH call"
+        for cmd in migration_cmds:
+            assert "sudo -u agent" in cmd, f"Migration must run as agent user: {cmd}"
+            assert "HOME=/home/agent" in cmd, f"Migration must set HOME for agent: {cmd}"
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_migrations_use_docker_compose_run(self, mock_cls, tmp_path):
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        assert any("docker compose run --rm migrations" in cmd for cmd in cmds)
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_migrations_run_after_db_restore(self, mock_cls, tmp_path):
+        """Migrations should run after the database is restored, not before."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        psql_idx = next(i for i, cmd in enumerate(cmds) if "psql" in cmd)
+        migration_idx = next(i for i, cmd in enumerate(cmds) if "docker compose run --rm migrations" in cmd)
+        assert migration_idx > psql_idx, "Migrations must run after DB restore"
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_migration_failure_exits_nonzero(self, mock_cls, tmp_path):
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        # First two calls succeed (db restore + status reset), third (migration) fails
+        vagrant.ssh.side_effect = [None, None, VagrantError("migration failed")]
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        assert result.exit_code == 1
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_migrations_skipped_when_no_db(self, mock_cls, tmp_path):
+        """When --no-db is passed, migrations should not run."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-db"])
+
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        assert not any("migrations" in cmd for cmd in cmds)
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_migrations_stream_output(self, mock_cls, tmp_path):
+        """run_migrations should pass stream=True to vagrant.ssh."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        calls = vagrant.ssh.call_args_list
+        migration_calls = [c for c in calls if "migrations" in c.args[0]]
+        assert len(migration_calls) >= 1
+        for call in migration_calls:
+            assert call.kwargs.get("stream") is True, "Migration should stream output"
+
+
 class TestRestoreSelectiveFlags:
     @patch("aquarco_cli.commands.restore.VagrantHelper")
     def test_no_db_skips_database(self, mock_cls, tmp_path):
