@@ -8,17 +8,14 @@ from pathlib import Path
 import typer
 
 from aquarco_cli.console import print_error, print_info, print_success, print_warning
-from aquarco_cli.vagrant import VagrantError, VagrantHelper
+from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, VagrantError, VagrantHelper
 
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
 # Default backup root on the host (mirrors backup.py)
 DEFAULT_BACKUP_ROOT = Path.home() / ".aquarco" / "backups"
 
-# Docker Compose working dir inside the VM
-COMPOSE_DIR = "/home/agent/aquarco/docker"
-
-# Credential file paths inside the VM (as agent user).
+# Credential file paths inside the VM.
 # Must mirror backup.py exactly so backup ↔ restore filenames align.
 _CRED_FILES = {
     "github-token": "/home/agent/.ssh/github-token",
@@ -26,7 +23,7 @@ _CRED_FILES = {
 }
 
 
-def _latest_backup(root: Path) -> Path | None:
+def latest_backup(root: Path) -> Path | None:
     """Return the most recent timestamped subdirectory under *root*, or None."""
     if not root.exists():
         return None
@@ -34,7 +31,7 @@ def _latest_backup(root: Path) -> Path | None:
     return dirs[-1] if dirs else None
 
 
-def _restore_db(vagrant: VagrantHelper, src: Path) -> bool:
+def restore_db(vagrant: VagrantHelper, src: Path) -> bool:
     """Pipe aquarco.sql from the backup into the postgres container."""
     sql_file = src / "aquarco.sql"
     if not sql_file.exists():
@@ -44,7 +41,7 @@ def _restore_db(vagrant: VagrantHelper, src: Path) -> bool:
         sql = sql_file.read_text()
         vagrant.ssh(
             f"sudo -u agent HOME=/home/agent bash -c "
-            f"'cd {COMPOSE_DIR} && docker compose exec -T postgres psql -U aquarco aquarco'",
+            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose exec -T postgres psql -U aquarco aquarco'",
             input=sql,
         )
         print_success(f"Database ← {sql_file}")
@@ -57,7 +54,7 @@ def _restore_db(vagrant: VagrantHelper, src: Path) -> bool:
     try:
         vagrant.ssh(
             f"sudo -u agent HOME=/home/agent bash -c "
-            f"'cd {COMPOSE_DIR} && docker compose exec -T postgres psql -U aquarco aquarco "
+            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose exec -T postgres psql -U aquarco aquarco "
             f"-c \"UPDATE aquarco.repositories SET clone_status = '\\''pending'\\'',"
             f" error_message = NULL WHERE clone_status IN ('\\''ready'\\'',"
             f" '\\''error'\\'');\"'",
@@ -70,7 +67,21 @@ def _restore_db(vagrant: VagrantHelper, src: Path) -> bool:
     return True
 
 
-def _restore_credentials(vagrant: VagrantHelper, src: Path) -> bool:
+def run_migrations(vagrant: VagrantHelper) -> bool:
+    """Run yoyo migrations after restore to bring the schema up to date."""
+    try:
+        vagrant.ssh(
+            f"sudo bash -c '{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose run --rm migrations'",
+            stream=True,
+        )
+        print_success("Migrations applied")
+        return True
+    except (VagrantError, subprocess.CalledProcessError, OSError) as exc:
+        print_error(f"Migrations failed: {exc}")
+        return False
+
+
+def restore_credentials(vagrant: VagrantHelper, src: Path) -> bool:
     """Write credential files from the backup directory back into the VM."""
     ok = True
     for filename, vm_path in _CRED_FILES.items():
@@ -119,7 +130,7 @@ def restore(
             print_error(f"Backup directory not found: {src}")
             raise typer.Exit(code=1)
     else:
-        src = _latest_backup(DEFAULT_BACKUP_ROOT)
+        src = latest_backup(DEFAULT_BACKUP_ROOT)
         if src is None:
             print_error(
                 f"No backups found in {DEFAULT_BACKUP_ROOT}. "
@@ -132,11 +143,14 @@ def restore(
 
     if db:
         print_info("Restoring database...")
-        ok = _restore_db(vagrant, src) and ok
+        ok = restore_db(vagrant, src) and ok
+        if ok:
+            print_info("Running migrations...")
+            ok = run_migrations(vagrant) and ok
 
     if creds:
         print_info("Restoring credentials...")
-        ok = _restore_credentials(vagrant, src) and ok
+        ok = restore_credentials(vagrant, src) and ok
 
     if not ok:
         print_warning("Restore completed with errors.")

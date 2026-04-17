@@ -11,6 +11,19 @@ from aquarco_cli._build import BUILD_TYPE
 from aquarco_cli.config import get_config
 
 
+# ---------------------------------------------------------------------------
+# Shared VM / Docker constants used across CLI commands
+# ---------------------------------------------------------------------------
+
+#: Working directory for docker compose inside the VM.
+COMPOSE_DIR = "/home/agent/aquarco/docker"
+
+#: Shell snippet that exports secrets from the provisioned env file.
+#: Required before any ``docker compose`` invocation because compose.yml
+#: declares POSTGRES_PASSWORD and DATABASE_URL as required variables.
+LOAD_SECRETS = "set -a; . /etc/aquarco/docker-secrets.env; set +a"
+
+
 class VagrantError(Exception):
     """Raised when a vagrant command exits non-zero."""
 

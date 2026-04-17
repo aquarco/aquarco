@@ -42,6 +42,16 @@ if [[ ! -d "${BACKUP_DIR}" ]]; then
   exit 1
 fi
 
+# ── Load secrets ────────────────────────────────────────────────────────────
+
+# POSTGRES_PASSWORD and DATABASE_URL are required by compose.yml.
+# The file is readable by both root and the agent group (640 root:agent).
+# shellcheck source=/dev/null
+set -a
+# shellcheck disable=SC1091
+. /etc/aquarco/docker-secrets.env
+set +a
+
 # ── Detect environment (dev vs production) ─────────────────────────────────
 
 AQUARCO_ENV="development"

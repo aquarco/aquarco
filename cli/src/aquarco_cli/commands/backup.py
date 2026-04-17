@@ -9,16 +9,12 @@ from pathlib import Path
 import typer
 
 from aquarco_cli.console import print_error, print_info, print_success, print_warning
-from aquarco_cli.vagrant import VagrantError, VagrantHelper
+from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, VagrantError, VagrantHelper
 
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
 # Default backup root on the host
 DEFAULT_BACKUP_ROOT = Path.home() / ".aquarco" / "backups"
-
-# Docker Compose working dir inside the VM
-COMPOSE_DIR = "/home/agent/aquarco/docker"
-
 # Credential file paths inside the VM (as agent user).
 # github-token: raw OAuth token written by the API's device-flow handler to the
 #   agent-ssh shared volume (compose: ${AGENT_SSH_DIR:-/home/agent/.ssh}:/agent-ssh).
@@ -35,7 +31,7 @@ def _backup_db(vagrant: VagrantHelper, dest: Path) -> bool:
     try:
         result = vagrant.ssh(
             f"sudo -u agent HOME=/home/agent bash -c "
-            f"'cd {COMPOSE_DIR} && docker compose exec -T postgres pg_dump -U aquarco aquarco'",
+            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose exec -T postgres pg_dump -U aquarco aquarco'",
             stream=False,
         )
         out = dest / "aquarco.sql"
