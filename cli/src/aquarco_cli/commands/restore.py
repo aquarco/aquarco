@@ -67,8 +67,26 @@ def restore_db(vagrant: VagrantHelper, src: Path) -> bool:
     return True
 
 
+_DB_CONTEXT = "/home/agent/aquarco/db"
+
+
 def run_migrations(vagrant: VagrantHelper) -> bool:
     """Run yoyo migrations after restore to bring the schema up to date."""
+    # The migrations image build context is ../db relative to the compose dir.
+    # If the source tree isn't available yet (fresh VM, code not cloned),
+    # skip gracefully — the restored DB already contains all prior migrations,
+    # and new ones will run automatically on the next `docker compose up`.
+    try:
+        result = vagrant.ssh(f"test -d {_DB_CONTEXT} && echo ok || echo missing")
+        if "missing" in (result.stdout or ""):
+            print_warning(
+                f"  Skipping migrations: {_DB_CONTEXT} not found on VM. "
+                "They will run automatically on next start."
+            )
+            return True
+    except (VagrantError, subprocess.CalledProcessError, OSError):
+        pass
+
     try:
         vagrant.ssh(
             f"sudo -u agent HOME=/home/agent bash -c "
