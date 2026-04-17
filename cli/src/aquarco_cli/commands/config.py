@@ -13,7 +13,11 @@ app = typer.Typer(
 )
 
 _SUPERVISOR_CONFIG = "/home/agent/aquarco/supervisor/config/supervisor.yaml"
-_SUPERVISOR_CMD = "sudo -u agent HOME=/home/agent bash -c 'aquarco-supervisor config {subcommand} --config {config}'"
+_SUPERVISOR_CMD = (
+    "sudo -u agent HOME=/home/agent "
+    "bash -c 'set -a; . /etc/aquarco/secrets.env; set +a; "
+    "/home/agent/.venv/bin/aquarco-supervisor config {subcommand} --config {config}'"
+)
 
 
 def _run(subcommand: str) -> None:
