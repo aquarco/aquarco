@@ -3,23 +3,19 @@
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 
-import httpx
 import typer
 
 from aquarco_cli.console import console, handle_api_error, print_error, print_info, print_success, print_warning
 from aquarco_cli.graphql_client import (
     MUTATION_CREATE_TASK,
-    QUERY_PIPELINE_STATUS,
     TERMINAL_STATUSES,
     GraphQLClient,
 )
+from aquarco_cli.task import follow_task
 
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
-
-MAX_FOLLOW_ERRORS = 5
 
 
 @app.callback(invoke_without_command=True)
@@ -87,49 +83,24 @@ def run(
     if not follow:
         return
 
-    # Poll for progress
     print_info("Following task progress (Ctrl+C to stop)...")
     last_stage = -1
-    consecutive_errors = 0
-    try:
-        while True:
-            time.sleep(2)
-            try:
-                ps_data = client.execute(QUERY_PIPELINE_STATUS, {"taskId": task_id})
-                consecutive_errors = 0
-            except (httpx.ConnectError, httpx.TimeoutException) as conn_exc:
-                handle_api_error(conn_exc)
-                raise typer.Exit(code=1) from conn_exc
-            except Exception as poll_exc:
-                consecutive_errors += 1
-                print_warning(f"Poll error: {poll_exc}")
-                if consecutive_errors >= MAX_FOLLOW_ERRORS:
-                    print_error(
-                        f"Too many consecutive errors ({MAX_FOLLOW_ERRORS}), stopping."
-                    )
-                    raise typer.Exit(code=1) from poll_exc
-                continue
 
-            ps = ps_data.get("pipelineStatus")
-            if not ps:
-                continue
+    def _on_poll(ps: dict) -> bool:
+        nonlocal last_stage
+        for stage in ps.get("stages", []):
+            snum = stage["stageNumber"]
+            if snum > last_stage:
+                agent = stage.get("agent") or "-"
+                console.print(
+                    f"  Stage {snum} [{stage['category']}] "
+                    f"agent={agent} status={stage['status']}"
+                )
+                last_stage = snum
+        if ps["status"] in TERMINAL_STATUSES:
+            style = "green" if ps["status"] == "COMPLETED" else "red"
+            console.print(f"\n[bold {style}]Task {task_id}: {ps['status']}[/bold {style}]")
+            return True
+        return False
 
-            # Print new stage transitions
-            for stage in ps.get("stages", []):
-                snum = stage["stageNumber"]
-                if snum > last_stage:
-                    status_str = stage["status"]
-                    agent = stage.get("agent") or "-"
-                    console.print(
-                        f"  Stage {snum} [{stage['category']}] "
-                        f"agent={agent} status={status_str}"
-                    )
-                    last_stage = snum
-
-            if ps["status"] in TERMINAL_STATUSES:
-                style = "green" if ps["status"] == "COMPLETED" else "red"
-                console.print(f"\n[bold {style}]Task {task_id}: {ps['status']}[/bold {style}]")
-                return
-
-    except KeyboardInterrupt:
-        console.print("\nStopped following.")
+    follow_task(client, task_id, _on_poll)

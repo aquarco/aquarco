@@ -3,25 +3,21 @@
 from __future__ import annotations
 
 import json
-import time
 from typing import Optional
 
-import httpx
 import typer
 
 from aquarco_cli.console import console, handle_api_error, make_table, print_error, print_info, print_warning
 from aquarco_cli.graphql_client import (
     QUERY_DASHBOARD_STATS,
-    QUERY_PIPELINE_STATUS,
     QUERY_TASK,
     QUERY_TASKS,
     TERMINAL_STATUSES,
     GraphQLClient,
 )
+from aquarco_cli.task import follow_task
 
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
-
-MAX_FOLLOW_ERRORS = 5
 
 
 def _status_style(status: str) -> str:
@@ -177,31 +173,14 @@ def status(
 
             if follow:
                 print_info("Following task (Ctrl+C to stop)...")
-                consecutive_errors = 0
-                try:
-                    while True:
-                        time.sleep(2)
-                        try:
-                            ps = client.execute(QUERY_PIPELINE_STATUS, {"taskId": task_id})
-                            consecutive_errors = 0
-                        except (httpx.ConnectError, httpx.TimeoutException) as conn_exc:
-                            handle_api_error(conn_exc)
-                            raise typer.Exit(code=1) from conn_exc
-                        except Exception as poll_exc:
-                            consecutive_errors += 1
-                            print_warning(f"Poll error: {poll_exc}")
-                            if consecutive_errors >= MAX_FOLLOW_ERRORS:
-                                print_error(
-                                    f"Too many consecutive errors ({MAX_FOLLOW_ERRORS}), stopping."
-                                )
-                                raise typer.Exit(code=1) from poll_exc
-                            continue
-                        ps_data = ps.get("pipelineStatus")
-                        if ps_data and ps_data["status"] in TERMINAL_STATUSES:
-                            _print_task_detail(client, task_id)
-                            return
-                except KeyboardInterrupt:
-                    console.print("\nStopped following.")
+
+                def _on_poll(ps: dict) -> bool:
+                    if ps["status"] in TERMINAL_STATUSES:
+                        _print_task_detail(client, task_id)
+                        return True
+                    return False
+
+                follow_task(client, task_id, _on_poll)
         else:
             if json_output:
                 stats = client.execute(QUERY_DASHBOARD_STATS)
