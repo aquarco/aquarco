@@ -71,7 +71,8 @@ def run_migrations(vagrant: VagrantHelper) -> bool:
     """Run yoyo migrations after restore to bring the schema up to date."""
     try:
         vagrant.ssh(
-            f"sudo bash -c '{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose run --rm migrations'",
+            f"sudo -u agent HOME=/home/agent bash -c "
+            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose run --rm migrations'",
             stream=True,
         )
         print_success("Migrations applied")

@@ -41,16 +41,19 @@ def start() -> None:
 
 
 @stop_app.callback(invoke_without_command=True)
-def stop() -> None:
+def stop(
+    no_backup: bool = typer.Option(False, "--no-backup", help="Skip the pre-stop backup."),
+) -> None:
     """Stop the Aquarco VM."""
     vagrant = VagrantHelper()
     if not vagrant.is_running():
         print_info("VM is already stopped.")
         return
-    try:
-        perform_backup(vagrant)
-    except typer.Exit:
-        typer.confirm("Backup had errors. Stop anyway?", abort=True)
+    if not no_backup:
+        try:
+            perform_backup(vagrant)
+        except typer.Exit:
+            typer.confirm("Backup had errors. Stop anyway?", abort=True)
     print_info("Stopping VM...")
     try:
         vagrant.halt()
@@ -63,12 +66,13 @@ def stop() -> None:
 @destroy_app.callback(invoke_without_command=True)
 def destroy(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+    no_backup: bool = typer.Option(False, "--no-backup", help="Skip the pre-destroy backup."),
 ) -> None:
     """Destroy the Aquarco VM. This is irreversible."""
     if not yes:
         typer.confirm("This will permanently destroy the VM. Continue?", abort=True)
     vagrant = VagrantHelper()
-    if vagrant.is_running():
+    if vagrant.is_running() and not no_backup:
         try:
             perform_backup(vagrant)
         except typer.Exit:
