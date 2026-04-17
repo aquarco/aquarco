@@ -1,5 +1,17 @@
 # Changelog
 
+## [2026-04-16] — Remove `--dev` flag; introduce `AQUARCO_VM_NAME`
+
+### Changed
+- `--dev` flag removed from all CLI commands (`init`, `backup`, `restore`, `start`, `stop`, `destroy`, `config`)
+- VM targeting now controlled by `AQUARCO_VM_NAME` env var: set to `aquarco-dev` to use `vagrant/dev/Vagrantfile`; unset defaults to `vagrant/prod/Vagrantfile`
+- `resolve_vagrant_dir()` in `cli/src/aquarco_cli/config.py` checks for `"dev"` substring in `AQUARCO_VM_NAME`
+- Recommended workflow: copy `.envrc.example` → `.envrc`, uncomment the export line, run `direnv allow`; `.envrc` is gitignored
+
+### Docs
+- `wiki/CLI-Reference.md` — removed `--dev` rows from all command tables; added `AQUARCO_VM_NAME` notes
+- `wiki/Dev-Setup.md` — replaced `aquarco init --dev` section with direnv/.envrc setup guide
+
 ## [2026-04-15] — Improve Stage Output UX (#139)
 
 ### Changed
