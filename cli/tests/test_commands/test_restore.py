@@ -208,6 +208,169 @@ class TestRestoreCredentials:
         vagrant.ssh.assert_not_called()
 
 
+class TestRunMigrationsEnvironmentDetection:
+    """Tests for environment-aware compose file selection in run_migrations()."""
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_production_env_uses_compose_prod_yml(self, mock_cls, tmp_path):
+        """When /etc/aquarco/env contains 'production', migrations use compose.prod.yml."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        # First ssh call: restore_db psql, second: reset clone statuses,
+        # third: read /etc/aquarco/env, fourth: run migrations.
+        env_result = MagicMock()
+        env_result.stdout = "production"
+        vagrant.ssh.side_effect = [
+            MagicMock(),  # restore_db: psql
+            MagicMock(),  # restore_db: reset clone statuses
+            env_result,   # run_migrations: read env
+            MagicMock(),  # run_migrations: compose command
+        ]
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        assert result.exit_code == 0
+        migration_cmd = vagrant.ssh.call_args_list[3].args[0]
+        assert "compose.prod.yml" in migration_cmd
+        assert "run --rm migrations" in migration_cmd
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_development_env_uses_default_compose(self, mock_cls, tmp_path):
+        """When /etc/aquarco/env contains 'development', migrations use default compose.yml."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        env_result = MagicMock()
+        env_result.stdout = "development"
+        vagrant.ssh.side_effect = [
+            MagicMock(),  # restore_db: psql
+            MagicMock(),  # restore_db: reset clone statuses
+            env_result,   # run_migrations: read env
+            MagicMock(),  # run_migrations: compose command
+        ]
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        assert result.exit_code == 0
+        migration_cmd = vagrant.ssh.call_args_list[3].args[0]
+        assert "docker compose run --rm migrations" in migration_cmd
+        assert "compose.prod.yml" not in migration_cmd
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_env_file_missing_falls_back_to_development(self, mock_cls, tmp_path):
+        """When /etc/aquarco/env is missing, the shell fallback echoes 'development'."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        env_result = MagicMock()
+        env_result.stdout = "development"  # shell fallback: echo development
+        vagrant.ssh.side_effect = [
+            MagicMock(),  # restore_db: psql
+            MagicMock(),  # restore_db: reset clone statuses
+            env_result,   # run_migrations: read env (fallback)
+            MagicMock(),  # run_migrations: compose command
+        ]
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        assert result.exit_code == 0
+        migration_cmd = vagrant.ssh.call_args_list[3].args[0]
+        assert "compose.prod.yml" not in migration_cmd
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_env_read_ssh_failure_falls_back_to_development(self, mock_cls, tmp_path):
+        """When the SSH call to read /etc/aquarco/env raises, fallback to development compose."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+
+        call_count = 0
+
+        def ssh_side_effect(cmd, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # Calls 1 & 2: restore_db (psql + reset)
+            if call_count <= 2:
+                return MagicMock()
+            # Call 3: reading /etc/aquarco/env — fails
+            if call_count == 3:
+                raise VagrantError("ssh failed")
+            # Call 4: migration command — succeeds
+            return MagicMock()
+
+        vagrant.ssh.side_effect = ssh_side_effect
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        assert result.exit_code == 0
+        migration_cmd = vagrant.ssh.call_args_list[3].args[0]
+        assert "docker compose run --rm migrations" in migration_cmd
+        assert "compose.prod.yml" not in migration_cmd
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_env_reads_etc_aquarco_env(self, mock_cls, tmp_path):
+        """run_migrations reads /etc/aquarco/env via SSH."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        env_result = MagicMock()
+        env_result.stdout = "production"
+        vagrant.ssh.side_effect = [
+            MagicMock(),  # restore_db: psql
+            MagicMock(),  # restore_db: reset clone statuses
+            env_result,   # run_migrations: read env
+            MagicMock(),  # run_migrations: compose command
+        ]
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        env_read_cmd = vagrant.ssh.call_args_list[2].args[0]
+        assert "/etc/aquarco/env" in env_read_cmd
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_env_value_with_whitespace_is_stripped(self, mock_cls, tmp_path):
+        """Trailing whitespace/newlines in env file content are stripped."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        env_result = MagicMock()
+        env_result.stdout = "  production\n"
+        vagrant.ssh.side_effect = [
+            MagicMock(),  # restore_db: psql
+            MagicMock(),  # restore_db: reset clone statuses
+            env_result,   # run_migrations: read env
+            MagicMock(),  # run_migrations: compose command
+        ]
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        assert result.exit_code == 0
+        migration_cmd = vagrant.ssh.call_args_list[3].args[0]
+        assert "compose.prod.yml" in migration_cmd
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_unknown_env_value_uses_default_compose(self, mock_cls, tmp_path):
+        """An unrecognised environment value (e.g. 'staging') uses default compose."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        env_result = MagicMock()
+        env_result.stdout = "staging"
+        vagrant.ssh.side_effect = [
+            MagicMock(),  # restore_db: psql
+            MagicMock(),  # restore_db: reset clone statuses
+            env_result,   # run_migrations: read env
+            MagicMock(),  # run_migrations: compose command
+        ]
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        assert result.exit_code == 0
+        migration_cmd = vagrant.ssh.call_args_list[3].args[0]
+        assert "compose.prod.yml" not in migration_cmd
+
+
 class TestLatestBackupFunction:
     """Tests for the latest_backup helper in restore.py."""
 
