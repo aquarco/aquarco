@@ -68,7 +68,7 @@ async def _update(config_path: str) -> None:
         else:
             typer.echo("No pipelinesFile configured, skipping pipeline sync.", err=True)
     finally:
-        await db.disconnect()
+        await db.close()
 
 
 async def _export(config_path: str) -> None:
@@ -87,4 +87,4 @@ async def _export(config_path: str) -> None:
         else:
             typer.echo("No pipelinesFile configured, skipping pipeline export.", err=True)
     finally:
-        await db.disconnect()
+        await db.close()
