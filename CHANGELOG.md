@@ -7,6 +7,7 @@
 - **Task status terminal detection** — added `CANCELLED` to `TERMINAL_STATUSES` set in `graphql_client.py` so the `follow_task()` helper correctly stops polling when a task is cancelled
 - **Restore logic short-circuit evaluation** — fixed error accumulation in `cli/src/aquarco_cli/commands/init.py` restore logic by correcting evaluation order (`ok and restore_db` instead of `restore_db and ok`)
 - **Configuration loading** — extracted `COMPOSE_DIR` and `LOAD_SUPERVISOR_SECRETS` constants to `vagrant.py` module for centralized secret-loading pattern; updated `config.py` to use shared constants
+- **Migrations graceful skip on VM** — modified `run_migrations()` in `cli/src/aquarco_cli/commands/restore.py` to check for migrations build context directory before attempting to run migrations; if the context is missing (fresh VM, code not yet cloned), migrations are skipped gracefully with a warning, since the restored database already contains all prior migrations and new ones will run automatically on next `docker compose up`. Prevents errors during restore operations on fresh VMs.
 
 ### Test Coverage
 - 30 new tests added covering refactored task, vagrant, and config modules
