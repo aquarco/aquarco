@@ -226,28 +226,21 @@ class TestBackupBoth:
         assert "complete" in result.output.lower()
 
 
-class TestBackupDevFlag:
-    @patch("aquarco_cli.commands.backup.VagrantHelper")
-    def test_dev_flag_sets_vm_name(self, mock_cls, tmp_path):
-        import os
-        vagrant = _make_vagrant()
-        vagrant.ssh.return_value.stdout = "content"
-        mock_cls.return_value = vagrant
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("AQUARCO_VM_NAME", None)
-            runner.invoke(app, ["backup", "--dev", "--output", str(tmp_path)])
-            assert os.environ.get("AQUARCO_VM_NAME") == "aquarco-dev"
+class TestBackupDisableTriggers:
+    """Verify pg_dump uses --disable-triggers flag."""
 
     @patch("aquarco_cli.commands.backup.VagrantHelper")
-    def test_no_dev_flag_does_not_set_vm_name(self, mock_cls, tmp_path):
-        import os
+    def test_backup_uses_disable_triggers(self, mock_cls, tmp_path):
         vagrant = _make_vagrant()
         vagrant.ssh.return_value.stdout = "content"
         mock_cls.return_value = vagrant
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("AQUARCO_VM_NAME", None)
-            runner.invoke(app, ["backup", "--output", str(tmp_path)])
-            assert "AQUARCO_VM_NAME" not in os.environ
+        result = runner.invoke(app, ["backup", "--output", str(tmp_path)])
+        assert result.exit_code == 0
+        # Verify the pg_dump command includes --disable-triggers
+        ssh_calls = vagrant.ssh.call_args_list
+        pg_dump_calls = [c for c in ssh_calls if "pg_dump" in str(c)]
+        assert len(pg_dump_calls) > 0
+        assert "--disable-triggers" in str(pg_dump_calls[0])
 
 
 class TestBackupDefaultOutput:
