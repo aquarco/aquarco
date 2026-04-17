@@ -244,6 +244,7 @@ export type Mutation = {
   claudeLogout: Scalars['Boolean']['output'];
   claudeSubmitCode: ClaudeLoginResult;
   closeTask: TaskPayload;
+  continueTask: TaskPayload;
   createAgentPR: CreatePrPayload;
   createTask: TaskPayload;
   githubLoginPoll: GithubLoginResult;
@@ -252,10 +253,9 @@ export type Mutation = {
   modifyAgent: AgentDefinitionPayload;
   registerRepository: RepositoryPayload;
   removeRepository: RepositoryPayload;
-  runAgainTask: TaskPayload;
   resetAgentModification: AgentDefinitionPayload;
   retryClone: RepositoryPayload;
-  continueTask: TaskPayload;
+  runAgainTask: TaskPayload;
   setAgentDisabled: AgentDefinitionPayload;
   setDrainMode: DrainStatus;
   unblockTask: TaskPayload;
@@ -275,6 +275,11 @@ export type MutationClaudeSubmitCodeArgs = {
 
 
 export type MutationCloseTaskArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
+export type MutationContinueTaskArgs = {
   id: Scalars['ID']['input'];
 };
 
@@ -306,11 +311,6 @@ export type MutationRemoveRepositoryArgs = {
 };
 
 
-export type MutationRunAgainTaskArgs = {
-  id: Scalars['ID']['input'];
-};
-
-
 export type MutationResetAgentModificationArgs = {
   name: Scalars['String']['input'];
   scope: Scalars['String']['input'];
@@ -322,7 +322,7 @@ export type MutationRetryCloneArgs = {
 };
 
 
-export type MutationContinueTaskArgs = {
+export type MutationRunAgainTaskArgs = {
   id: Scalars['ID']['input'];
 };
 
@@ -585,6 +585,7 @@ export type TaskPayload = {
 
 export enum TaskStatus {
   Blocked = 'blocked',
+  Cancelled = 'CANCELLED',
   Closed = 'closed',
   Completed = 'completed',
   Executing = 'executing',
@@ -600,6 +601,7 @@ export type TokenUsageByDay = {
   __typename?: 'TokenUsageByDay';
   cacheReadTokens: Scalars['Int']['output'];
   cacheWriteTokens: Scalars['Int']['output'];
+  costUsd: Scalars['Float']['output'];
   day: Scalars['DateTime']['output'];
   model: Scalars['String']['output'];
   tokensInput: Scalars['Int']['output'];
@@ -971,6 +973,7 @@ export type MutationResolvers<ContextType = Context, ParentType extends Resolver
   claudeLogout?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   claudeSubmitCode?: Resolver<ResolversTypes['ClaudeLoginResult'], ParentType, ContextType, RequireFields<MutationClaudeSubmitCodeArgs, 'code'>>;
   closeTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationCloseTaskArgs, 'id'>>;
+  continueTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationContinueTaskArgs, 'id'>>;
   createAgentPR?: Resolver<ResolversTypes['CreatePRPayload'], ParentType, ContextType, RequireFields<MutationCreateAgentPrArgs, 'repoName'>>;
   createTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationCreateTaskArgs, 'input'>>;
   githubLoginPoll?: Resolver<ResolversTypes['GithubLoginResult'], ParentType, ContextType>;
@@ -979,10 +982,9 @@ export type MutationResolvers<ContextType = Context, ParentType extends Resolver
   modifyAgent?: Resolver<ResolversTypes['AgentDefinitionPayload'], ParentType, ContextType, RequireFields<MutationModifyAgentArgs, 'name' | 'scope' | 'spec'>>;
   registerRepository?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationRegisterRepositoryArgs, 'input'>>;
   removeRepository?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationRemoveRepositoryArgs, 'name'>>;
-  runAgainTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationRunAgainTaskArgs, 'id'>>;
   resetAgentModification?: Resolver<ResolversTypes['AgentDefinitionPayload'], ParentType, ContextType, RequireFields<MutationResetAgentModificationArgs, 'name' | 'scope'>>;
   retryClone?: Resolver<ResolversTypes['RepositoryPayload'], ParentType, ContextType, RequireFields<MutationRetryCloneArgs, 'name'>>;
-  continueTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationContinueTaskArgs, 'id'>>;
+  runAgainTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationRunAgainTaskArgs, 'id'>>;
   setAgentDisabled?: Resolver<ResolversTypes['AgentDefinitionPayload'], ParentType, ContextType, RequireFields<MutationSetAgentDisabledArgs, 'disabled' | 'name' | 'scope'>>;
   setDrainMode?: Resolver<ResolversTypes['DrainStatus'], ParentType, ContextType, RequireFields<MutationSetDrainModeArgs, 'enabled'>>;
   unblockTask?: Resolver<ResolversTypes['TaskPayload'], ParentType, ContextType, RequireFields<MutationUnblockTaskArgs, 'id' | 'resolution'>>;
@@ -1154,11 +1156,12 @@ export type TaskPayloadResolvers<ContextType = Context, ParentType extends Resol
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
 
-export type TaskStatusResolvers = { BLOCKED: 'blocked', CLOSED: 'closed', COMPLETED: 'completed', EXECUTING: 'executing', FAILED: 'failed', PENDING: 'pending', PLANNING?: 'PLANNING', QUEUED: 'queued', RATE_LIMITED: 'rate_limited', TIMEOUT: 'timeout' };
+export type TaskStatusResolvers = { BLOCKED: 'blocked', CANCELLED?: 'CANCELLED', CLOSED: 'closed', COMPLETED: 'completed', EXECUTING: 'executing', FAILED: 'failed', PENDING: 'pending', PLANNING?: 'PLANNING', QUEUED: 'queued', RATE_LIMITED: 'rate_limited', TIMEOUT: 'timeout' };
 
 export type TokenUsageByDayResolvers<ContextType = Context, ParentType extends ResolversParentTypes['TokenUsageByDay'] = ResolversParentTypes['TokenUsageByDay']> = ResolversObject<{
   cacheReadTokens?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
   cacheWriteTokens?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  costUsd?: Resolver<ResolversTypes['Float'], ParentType, ContextType>;
   day?: Resolver<ResolversTypes['DateTime'], ParentType, ContextType>;
   model?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   tokensInput?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
