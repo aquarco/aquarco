@@ -167,7 +167,7 @@ def init(
         print_info("Restoring credentials...")
         ok = restore_credentials(vagrant, backup_dir)
         print_info("Restoring database...")
-        ok = restore_db(vagrant, backup_dir) and ok
+        ok = ok and restore_db(vagrant, backup_dir)
         if ok:
             print_info("Running migrations...")
             ok = run_migrations(vagrant) and ok

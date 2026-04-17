@@ -198,7 +198,7 @@ class TestStatusConnectionError:
 
 
 class TestStatusFollow:
-    @patch("aquarco_cli.commands.status.time.sleep")
+    @patch("aquarco_cli.task.time.sleep")
     @patch("aquarco_cli.commands.status.GraphQLClient")
     def test_follow_task_completes(self, mock_cls, mock_sleep):
         mock_client = mock_cls.return_value
@@ -223,7 +223,7 @@ class TestStatusFollow:
         result = runner.invoke(app, ["status", "--follow", "42"])
         assert result.exit_code == 0
 
-    @patch("aquarco_cli.commands.status.time.sleep")
+    @patch("aquarco_cli.task.time.sleep")
     @patch("aquarco_cli.commands.status.GraphQLClient")
     def test_follow_circuit_breaker(self, mock_cls, mock_sleep):
         mock_client = mock_cls.return_value

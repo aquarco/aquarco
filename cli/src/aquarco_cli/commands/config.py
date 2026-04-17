@@ -5,7 +5,7 @@ from __future__ import annotations
 import typer
 
 from aquarco_cli.console import print_error, print_info
-from aquarco_cli.vagrant import VagrantError, VagrantHelper
+from aquarco_cli.vagrant import LOAD_SUPERVISOR_SECRETS, VagrantError, VagrantHelper
 
 app = typer.Typer(
     help="Sync agent and pipeline definitions between config files and the database.",
@@ -15,7 +15,7 @@ app = typer.Typer(
 _SUPERVISOR_CONFIG = "/home/agent/aquarco/supervisor/config/supervisor.yaml"
 _SUPERVISOR_CMD = (
     "sudo -u agent HOME=/home/agent "
-    "bash -c 'set -a; . /etc/aquarco/secrets.env; set +a; "
+    f"bash -c '{LOAD_SUPERVISOR_SECRETS}; "
     "/home/agent/.venv/bin/aquarco-supervisor config {subcommand} --config {config}'"
 )
 

@@ -155,7 +155,7 @@ class TestRunConnectionError:
 class TestRunFollow:
     """Tests for the --follow flag with circuit breaker."""
 
-    @patch("aquarco_cli.commands.run.time.sleep")
+    @patch("aquarco_cli.task.time.sleep")
     @patch("aquarco_cli.commands.run.GraphQLClient")
     def test_follow_until_completed(self, mock_cls, mock_sleep):
         mock_client = mock_cls.return_value
@@ -174,7 +174,7 @@ class TestRunFollow:
         assert result.exit_code == 0
         assert "COMPLETED" in result.output
 
-    @patch("aquarco_cli.commands.run.time.sleep")
+    @patch("aquarco_cli.task.time.sleep")
     @patch("aquarco_cli.commands.run.GraphQLClient")
     def test_follow_circuit_breaker(self, mock_cls, mock_sleep):
         mock_client = mock_cls.return_value
@@ -191,7 +191,7 @@ class TestRunFollow:
         assert result.exit_code == 1
         assert "too many consecutive errors" in result.output.lower()
 
-    @patch("aquarco_cli.commands.run.time.sleep")
+    @patch("aquarco_cli.task.time.sleep")
     @patch("aquarco_cli.commands.run.GraphQLClient")
     def test_follow_error_resets_on_success(self, mock_cls, mock_sleep):
         mock_client = mock_cls.return_value

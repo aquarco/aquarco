@@ -8,7 +8,28 @@ from unittest.mock import patch
 
 import pytest
 
-from aquarco_cli.vagrant import VagrantError, VagrantHelper
+from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, LOAD_SUPERVISOR_SECRETS, VagrantError, VagrantHelper
+
+
+class TestVagrantConstants:
+    """Tests for centralized VM/Docker constants."""
+
+    def test_compose_dir_is_docker_path(self):
+        assert COMPOSE_DIR == "/home/agent/aquarco/docker"
+
+    def test_load_secrets_sources_docker_secrets(self):
+        assert "docker-secrets.env" in LOAD_SECRETS
+        assert "set -a" in LOAD_SECRETS
+
+    def test_load_supervisor_secrets_sources_secrets_env(self):
+        assert "secrets.env" in LOAD_SUPERVISOR_SECRETS
+        assert "set -a" in LOAD_SUPERVISOR_SECRETS
+        # Should NOT be docker-secrets.env (supervisor uses host-side secrets)
+        assert "docker-secrets.env" not in LOAD_SUPERVISOR_SECRETS
+
+    def test_load_secrets_and_supervisor_secrets_are_different(self):
+        """LOAD_SECRETS and LOAD_SUPERVISOR_SECRETS must point to different env files."""
+        assert LOAD_SECRETS != LOAD_SUPERVISOR_SECRETS
 
 
 class TestVagrantHelper:

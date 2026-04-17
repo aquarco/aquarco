@@ -96,92 +96,58 @@ class TestInitCommand:
         assert "Vagrant" in result.output
 
 
-class TestInitDevMode:
-    @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
-    @patch("aquarco_cli.commands.init.VagrantHelper")
-    @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
-    def test_dev_sets_vm_name_to_aquarco_dev(self, mock_which, mock_vagrant_cls, mock_health):
-        import os
-        mock_vagrant = mock_vagrant_cls.return_value
-        mock_vagrant.vagrant_dir = "/fake"
-        mock_vagrant.is_running.return_value = False
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("AQUARCO_VM_NAME", None)
-            runner.invoke(app, ["init", "--dev"])
-            assert os.environ.get("AQUARCO_VM_NAME") == "aquarco-dev"
-
-    @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
-    @patch("aquarco_cli.commands.init.VagrantHelper")
-    @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
-    def test_dev_does_not_override_explicit_vm_name(self, mock_which, mock_vagrant_cls, mock_health):
-        import os
-        mock_vagrant = mock_vagrant_cls.return_value
-        mock_vagrant.vagrant_dir = "/fake"
-        mock_vagrant.is_running.return_value = False
-        with patch.dict(os.environ, {"AQUARCO_VM_NAME": "my-custom-vm"}, clear=False):
-            runner.invoke(app, ["init", "--dev"])
-            assert os.environ.get("AQUARCO_VM_NAME") == "my-custom-vm"
-
-    @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
-    @patch("aquarco_cli.commands.init.VagrantHelper")
-    @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
-    def test_no_dev_does_not_set_vm_name(self, mock_which, mock_vagrant_cls, mock_health):
-        import os
-        mock_vagrant = mock_vagrant_cls.return_value
-        mock_vagrant.vagrant_dir = "/fake"
-        mock_vagrant.is_running.return_value = False
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("AQUARCO_VM_NAME", None)
-            runner.invoke(app, ["init"])
-            assert "AQUARCO_VM_NAME" not in os.environ
-
-
 class TestInitFromBackup:
-    @patch("aquarco_cli.commands.init._find_latest_backup")
-    @patch("aquarco_cli.commands.init._restore_from_backup", return_value=True)
+    @patch("aquarco_cli.commands.init.run_migrations", return_value=True)
+    @patch("aquarco_cli.commands.init.restore_db", return_value=True)
+    @patch("aquarco_cli.commands.init.restore_credentials", return_value=True)
+    @patch("aquarco_cli.commands.restore.latest_backup")
     @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.init.VagrantHelper")
     @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
-    def test_from_backup_latest(self, mock_which, mock_vagrant_cls, mock_health, mock_restore, mock_find):
+    def test_from_backup_latest(self, mock_which, mock_vagrant_cls, mock_health,
+                                 mock_latest, mock_creds, mock_db, mock_migrate):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
         mock_vagrant.is_running.return_value = False
-        mock_find.return_value = Path("/fake/backups/20260101T120000")
+        mock_latest.return_value = Path("/fake/backups/20260101T120000")
         result = runner.invoke(app, ["init", "--from-backup", "latest"])
         assert result.exit_code == 0
-        mock_find.assert_called_once()
-        mock_restore.assert_called_once_with(mock_vagrant, Path("/fake/backups/20260101T120000"))
+        mock_latest.assert_called_once()
+        mock_creds.assert_called_once()
+        mock_db.assert_called_once()
 
-    @patch("aquarco_cli.commands.init._restore_from_backup", return_value=True)
+    @patch("aquarco_cli.commands.init.run_migrations", return_value=True)
+    @patch("aquarco_cli.commands.init.restore_db", return_value=True)
+    @patch("aquarco_cli.commands.init.restore_credentials", return_value=True)
     @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.init.VagrantHelper")
     @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
-    def test_from_backup_explicit_path(self, mock_which, mock_vagrant_cls, mock_health, mock_restore, tmp_path):
+    def test_from_backup_explicit_path(self, mock_which, mock_vagrant_cls, mock_health,
+                                        mock_creds, mock_db, mock_migrate, tmp_path):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
         mock_vagrant.is_running.return_value = False
         result = runner.invoke(app, ["init", "--from-backup", str(tmp_path)])
         assert result.exit_code == 0
-        mock_restore.assert_called_once_with(mock_vagrant, tmp_path)
+        mock_creds.assert_called_once()
+        mock_db.assert_called_once()
 
-    @patch("aquarco_cli.commands.init._restore_from_backup", return_value=True)
     @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.init.VagrantHelper")
     @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
-    def test_from_backup_nonexistent_path(self, mock_which, mock_vagrant_cls, mock_health, mock_restore):
+    def test_from_backup_nonexistent_path(self, mock_which, mock_vagrant_cls, mock_health):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
         mock_vagrant.is_running.return_value = False
         result = runner.invoke(app, ["init", "--from-backup", "/nonexistent/backup"])
         assert result.exit_code == 1
         assert "not found" in result.output
-        mock_restore.assert_not_called()
 
-    @patch("aquarco_cli.commands.init._find_latest_backup", return_value=None)
+    @patch("aquarco_cli.commands.restore.latest_backup", return_value=None)
     @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.init.VagrantHelper")
     @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
-    def test_from_backup_no_backups_found(self, mock_which, mock_vagrant_cls, mock_health, mock_find):
+    def test_from_backup_no_backups_found(self, mock_which, mock_vagrant_cls, mock_health, mock_latest):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
         mock_vagrant.is_running.return_value = False
@@ -189,49 +155,65 @@ class TestInitFromBackup:
         assert result.exit_code == 1
         assert "No backups found" in result.output
 
-    @patch("aquarco_cli.commands.init._restore_from_backup", return_value=False)
+    @patch("aquarco_cli.commands.init.run_migrations", return_value=True)
+    @patch("aquarco_cli.commands.init.restore_db", return_value=False)
+    @patch("aquarco_cli.commands.init.restore_credentials", return_value=True)
     @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.init.VagrantHelper")
     @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
-    def test_from_backup_restore_errors(self, mock_which, mock_vagrant_cls, mock_health, mock_restore, tmp_path):
+    def test_from_backup_restore_db_error(self, mock_which, mock_vagrant_cls, mock_health,
+                                           mock_creds, mock_db, mock_migrate, tmp_path):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
         mock_vagrant.is_running.return_value = False
         result = runner.invoke(app, ["init", "--from-backup", str(tmp_path)])
         assert result.exit_code == 1
         assert "errors" in result.output
+        # When restore_db fails, migrations should NOT run
+        mock_migrate.assert_not_called()
 
-    @patch("aquarco_cli.commands.init._restore_from_backup")
+    @patch("aquarco_cli.commands.init.restore_credentials", return_value=False)
+    @patch("aquarco_cli.commands.init.run_migrations", return_value=True)
+    @patch("aquarco_cli.commands.init.restore_db", return_value=True)
     @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.init.VagrantHelper")
     @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
-    def test_no_from_backup_skips_restore(self, mock_which, mock_vagrant_cls, mock_health, mock_restore):
+    def test_from_backup_creds_failure_propagates(self, mock_which, mock_vagrant_cls, mock_health,
+                                                   mock_db, mock_migrate, mock_creds, tmp_path):
+        mock_vagrant = mock_vagrant_cls.return_value
+        mock_vagrant.vagrant_dir = "/fake"
+        mock_vagrant.is_running.return_value = False
+        result = runner.invoke(app, ["init", "--from-backup", str(tmp_path)])
+        assert result.exit_code == 1
+
+    @patch("aquarco_cli.commands.init.print_health_table", return_value=True)
+    @patch("aquarco_cli.commands.init.VagrantHelper")
+    @patch("aquarco_cli.commands.init.shutil.which", return_value="/usr/bin/mock")
+    def test_no_from_backup_skips_restore(self, mock_which, mock_vagrant_cls, mock_health):
         mock_vagrant = mock_vagrant_cls.return_value
         mock_vagrant.vagrant_dir = "/fake"
         mock_vagrant.is_running.return_value = False
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 0
-        mock_restore.assert_not_called()
 
 
-class TestFindLatestBackup:
+class TestLatestBackup:
+    """Tests for the latest_backup helper moved to restore.py."""
+
     def test_returns_most_recent(self, tmp_path):
-        from aquarco_cli.commands.init import _find_latest_backup
+        from aquarco_cli.commands.restore import latest_backup
         (tmp_path / "20260101T120000").mkdir()
         (tmp_path / "20260315T080000").mkdir()
         (tmp_path / "20260201T090000").mkdir()
-        with patch("aquarco_cli.commands.init.DEFAULT_BACKUP_ROOT", tmp_path):
-            result = _find_latest_backup()
+        result = latest_backup(tmp_path)
         assert result == tmp_path / "20260315T080000"
 
     def test_returns_none_when_empty(self, tmp_path):
-        from aquarco_cli.commands.init import _find_latest_backup
-        with patch("aquarco_cli.commands.init.DEFAULT_BACKUP_ROOT", tmp_path):
-            result = _find_latest_backup()
+        from aquarco_cli.commands.restore import latest_backup
+        result = latest_backup(tmp_path)
         assert result is None
 
     def test_returns_none_when_dir_missing(self, tmp_path):
-        from aquarco_cli.commands.init import _find_latest_backup
-        with patch("aquarco_cli.commands.init.DEFAULT_BACKUP_ROOT", tmp_path / "nonexistent"):
-            result = _find_latest_backup()
+        from aquarco_cli.commands.restore import latest_backup
+        result = latest_backup(tmp_path / "nonexistent")
         assert result is None

@@ -96,6 +96,12 @@ class TestTerminalStatuses:
         assert "COMPLETED" in TERMINAL_STATUSES
         assert "FAILED" in TERMINAL_STATUSES
         assert "TIMEOUT" in TERMINAL_STATUSES
+        assert "CANCELLED" in TERMINAL_STATUSES
         assert "CLOSED" in TERMINAL_STATUSES
         assert "PENDING" not in TERMINAL_STATUSES
         assert "EXECUTING" not in TERMINAL_STATUSES
+
+    def test_terminal_statuses_is_complete(self):
+        """Verify the exact set of terminal statuses."""
+        from aquarco_cli.graphql_client import TERMINAL_STATUSES
+        assert TERMINAL_STATUSES == {"COMPLETED", "FAILED", "TIMEOUT", "CANCELLED", "CLOSED"}

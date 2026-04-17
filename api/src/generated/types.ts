@@ -585,13 +585,13 @@ export type TaskPayload = {
 
 export enum TaskStatus {
   Blocked = 'blocked',
-  Cancelled = 'CANCELLED',
+  Cancelled = 'cancelled',
   Closed = 'closed',
   Completed = 'completed',
   Executing = 'executing',
   Failed = 'failed',
   Pending = 'pending',
-  Planning = 'PLANNING',
+  Planning = 'planning',
   Queued = 'queued',
   RateLimited = 'rate_limited',
   Timeout = 'timeout'
@@ -1156,7 +1156,7 @@ export type TaskPayloadResolvers<ContextType = Context, ParentType extends Resol
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 }>;
 
-export type TaskStatusResolvers = { BLOCKED: 'blocked', CANCELLED?: 'CANCELLED', CLOSED: 'closed', COMPLETED: 'completed', EXECUTING: 'executing', FAILED: 'failed', PENDING: 'pending', PLANNING?: 'PLANNING', QUEUED: 'queued', RATE_LIMITED: 'rate_limited', TIMEOUT: 'timeout' };
+export type TaskStatusResolvers = { BLOCKED: 'blocked', CANCELLED: 'cancelled', CLOSED: 'closed', COMPLETED: 'completed', EXECUTING: 'executing', FAILED: 'failed', PENDING: 'pending', PLANNING: 'planning', QUEUED: 'queued', RATE_LIMITED: 'rate_limited', TIMEOUT: 'timeout' };
 
 export type TokenUsageByDayResolvers<ContextType = Context, ParentType extends ResolversParentTypes['TokenUsageByDay'] = ResolversParentTypes['TokenUsageByDay']> = ResolversObject<{
   cacheReadTokens?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;

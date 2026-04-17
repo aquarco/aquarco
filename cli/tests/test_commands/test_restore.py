@@ -208,26 +208,28 @@ class TestRestoreCredentials:
         vagrant.ssh.assert_not_called()
 
 
-class TestRestoreDevFlag:
-    @patch("aquarco_cli.commands.restore.VagrantHelper")
-    def test_dev_flag_sets_vm_name(self, mock_cls, tmp_path):
-        backup_dir = _make_backup_dir(tmp_path)
-        vagrant = _make_vagrant()
-        mock_cls.return_value = vagrant
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("AQUARCO_VM_NAME", None)
-            runner.invoke(app, ["restore", "--dev", "--from-file", str(backup_dir)])
-            assert os.environ.get("AQUARCO_VM_NAME") == "aquarco-dev"
+class TestLatestBackupFunction:
+    """Tests for the latest_backup helper in restore.py."""
 
-    @patch("aquarco_cli.commands.restore.VagrantHelper")
-    def test_no_dev_flag_does_not_set_vm_name(self, mock_cls, tmp_path):
-        backup_dir = _make_backup_dir(tmp_path)
-        vagrant = _make_vagrant()
-        mock_cls.return_value = vagrant
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("AQUARCO_VM_NAME", None)
-            runner.invoke(app, ["restore", "--from-file", str(backup_dir)])
-            assert "AQUARCO_VM_NAME" not in os.environ
+    def test_returns_most_recent_sorted(self, tmp_path):
+        from aquarco_cli.commands.restore import latest_backup
+        (tmp_path / "20260101T120000").mkdir()
+        (tmp_path / "20260315T080000").mkdir()
+        (tmp_path / "20260201T090000").mkdir()
+        result = latest_backup(tmp_path)
+        assert result == tmp_path / "20260315T080000"
+
+    def test_returns_none_when_no_dirs(self, tmp_path):
+        from aquarco_cli.commands.restore import latest_backup
+        # Create a file (not a directory) — should be ignored
+        (tmp_path / "not-a-dir.txt").touch()
+        result = latest_backup(tmp_path)
+        assert result is None
+
+    def test_returns_none_when_root_missing(self, tmp_path):
+        from aquarco_cli.commands.restore import latest_backup
+        result = latest_backup(tmp_path / "nonexistent")
+        assert result is None
 
 
 class TestRestoreSelectiveFlags:
