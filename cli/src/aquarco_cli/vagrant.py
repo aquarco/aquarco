@@ -23,6 +23,11 @@ COMPOSE_DIR = "/home/agent/aquarco/docker"
 #: declares POSTGRES_PASSWORD and DATABASE_URL as required variables.
 LOAD_SECRETS = "set -a; . /etc/aquarco/docker-secrets.env; set +a"
 
+#: Shell snippet that exports the supervisor's host-side secrets (DATABASE_URL
+#: pointing to localhost, API keys, etc.).  Used by ``aquarco config`` and any
+#: command that invokes the supervisor CLI directly on the VM.
+LOAD_SUPERVISOR_SECRETS = "set -a; . /etc/aquarco/secrets.env; set +a"
+
 
 class VagrantError(Exception):
     """Raised when a vagrant command exits non-zero."""

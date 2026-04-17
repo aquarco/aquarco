@@ -15,10 +15,12 @@ generates:
         TaskStatus:
           PENDING: pending
           QUEUED: queued
+          PLANNING: planning
           EXECUTING: executing
           COMPLETED: completed
           FAILED: failed
           TIMEOUT: timeout
+          CANCELLED: cancelled
           BLOCKED: blocked
           RATE_LIMITED: rate_limited
           CLOSED: closed

@@ -213,7 +213,7 @@ mutation SetDrainMode($enabled: Boolean!) {
 
 # -- Shared constants --------------------------------------------------------
 
-TERMINAL_STATUSES = {"COMPLETED", "FAILED", "TIMEOUT", "CLOSED"}
+TERMINAL_STATUSES = {"COMPLETED", "FAILED", "TIMEOUT", "CANCELLED", "CLOSED"}
 
 #: Maximum consecutive poll errors before giving up in follow mode.
 MAX_FOLLOW_ERRORS = 5
