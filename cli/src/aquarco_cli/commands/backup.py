@@ -31,7 +31,7 @@ def _backup_db(vagrant: VagrantHelper, dest: Path) -> bool:
     try:
         result = vagrant.ssh(
             f"sudo -u agent HOME=/home/agent bash -c "
-            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose exec -T postgres pg_dump -U aquarco aquarco'",
+            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose exec -T postgres pg_dump --disable-triggers -U aquarco aquarco'",
             stream=False,
         )
         out = dest / "aquarco.sql"
