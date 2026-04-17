@@ -208,6 +208,144 @@ class TestRestoreCredentials:
         vagrant.ssh.assert_not_called()
 
 
+class TestRunMigrationsGracefulSkip:
+    """Tests for the graceful skip when db build context is missing on VM."""
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_skips_migrations_when_db_context_missing(self, mock_cls, tmp_path):
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        # First call: test -d check returns "missing"
+        # Second call: psql for db restore
+        # Third call: psql for clone status reset
+        check_result = MagicMock()
+        check_result.stdout = "missing"
+        vagrant.ssh.side_effect = [
+            None,   # restore_db: psql
+            None,   # restore_db: clone status reset
+            check_result,  # run_migrations: directory check
+        ]
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        assert result.exit_code == 0
+        assert "skipping migrations" in result.output.lower()
+        # Should NOT have attempted to run docker compose run --rm migrations
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        assert not any("migrations" in cmd and "docker compose run" in cmd for cmd in cmds)
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_runs_migrations_when_db_context_exists(self, mock_cls, tmp_path):
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        check_result = MagicMock()
+        check_result.stdout = "ok"
+        vagrant.ssh.side_effect = [
+            None,          # restore_db: psql
+            None,          # restore_db: clone status reset
+            check_result,  # run_migrations: directory check → ok
+            None,          # run_migrations: docker compose run --rm migrations
+        ]
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        assert result.exit_code == 0
+        assert "skipping migrations" not in result.output.lower()
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        assert any("docker compose run --rm migrations" in cmd for cmd in cmds)
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_continues_to_run_migrations_when_check_raises(self, mock_cls, tmp_path):
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        vagrant.ssh.side_effect = [
+            None,                          # restore_db: psql
+            None,                          # restore_db: clone status reset
+            VagrantError("ssh failed"),    # run_migrations: directory check fails
+            None,                          # run_migrations: proceeds to run migrations
+        ]
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        assert result.exit_code == 0
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        assert any("docker compose run --rm migrations" in cmd for cmd in cmds)
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_skips_migrations_when_stdout_is_none(self, mock_cls, tmp_path):
+        """When stdout is None but contains 'missing' after or-default, should pass through."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        check_result = MagicMock()
+        check_result.stdout = None
+        vagrant.ssh.side_effect = [
+            None,          # restore_db: psql
+            None,          # restore_db: clone status reset
+            check_result,  # run_migrations: directory check → stdout is None
+            None,          # run_migrations: docker compose run (stdout=None means "" which has no "missing")
+        ]
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        # stdout=None → (result.stdout or "") → "" → "missing" not in "" → proceeds to run
+        assert result.exit_code == 0
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        assert any("docker compose run --rm migrations" in cmd for cmd in cmds)
+
+    def test_db_context_constant_value(self):
+        from aquarco_cli.commands.restore import _DB_CONTEXT
+        assert _DB_CONTEXT == "/home/agent/aquarco/db"
+
+
+class TestRunMigrationsUnit:
+    """Direct unit tests for run_migrations function."""
+
+    def test_skip_returns_true(self):
+        """When db context is missing, run_migrations returns True (success)."""
+        from aquarco_cli.commands.restore import run_migrations
+
+        vagrant = _make_vagrant()
+        check_result = MagicMock()
+        check_result.stdout = "missing"
+        vagrant.ssh.return_value = check_result
+
+        result = run_migrations(vagrant)
+        assert result is True
+
+    def test_skip_does_not_run_compose(self):
+        """When db context is missing, no docker compose run call is made."""
+        from aquarco_cli.commands.restore import run_migrations
+
+        vagrant = _make_vagrant()
+        check_result = MagicMock()
+        check_result.stdout = "missing"
+        vagrant.ssh.return_value = check_result
+
+        run_migrations(vagrant)
+
+        # Only one ssh call: the directory check
+        assert vagrant.ssh.call_count == 1
+        assert "test -d" in vagrant.ssh.call_args_list[0].args[0]
+
+    def test_check_failure_falls_through_to_migrations(self):
+        """When the directory check raises, migrations still run."""
+        from aquarco_cli.commands.restore import run_migrations
+
+        vagrant = _make_vagrant()
+        vagrant.ssh.side_effect = [
+            VagrantError("ssh failed"),  # directory check
+            None,                        # migrations run
+        ]
+
+        result = run_migrations(vagrant)
+        assert result is True
+        assert vagrant.ssh.call_count == 2
+
+
 class TestLatestBackupFunction:
     """Tests for the latest_backup helper in restore.py."""
 
