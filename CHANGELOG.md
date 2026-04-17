@@ -1,5 +1,17 @@
 # Changelog
 
+## [2026-04-17] — Fix GraphQL enum mappings and code quality issues
+
+### Fixed
+- **GraphQL enum mappings** — added missing `CANCELLED` and `PLANNING` value mappings in `api/codegen.yml` to ensure TypeScript types match database enum values; regenerated `types.ts`
+- **Task status terminal detection** — added `CANCELLED` to `TERMINAL_STATUSES` set in `graphql_client.py` so the `follow_task()` helper correctly stops polling when a task is cancelled
+- **Restore logic short-circuit evaluation** — fixed error accumulation in `cli/src/aquarco_cli/commands/init.py` restore logic by correcting evaluation order (`ok and restore_db` instead of `restore_db and ok`)
+- **Configuration loading** — extracted `COMPOSE_DIR` and `LOAD_SUPERVISOR_SECRETS` constants to `vagrant.py` module for centralized secret-loading pattern; updated `config.py` to use shared constants
+
+### Test Coverage
+- 30 new tests added covering refactored task, vagrant, and config modules
+- All 378 tests passing with 88% coverage
+
 ## [2026-04-16] — Remove `--dev` flag; introduce `AQUARCO_VM_NAME`
 
 ### Changed
