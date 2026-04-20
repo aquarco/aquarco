@@ -87,7 +87,11 @@ async def _handle_login(ipc_dir: Path, oauth_script: Path | None) -> None:
     # Locate the OAuth driver next to this script or in the scripts directory
     if oauth_script is None:
         candidates = [
-            Path(__file__).parent.parent.parent.parent / "scripts" / "claude-auth-oauth.py",
+            # Bundled with the installed package (site-packages/aquarco_supervisor/scripts/)
+            Path(__file__).parent.parent / "scripts" / "claude-auth-oauth.py",
+            # Dev source checkout (supervisor/python/src/aquarco_supervisor/../../scripts/ → supervisor/scripts/)
+            Path(__file__).parent.parent.parent.parent.parent / "scripts" / "claude-auth-oauth.py",
+            # Explicit fallback for legacy/non-venv installs
             Path("/home/agent/aquarco/supervisor/scripts/claude-auth-oauth.py"),
         ]
         oauth_script = next((p for p in candidates if p.exists()), None)
@@ -97,7 +101,8 @@ async def _handle_login(ipc_dir: Path, oauth_script: Path | None) -> None:
         # executing it, to prevent an operator-supplied --oauth-script from
         # running arbitrary files on disk.
         _TRUSTED_SCRIPT_ROOTS = [
-            Path(__file__).parent.parent.parent.parent / "scripts",
+            Path(__file__).parent.parent / "scripts",
+            Path(__file__).parent.parent.parent.parent.parent / "scripts",
             Path("/home/agent/aquarco/supervisor/scripts"),
         ]
         resolved = oauth_script.resolve()
