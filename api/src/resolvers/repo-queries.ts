@@ -131,14 +131,20 @@ export const repoQueries = {
   },
 
   async supervisorHealth(_: unknown, __: unknown, ctx: Context) {
-    const result = await ctx.pool.query<{ value: string; message: string | null }>(
-      "SELECT value, message FROM aquarco.supervisor_health WHERE key = 'claude_auth'"
+    const result = await ctx.pool.query<{ key: string; value: string; message: string | null }>(
+      "SELECT key, value, message FROM aquarco.supervisor_health WHERE key IN ('claude_auth', 'github_auth')"
     )
-    const row = result.rows[0]
+    const byKey = Object.fromEntries(result.rows.map((r) => [r.key, r]))
+    const claudeRow = byKey['claude_auth']
+    const githubRow = byKey['github_auth']
     return {
       claudeAuth: {
-        ok: !row || row.value === 'ok',
-        message: row?.message ?? null,
+        ok: !claudeRow || claudeRow.value === 'ok',
+        message: claudeRow?.message ?? null,
+      },
+      githubAuth: {
+        ok: !githubRow || githubRow.value === 'ok',
+        message: githubRow?.message ?? null,
       },
     }
   },

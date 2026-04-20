@@ -14,7 +14,7 @@ import typer
 
 from .cli.agents import app as agents_app
 from .cli.config import app as config_app
-from .exceptions import AuthenticationError, RateLimitError, RetryableError, _cooldown_for_error
+from .exceptions import AuthenticationError, GitHubAuthenticationError, RateLimitError, RetryableError, _cooldown_for_error
 from .cli.auth_helper import auth_watch
 from .cli.repo_manager import repo_app
 from .cli.status import status
@@ -83,6 +83,9 @@ class Supervisor:
         # Claude auth tracking
         self._claude_auth_broken: bool = False
         self._creds_file_mtime: float = 0.0
+
+        # GitHub auth tracking
+        self._github_auth_broken: bool = False
 
     async def start(self, config_file: str) -> None:
         """Initialize components and start the main loop."""
@@ -228,6 +231,10 @@ class Supervisor:
                 continue
             try:
                 await poller.poll()
+            except GitHubAuthenticationError as e:
+                log.warning("github_auth_broken", poller=poller.name, error=str(e))
+                self._github_auth_broken = True
+                asyncio.create_task(self._write_health("github_auth", "broken", "GitHub authentication failed — run `aquarco auth github`"))
             except Exception:
                 log.exception("poller_error", poller=poller.name)
             self._mark_ran(poller.name)
@@ -269,6 +276,10 @@ class Supervisor:
         if self._claude_auth_broken:
             return
 
+        # Skip dispatch while GitHub auth is broken (pipeline stages use gh for PRs)
+        if self._github_auth_broken:
+            return
+
         # Check capacity
         active = await self._db.fetch_val(
             "SELECT COALESCE(SUM(active_count), 0) FROM agent_instances"
@@ -308,7 +319,7 @@ class Supervisor:
                 await self._tq.reset_task_to_pending(
                     task_id, "Claude authentication failed — re-run `aquarco auth claude`"
                 )
-            await self._write_auth_health("broken", "Claude authentication failed — run `aquarco auth claude`")
+            await self._write_health("claude_auth", "broken", "Claude authentication failed — run `aquarco auth claude`")
         except RetryableError as e:
             # Defensively postpone the task in case the error propagated
             # before execute_pipeline had a chance to call postpone_task().
@@ -529,6 +540,10 @@ class Supervisor:
             self._apply_github_env()
             if new_token and not old_token:
                 log.info("github_token_detected")
+            if new_token and self._github_auth_broken:
+                self._github_auth_broken = False
+                log.info("github_auth_cleared", reason="token_changed")
+                asyncio.create_task(self._write_health("github_auth", "ok", ""))
 
         # Also check if credentials.json changed — if so, clear auth_broken
         creds_path = Path("/home/agent/.claude/.credentials.json")
@@ -539,28 +554,28 @@ class Supervisor:
                 if self._claude_auth_broken:
                     self._claude_auth_broken = False
                     log.info("claude_auth_cleared", reason="credentials_file_changed")
-                    asyncio.create_task(self._write_auth_health("ok", ""))
+                    asyncio.create_task(self._write_health("claude_auth", "ok", ""))
         except OSError:
             pass
 
-    async def _write_auth_health(self, status: str, message: str) -> None:
-        """Write Claude auth status to supervisor_health table."""
+    async def _write_health(self, key: str, status: str, message: str) -> None:
+        """Write an auth/health status to supervisor_health table."""
         if not self._db:
             return
         try:
             await self._db.execute(
                 """
                 INSERT INTO aquarco.supervisor_health (key, value, message, updated_at)
-                VALUES ('claude_auth', %(status)s, %(message)s, NOW())
+                VALUES (%(key)s, %(status)s, %(message)s, NOW())
                 ON CONFLICT (key) DO UPDATE
                     SET value = EXCLUDED.value,
                         message = EXCLUDED.message,
                         updated_at = EXCLUDED.updated_at
                 """,
-                {"status": status, "message": message},
+                {"key": key, "status": status, "message": message},
             )
         except Exception:
-            log.exception("write_auth_health_error")
+            log.exception("write_health_error", key=key)
 
     def _apply_github_env(self) -> None:
         """Set up GitHub auth env vars for all subprocesses.

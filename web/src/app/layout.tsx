@@ -34,6 +34,10 @@ const SUPERVISOR_HEALTH_QUERY = gql`
         ok
         message
       }
+      githubAuth {
+        ok
+        message
+      }
     }
   }
 `
@@ -58,6 +62,8 @@ function AppShell({ children }: RootLayoutProps) {
   const { data } = useQuery(SUPERVISOR_HEALTH_QUERY, { pollInterval: 60000 })
   const claudeAuthBroken = data?.supervisorHealth?.claudeAuth?.ok === false
   const claudeAuthMessage = data?.supervisorHealth?.claudeAuth?.message
+  const githubAuthBroken = data?.supervisorHealth?.githubAuth?.ok === false
+  const githubAuthMessage = data?.supervisorHealth?.githubAuth?.message
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
@@ -73,6 +79,11 @@ function AppShell({ children }: RootLayoutProps) {
         {claudeAuthBroken && (
           <Alert severity="warning" sx={{ borderRadius: 0 }}>
             {claudeAuthMessage || 'Claude authentication expired — run aquarco auth claude'}
+          </Alert>
+        )}
+        {githubAuthBroken && (
+          <Alert severity="warning" sx={{ borderRadius: 0 }}>
+            {githubAuthMessage || 'GitHub authentication expired — run aquarco auth github'}
           </Alert>
         )}
       </AppBar>
@@ -96,7 +107,9 @@ function AppShell({ children }: RootLayoutProps) {
                 item.href === '/'
                   ? pathname === '/'
                   : pathname.startsWith(item.href)
-              const showWarningBadge = claudeAuthBroken && item.label === 'Agents'
+              const showWarningBadge =
+                (claudeAuthBroken && item.label === 'Agents') ||
+                (githubAuthBroken && item.label === 'Repositories')
               const icon = showWarningBadge ? (
                 <Badge color="warning" variant="dot">
                   {item.icon}

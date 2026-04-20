@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..database import Database
+from ..exceptions import GitHubAuthenticationError
 from ..logging import get_logger
 from ..models import GitFlowConfig, SupervisorConfig
 from ..pipeline.git_workflow import (
@@ -73,6 +74,8 @@ class GitHubSourcePoller(BasePoller):
             try:
                 created = await self._poll_prs(repo["name"], slug, cursor)
                 total_created += created
+            except GitHubAuthenticationError:
+                raise
             except Exception as e:
                 log.error("pr_poll_failed", repo=slug, error=str(e))
 
@@ -89,6 +92,8 @@ class GitHubSourcePoller(BasePoller):
             # Poll merged PRs for back-merge in Git Flow repos
             try:
                 await self._poll_merged_prs(repo["name"], slug, cursor)
+            except GitHubAuthenticationError:
+                raise
             except Exception as e:
                 log.error("merged_pr_poll_failed", repo=slug, error=str(e))
 
@@ -457,6 +462,12 @@ class GitHubSourcePoller(BasePoller):
         return created
 
 
+def _is_github_auth_error(err_text: str) -> bool:
+    """Return True if the gh CLI stderr indicates an authentication failure."""
+    lower = err_text.lower()
+    return any(kw in lower for kw in ("401", "403", "authentication", "unauthorized", "bad credentials", "not logged in", "token"))
+
+
 async def _gh_list_prs(repo_slug: str, timeout: int = 60) -> list[dict[str, Any]]:
     """Call gh pr list and return parsed JSON."""
     proc = await asyncio.create_subprocess_exec(
@@ -481,6 +492,8 @@ async def _gh_list_prs(repo_slug: str, timeout: int = 60) -> list[dict[str, Any]
         # propagating stderr text into logs or error messages.
         err_text = stderr.decode("utf-8", errors="replace")
         err_text = re.sub(r"https?://[^@\s]+@", "https://<redacted>@", err_text)
+        if _is_github_auth_error(err_text):
+            raise GitHubAuthenticationError(f"GitHub authentication failed for {repo_slug}: {err_text[:200]}")
         raise RuntimeError(f"gh pr list failed: {err_text}")
     prs: list[dict[str, Any]] = json.loads(stdout.decode())
     return prs
@@ -514,6 +527,8 @@ async def _gh_list_merged_prs(
     if proc.returncode != 0:
         err_text = stderr.decode("utf-8", errors="replace")
         err_text = re.sub(r"https?://[^@\s]+@", "https://<redacted>@", err_text)
+        if _is_github_auth_error(err_text):
+            raise GitHubAuthenticationError(f"GitHub authentication failed for {repo_slug}: {err_text[:200]}")
         raise RuntimeError(f"gh pr list (merged) failed: {err_text}")
     prs: list[dict[str, Any]] = json.loads(stdout.decode())
     return prs

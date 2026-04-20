@@ -484,6 +484,7 @@ type PipelineCondition {
 
 type SupervisorHealth {
   claudeAuth: AuthHealth!
+  githubAuth: AuthHealth!
 }
 
 type AuthHealth {

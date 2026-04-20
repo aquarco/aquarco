@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..database import Database
+from ..exceptions import GitHubAuthenticationError
 from ..logging import get_logger
 from ..models import PipelineConfig, SupervisorConfig
 from ..task_queue import TaskQueue
@@ -54,6 +55,8 @@ class GitHubTasksPoller(BasePoller):
 
             try:
                 issues = await _gh_list_issues(slug, cursor)
+            except GitHubAuthenticationError:
+                raise
             except Exception as e:
                 log.error("gh_issue_list_failed", repo=slug, error=str(e))
                 continue
@@ -160,6 +163,12 @@ class GitHubTasksPoller(BasePoller):
         return "feature-pipeline"
 
 
+def _is_github_auth_error(err_text: str) -> bool:
+    """Return True if the gh CLI stderr indicates an authentication failure."""
+    lower = err_text.lower()
+    return any(kw in lower for kw in ("401", "403", "authentication", "unauthorized", "bad credentials", "not logged in", "token"))
+
+
 async def _gh_list_issues(
     repo_slug: str, since: str, timeout: int = 60
 ) -> list[dict[str, Any]]:
@@ -182,6 +191,9 @@ async def _gh_list_issues(
         await proc.wait()
         raise RuntimeError(f"gh issue list timed out after {timeout}s for {repo_slug}")
     if proc.returncode != 0:
-        raise RuntimeError(f"gh issue list failed: {stderr.decode('utf-8', errors='replace')}")
+        err_text = stderr.decode("utf-8", errors="replace")
+        if _is_github_auth_error(err_text):
+            raise GitHubAuthenticationError(f"GitHub authentication failed for {repo_slug}: {err_text[:200]}")
+        raise RuntimeError(f"gh issue list failed: {err_text}")
     issues: list[dict[str, Any]] = json.loads(stdout.decode())
     return issues

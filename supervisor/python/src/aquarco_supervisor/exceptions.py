@@ -154,6 +154,10 @@ class GitHubAPIError(PollerError):
     """GitHub CLI or API call failed."""
 
 
+class GitHubAuthenticationError(GitHubAPIError):
+    """GitHub authentication failed (401/403) — supervisor must pause until re-authed."""
+
+
 # --- Workers ---
 
 
