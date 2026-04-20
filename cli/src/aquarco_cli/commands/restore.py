@@ -159,3 +159,7 @@ def restore(
         raise typer.Exit(code=1)
 
     print_success("Restore complete.")
+    print_warning(
+        "Claude OAuth tokens expire. If the supervisor agents fail to authenticate, "
+        "run: aquarco auth claude"
+    )

@@ -97,8 +97,9 @@ class Supervisor:
             pid=os.getpid(),
         )
 
-        # Set up GitHub auth env vars for all subprocesses
+        # Set up auth env vars for all subprocesses
         self._apply_github_env()
+        self._apply_anthropic_env()
 
         # Initialize database
         self._db = Database(
@@ -541,6 +542,12 @@ class Supervisor:
             )
             askpass_path.chmod(stat.S_IRWXU)
         os.environ["GIT_ASKPASS"] = str(askpass_path)
+
+    def _apply_anthropic_env(self) -> None:
+        """Inject ANTHROPIC_API_KEY into the process env so Claude subprocesses inherit it."""
+        key = self._secrets.get("anthropic_api_key")
+        if key:
+            os.environ["ANTHROPIC_API_KEY"] = key
 
     def _handle_shutdown(self) -> None:
         """Signal handler for SIGTERM/SIGINT."""
