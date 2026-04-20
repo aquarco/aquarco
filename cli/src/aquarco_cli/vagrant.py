@@ -21,7 +21,7 @@ COMPOSE_DIR = "/home/agent/aquarco/docker"
 #: Shell snippet that exports secrets from the provisioned env file.
 #: Required before any ``docker compose`` invocation because compose.yml
 #: declares POSTGRES_PASSWORD and DATABASE_URL as required variables.
-LOAD_SECRETS = "set -a; . /etc/aquarco/docker-secrets.env; set +a"
+LOAD_SECRETS = "set -a; . /etc/aquarco/docker-secrets.env; . /home/agent/aquarco/docker/versions.env; set +a"
 
 #: Shell snippet that exports the supervisor's host-side secrets (DATABASE_URL
 #: pointing to localhost, API keys, etc.).  Used by ``aquarco config`` and any
