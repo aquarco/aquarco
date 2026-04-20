@@ -33,6 +33,20 @@ class VagrantError(Exception):
     """Raised when a vagrant command exits non-zero."""
 
 
+def get_compose_prefix(vagrant: "VagrantHelper") -> str:
+    """Return the docker compose command prefix appropriate for the VM's environment.
+
+    Production VMs use pre-built registry images via ``compose.prod.yml``.
+    Dev VMs build from the source tree via the default ``compose.yml``.
+    """
+    try:
+        result = vagrant.ssh("cat /etc/aquarco/env 2>/dev/null || echo development")
+        env = (result.stdout or "").strip()
+    except Exception:
+        env = "development"
+    return "docker compose -f compose.prod.yml" if env == "production" else "docker compose"
+
+
 class VagrantHelper:
     """Convenience wrapper around the ``vagrant`` CLI."""
 

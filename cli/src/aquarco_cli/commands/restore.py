@@ -8,7 +8,7 @@ from pathlib import Path
 import typer
 
 from aquarco_cli.console import print_error, print_info, print_success, print_warning
-from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, VagrantError, VagrantHelper
+from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, VagrantError, VagrantHelper, get_compose_prefix
 
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
@@ -69,24 +69,11 @@ def restore_db(vagrant: VagrantHelper, src: Path) -> bool:
 
 def run_migrations(vagrant: VagrantHelper) -> bool:
     """Run yoyo migrations after restore to bring the schema up to date."""
-    # Choose compose file based on the VM's configured environment.
-    # Production uses pre-built registry images (compose.prod.yml) — no local
-    # source tree required.  Dev uses compose.yml which builds from ../db.
-    try:
-        result = vagrant.ssh("cat /etc/aquarco/env 2>/dev/null || echo development")
-        aquarco_env = (result.stdout or "").strip()
-    except (VagrantError, subprocess.CalledProcessError, OSError):
-        aquarco_env = "development"
-
-    if aquarco_env == "production":
-        compose_cmd = "docker compose -f compose.prod.yml run --rm migrations"
-    else:
-        compose_cmd = "docker compose run --rm migrations"
-
+    dc = get_compose_prefix(vagrant)
     try:
         vagrant.ssh(
             f"sudo -u agent HOME=/home/agent bash -c "
-            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && {compose_cmd}'",
+            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && {dc} run --rm migrations'",
             stream=True,
         )
         print_success("Migrations applied")

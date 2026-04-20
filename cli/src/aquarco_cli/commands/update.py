@@ -17,20 +17,22 @@ from aquarco_cli.graphql_client import (
     QUERY_DRAIN_STATUS,
     GraphQLClient,
 )
-from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, VagrantError, VagrantHelper
+from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, VagrantError, VagrantHelper, get_compose_prefix
 
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
-STEPS = [
-    ("Update OS packages", "sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --with-new-pkgs"),
-    ("Pull latest Docker images", f"sudo bash -c '{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose pull'"),
-    ("Run database migrations", f"sudo bash -c '{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose run --rm migrations'"),
-    ("Restart Docker services", f"sudo bash -c '{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose up -d'"),
-    ("Fix venv permissions", "sudo chown -R agent:agent /home/agent/.venv && sudo chmod -R u+w /home/agent/.venv"),
-    ("Upgrade supervisor package", "sudo -u agent /home/agent/.venv/bin/pip install -e /home/agent/aquarco/supervisor/python/"),
-    ("Lock venv", "sudo chmod -R a-w /home/agent/.venv/lib/"),
-    ("Restart supervisor service", "sudo systemctl restart aquarco-supervisor-python"),
-]
+
+def _build_steps(dc: str) -> list[tuple[str, str]]:
+    return [
+        ("Update OS packages", "sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --with-new-pkgs"),
+        ("Pull latest Docker images", f"sudo bash -c '{LOAD_SECRETS}; cd {COMPOSE_DIR} && {dc} pull'"),
+        ("Run database migrations", f"sudo bash -c '{LOAD_SECRETS}; cd {COMPOSE_DIR} && {dc} run --rm migrations'"),
+        ("Restart Docker services", f"sudo bash -c '{LOAD_SECRETS}; cd {COMPOSE_DIR} && {dc} up -d'"),
+        ("Fix venv permissions", "sudo chown -R agent:agent /home/agent/.venv && sudo chmod -R u+w /home/agent/.venv"),
+        ("Upgrade supervisor package", "sudo -u agent /home/agent/.venv/bin/pip install -e /home/agent/aquarco/supervisor/python/"),
+        ("Lock venv", "sudo chmod -R a-w /home/agent/.venv/lib/"),
+        ("Restart supervisor service", "sudo systemctl restart aquarco-supervisor-python"),
+    ]
 
 
 def _backup_credentials(vagrant: VagrantHelper) -> str | None:
@@ -142,7 +144,7 @@ def update(
         print_error("VM is not running. Start it with 'aquarco init' first.")
         raise typer.Exit(code=1)
 
-    steps = list(STEPS)
+    steps = _build_steps(get_compose_prefix(vagrant))
     if skip_migrations:
         steps = [(n, c) for n, c in steps if "migrations" not in c]
 
