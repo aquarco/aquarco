@@ -40,7 +40,7 @@ def get_compose_prefix(vagrant: "VagrantHelper") -> str:
     Dev VMs build from the source tree via the default ``compose.yml``.
     """
     try:
-        result = vagrant.ssh("cat /etc/aquarco/env 2>/dev/null || echo development")
+        result = vagrant.ssh("sudo cat /etc/aquarco/env 2>/dev/null || echo development")
         env = (result.stdout or "").strip()
     except Exception:
         env = "development"
