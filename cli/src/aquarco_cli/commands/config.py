@@ -12,11 +12,20 @@ app = typer.Typer(
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 
-_SUPERVISOR_CONFIG = "/home/agent/aquarco/supervisor/config/supervisor.yaml"
+# Detect the supervisor config path at runtime on the VM:
+# production installs use /etc/aquarco/supervisor.yaml;
+# dev (synced-folder) installs keep it in the repo tree.
+_DETECT_CONFIG = (
+    "if [ -f /etc/aquarco/supervisor.yaml ]; then "
+    "  SCFG=/etc/aquarco/supervisor.yaml; "
+    "else "
+    "  SCFG=/home/agent/aquarco/supervisor/config/supervisor.yaml; "
+    "fi"
+)
 _SUPERVISOR_CMD = (
     "sudo -u agent HOME=/home/agent "
-    f"bash -c '{LOAD_SUPERVISOR_SECRETS}; "
-    "/home/agent/.venv/bin/aquarco-supervisor config {subcommand} --config {config}'"
+    f"bash -c '{LOAD_SUPERVISOR_SECRETS}; {_DETECT_CONFIG}; "
+    '/home/agent/.venv/bin/aquarco-supervisor config {subcommand} --config "$SCFG"\''
 )
 
 
@@ -25,7 +34,7 @@ def _run(subcommand: str) -> None:
     if not vagrant.is_running():
         print_error("VM is not running. Start it with 'aquarco init' first.")
         raise typer.Exit(code=1)
-    cmd = _SUPERVISOR_CMD.format(subcommand=subcommand, config=_SUPERVISOR_CONFIG)
+    cmd = _SUPERVISOR_CMD.format(subcommand=subcommand)
     try:
         vagrant.ssh(cmd, stream=True)
     except VagrantError as exc:
