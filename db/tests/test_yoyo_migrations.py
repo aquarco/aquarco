@@ -28,6 +28,7 @@ EXPECTED_MIGRATIONS = [
     "001_add_git_flow_config",
     "002_drop_pipeline_trigger_config",
     "003_add_cancelled_task_status",
+    "004_add_supervisor_health",
 ]
 
 
@@ -300,7 +301,9 @@ class TestMigrationCount:
         """All expected migrations exist as .sql files."""
         files = _migration_files()
         names = {f.stem for f in files}
-        assert len(names) == 1, f"Expected 1 migration, found {len(names)}: {names}"
+        assert len(names) == len(EXPECTED_MIGRATIONS), (
+            f"Expected {len(EXPECTED_MIGRATIONS)} migrations, found {len(names)}: {names}"
+        )
         for expected in EXPECTED_MIGRATIONS:
             assert expected in names, f"Missing migration: {expected}.sql"
 
@@ -318,11 +321,10 @@ class TestMigrationCount:
 class TestDependencyChain:
     """Validate the full dependency chain forms a valid DAG."""
 
-    def test_single_root_migration(self) -> None:
-        """With a single consolidated migration, the chain is trivially valid."""
-        files = _migration_files()
-        assert len(files) == 1
-        first_line = files[0].read_text().splitlines()[0]
+    def test_root_migration_has_empty_depends(self) -> None:
+        """The root migration (000_consolidated_init) has empty depends."""
+        root = MIGRATIONS_DIR / "000_consolidated_init.sql"
+        first_line = root.read_text().splitlines()[0]
         assert first_line.strip() == "-- depends:", (
             "Root migration must have empty depends"
         )

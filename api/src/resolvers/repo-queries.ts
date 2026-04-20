@@ -129,4 +129,17 @@ export const repoQueries = {
     const { getClaudeAuthStatus } = await import('../claude-auth.js')
     return getClaudeAuthStatus()
   },
+
+  async supervisorHealth(_: unknown, __: unknown, ctx: Context) {
+    const result = await ctx.pool.query<{ value: string; message: string | null }>(
+      "SELECT value, message FROM aquarco.supervisor_health WHERE key = 'claude_auth'"
+    )
+    const row = result.rows[0]
+    return {
+      claudeAuth: {
+        ok: !row || row.value === 'ok',
+        message: row?.message ?? null,
+      },
+    }
+  },
 }

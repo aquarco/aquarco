@@ -14,7 +14,7 @@ from typing import Any
 from ..cli.claude import _scan_file_for_rate_limit_event
 from ..config import get_pipeline_categories
 from ..database import Database
-from ..exceptions import RateLimitError
+from ..exceptions import AgentExecutionError, AuthenticationError, RateLimitError
 from ..logging import get_logger
 from ..models import PipelineConfig
 from .agent_registry import AgentRegistry
@@ -236,6 +236,18 @@ class AgentInvoker:
                     f"(task={task_id}, stage={stage_num})",
                     session_id=output.get("_session_id"),
                 )
+
+            # No rate_limit_event — check for auth error, otherwise hard fail
+            result_text = (output.get("_result") or "").lower()
+            raw = (claude_output.raw or "").lower()
+            if "authentication_error" in result_text or "authentication_failed" in raw:
+                raise AuthenticationError(
+                    f"Claude authentication failed (task={task_id}, stage={stage_num})"
+                )
+            raise AgentExecutionError(
+                f"Claude returned is_error=true (task={task_id}, stage={stage_num}): "
+                f"{output.get('_result', '')[:200]}"
+            )
 
         # Carry raw NDJSON log so store_stage_output persists it to raw_output column
         output["_raw_output"] = claude_output.raw

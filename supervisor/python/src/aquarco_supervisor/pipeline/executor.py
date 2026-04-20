@@ -21,7 +21,7 @@ from ..cli.claude import _LOG_DIR as _CLAUDE_LOG_DIR
 from ..cli.claude import execute_claude  # noqa: F401 — re-export for test backward compat
 from ..config import get_pipeline_config
 from ..database import Database
-from ..exceptions import PipelineError, RetryableError, StageError
+from ..exceptions import AuthenticationError, PipelineError, RetryableError, StageError
 from ..logging import get_logger
 from ..models import GitFlowConfig, PipelineConfig, TaskStatus
 from ..stage_manager import StageManager
@@ -177,6 +177,13 @@ class PipelineExecutor:
             )
             return output, stage_id
         except RetryableError:
+            raise
+        except AuthenticationError:
+            await self._sm.record_stage_failed(
+                task_id, stage_num, "Claude authentication failed",
+                stage_id=stage_id,
+                stage_key=stage_key, iteration=iteration, run=run,
+            )
             raise
         except StageError as e:
             sid = getattr(e, "session_id", None)

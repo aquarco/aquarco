@@ -1,8 +1,10 @@
 'use client'
 
-import { type ReactNode, useState } from 'react'
+import { type ReactNode } from 'react'
 import { ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
+import Alert from '@mui/material/Alert'
+import Badge from '@mui/material/Badge'
 import Box from '@mui/material/Box'
 import Drawer from '@mui/material/Drawer'
 import AppBar from '@mui/material/AppBar'
@@ -21,8 +23,20 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import NetworkCheckIcon from '@mui/icons-material/NetworkCheck'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { gql, useQuery } from '@apollo/client'
 import { ApolloWrapper } from '@/lib/apollo'
 import { defaultTheme } from '@/lib/theme'
+
+const SUPERVISOR_HEALTH_QUERY = gql`
+  query SupervisorHealth {
+    supervisorHealth {
+      claudeAuth {
+        ok
+        message
+      }
+    }
+  }
+`
 
 const DRAWER_WIDTH = 240
 
@@ -41,6 +55,9 @@ interface RootLayoutProps {
 
 function AppShell({ children }: RootLayoutProps) {
   const pathname = usePathname()
+  const { data } = useQuery(SUPERVISOR_HEALTH_QUERY, { pollInterval: 60000 })
+  const claudeAuthBroken = data?.supervisorHealth?.claudeAuth?.ok === false
+  const claudeAuthMessage = data?.supervisorHealth?.claudeAuth?.message
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
@@ -53,6 +70,11 @@ function AppShell({ children }: RootLayoutProps) {
             Aquarco
           </Typography>
         </Toolbar>
+        {claudeAuthBroken && (
+          <Alert severity="warning" sx={{ borderRadius: 0 }}>
+            {claudeAuthMessage || 'Claude authentication expired — run aquarco auth claude'}
+          </Alert>
+        )}
       </AppBar>
 
       <Drawer
@@ -74,6 +96,14 @@ function AppShell({ children }: RootLayoutProps) {
                 item.href === '/'
                   ? pathname === '/'
                   : pathname.startsWith(item.href)
+              const showWarningBadge = claudeAuthBroken && item.label === 'Agents'
+              const icon = showWarningBadge ? (
+                <Badge color="warning" variant="dot">
+                  {item.icon}
+                </Badge>
+              ) : (
+                item.icon
+              )
               return (
                 <ListItem key={item.href} disablePadding>
                   <ListItemButton
@@ -96,7 +126,7 @@ function AppShell({ children }: RootLayoutProps) {
                       },
                     }}
                   >
-                    <ListItemIcon sx={{ minWidth: 40 }}>{item.icon}</ListItemIcon>
+                    <ListItemIcon sx={{ minWidth: 40 }}>{icon}</ListItemIcon>
                     <ListItemText primary={item.label} />
                   </ListItemButton>
                 </ListItem>

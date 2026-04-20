@@ -271,6 +271,18 @@ class TaskQueue:
         )
         log.info("task_rate_limit_resumed", task_id=task_id)
 
+    async def reset_task_to_pending(self, task_id: str, reason: str) -> None:
+        """Reset an executing task back to pending (e.g. when auth is broken)."""
+        await self._db.execute(
+            """
+            UPDATE tasks
+            SET status = 'pending', error_message = %(reason)s, updated_at = NOW()
+            WHERE id = %(id)s AND status = 'executing'
+            """,
+            {"id": task_id, "reason": reason},
+        )
+        log.info("task_reset_to_pending", task_id=task_id, reason=reason)
+
     async def complete_task(self, task_id: str) -> None:
         """Mark a task as completed."""
         await self._db.execute(

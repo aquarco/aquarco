@@ -104,6 +104,10 @@ class OverloadedError(RetryableError):
     """Claude API platform overload (529) — temporary, retry with short backoff."""
 
 
+class AuthenticationError(PipelineError):
+    """Claude authentication failed (401) — supervisor must pause until re-authed."""
+
+
 def _cooldown_for_error(e: RetryableError) -> tuple[int, int]:
     """Return ``(cooldown_minutes, max_retries)`` for a :class:`RetryableError` subtype.
 

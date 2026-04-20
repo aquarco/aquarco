@@ -38,6 +38,9 @@ type Query {
 
   # Supervisor drain mode
   drainStatus: DrainStatus!
+
+  # Supervisor health (includes Claude auth status from supervisor)
+  supervisorHealth: SupervisorHealth!
 }
 
 type Mutation {
@@ -475,4 +478,15 @@ type PipelineCondition {
   onYes: String
   onNo: String
   maxRepeats: Int
+}
+
+# --- Supervisor Health ---
+
+type SupervisorHealth {
+  claudeAuth: AuthHealth!
+}
+
+type AuthHealth {
+  ok: Boolean!
+  message: String
 }

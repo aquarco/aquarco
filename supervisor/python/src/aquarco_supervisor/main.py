@@ -14,7 +14,7 @@ import typer
 
 from .cli.agents import app as agents_app
 from .cli.config import app as config_app
-from .exceptions import RateLimitError, RetryableError, _cooldown_for_error
+from .exceptions import AuthenticationError, RateLimitError, RetryableError, _cooldown_for_error
 from .cli.auth_helper import auth_watch
 from .cli.repo_manager import repo_app
 from .cli.status import status
@@ -79,6 +79,10 @@ class Supervisor:
         self._in_flight: set[asyncio.Task[None]] = set()
         # Maps task_id → asyncio.Task so timed-out tasks can be cancelled
         self._in_flight_by_task: dict[str, asyncio.Task[None]] = {}
+
+        # Claude auth tracking
+        self._claude_auth_broken: bool = False
+        self._creds_file_mtime: float = 0.0
 
     async def start(self, config_file: str) -> None:
         """Initialize components and start the main loop."""
@@ -261,6 +265,10 @@ class Supervisor:
                 self._handle_shutdown()
             return
 
+        # Skip dispatch while Claude auth is broken
+        if self._claude_auth_broken:
+            return
+
         # Check capacity
         active = await self._db.fetch_val(
             "SELECT COALESCE(SUM(active_count), 0) FROM agent_instances"
@@ -293,6 +301,14 @@ class Supervisor:
         try:
             await self._tq.update_task_status(task_id, TaskStatus.EXECUTING)
             await self._executor.execute_pipeline(pipeline, task_id, initial_context)
+        except AuthenticationError as e:
+            log.warning("claude_auth_broken", task_id=task_id, error=str(e))
+            self._claude_auth_broken = True
+            if self._tq:
+                await self._tq.reset_task_to_pending(
+                    task_id, "Claude authentication failed — re-run `aquarco auth claude`"
+                )
+            await self._write_auth_health("broken", "Claude authentication failed — run `aquarco auth claude`")
         except RetryableError as e:
             # Defensively postpone the task in case the error propagated
             # before execute_pipeline had a chance to call postpone_task().
@@ -513,6 +529,38 @@ class Supervisor:
             self._apply_github_env()
             if new_token and not old_token:
                 log.info("github_token_detected")
+
+        # Also check if credentials.json changed — if so, clear auth_broken
+        creds_path = Path("/home/agent/.claude/.credentials.json")
+        try:
+            mtime = creds_path.stat().st_mtime
+            if mtime != self._creds_file_mtime:
+                self._creds_file_mtime = mtime
+                if self._claude_auth_broken:
+                    self._claude_auth_broken = False
+                    log.info("claude_auth_cleared", reason="credentials_file_changed")
+                    asyncio.create_task(self._write_auth_health("ok", ""))
+        except OSError:
+            pass
+
+    async def _write_auth_health(self, status: str, message: str) -> None:
+        """Write Claude auth status to supervisor_health table."""
+        if not self._db:
+            return
+        try:
+            await self._db.execute(
+                """
+                INSERT INTO aquarco.supervisor_health (key, value, message, updated_at)
+                VALUES ('claude_auth', %(status)s, %(message)s, NOW())
+                ON CONFLICT (key) DO UPDATE
+                    SET value = EXCLUDED.value,
+                        message = EXCLUDED.message,
+                        updated_at = EXCLUDED.updated_at
+                """,
+                {"status": status, "message": message},
+            )
+        except Exception:
+            log.exception("write_auth_health_error")
 
     def _apply_github_env(self) -> None:
         """Set up GitHub auth env vars for all subprocesses.
