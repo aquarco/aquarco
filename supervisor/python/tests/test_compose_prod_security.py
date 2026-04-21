@@ -41,11 +41,12 @@ def _load_compose(relative_path: str) -> dict:
 # ===========================================================================
 
 
-class TestAdminerRemovedFromProd:
+class TestAdminerProdPresence:
     """Adminer is intentionally present in compose.prod.yml.
 
     Adminer is kept in production for operational convenience.
-    The test below only checks that no other service incorrectly depends on it.
+    The tests below verify its presence, security documentation, and that
+    no other service incorrectly depends on it.
     """
 
     @pytest.fixture
@@ -55,6 +56,23 @@ class TestAdminerRemovedFromProd:
     @pytest.fixture
     def compose_dev(self) -> dict:
         return _load_compose("docker/compose.dev.yml")
+
+    def test_adminer_present_in_prod(self, compose_prod: dict) -> None:
+        """Adminer should be present in compose.prod.yml as an accepted service."""
+        services = compose_prod.get("services", {})
+        assert "adminer" in services, (
+            "Adminer should be present in compose.prod.yml — it is an accepted "
+            "production service with built-in credential-based security."
+        )
+
+    def test_adminer_security_rationale_documented(self) -> None:
+        """The security rationale for Adminer in prod must be documented inline."""
+        raw_text = (_project_root() / "docker/compose.prod.yml").read_text()
+        assert "valid credentials are required" in raw_text.lower() or \
+               "login screen" in raw_text.lower(), (
+            "compose.prod.yml must document why Adminer is safe in production "
+            "(built-in login screen / credential requirement)."
+        )
 
     def test_adminer_still_in_dev_services(self, compose_dev: dict) -> None:
         """Adminer should still be available in the dev compose for developer convenience."""
