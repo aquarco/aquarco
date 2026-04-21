@@ -206,3 +206,73 @@ async def test_poll_skips_repo_with_invalid_url(
 
     assert count == 0
     mock_gh.assert_not_called()
+
+
+# --- Shared auth_utils integration (DRY fix) ---
+
+
+def test_github_tasks_uses_shared_auth_utils() -> None:
+    """Verify that github_tasks imports is_github_auth_error from the shared auth_utils module.
+
+    This is a regression guard: the function was previously duplicated inline
+    in both github_source.py and github_tasks.py.  It should now be imported
+    from pollers/auth_utils.py.
+    """
+    from aquarco_supervisor.pollers import github_tasks
+    from aquarco_supervisor.pollers import auth_utils
+
+    assert github_tasks._is_github_auth_error is auth_utils.is_github_auth_error
+
+
+@pytest.mark.asyncio
+async def test_gh_list_issues_raises_auth_error_on_auth_failure() -> None:
+    """_gh_list_issues raises GitHubAuthenticationError when gh CLI reports auth failure."""
+    from aquarco_supervisor.exceptions import GitHubAuthenticationError
+    from aquarco_supervisor.pollers.github_tasks import _gh_list_issues
+
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 1
+    mock_proc.communicate = AsyncMock(
+        return_value=(b"", b"HTTP 401: Unauthorized")
+    )
+
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        with pytest.raises(GitHubAuthenticationError, match="authentication failed"):
+            await _gh_list_issues("owner/repo", "2024-01-01T00:00:00Z")
+
+
+@pytest.mark.asyncio
+async def test_gh_list_issues_raises_runtime_error_on_non_auth_failure() -> None:
+    """_gh_list_issues raises RuntimeError for non-auth gh failures."""
+    from aquarco_supervisor.pollers.github_tasks import _gh_list_issues
+
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 1
+    mock_proc.communicate = AsyncMock(
+        return_value=(b"", b"connection reset by peer")
+    )
+
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        with pytest.raises(RuntimeError, match="gh issue list failed"):
+            await _gh_list_issues("owner/repo", "2024-01-01T00:00:00Z")
+
+
+@pytest.mark.asyncio
+async def test_poll_reraises_github_auth_error(
+    sample_config: SupervisorConfig, sample_pipelines: list[PipelineConfig],
+) -> None:
+    """When _gh_list_issues raises GitHubAuthenticationError, poll() propagates it."""
+    from aquarco_supervisor.exceptions import GitHubAuthenticationError
+
+    tq = AsyncMock(spec=TaskQueue)
+    tq.get_poll_cursor = AsyncMock(return_value="2024-01-01T00:00:00Z")
+    db = AsyncMock(spec=Database)
+    db.fetch_all = AsyncMock(return_value=[SAMPLE_REPO])
+    poller = GitHubTasksPoller(sample_config, tq, db, sample_pipelines)
+
+    with patch(
+        "aquarco_supervisor.pollers.github_tasks._gh_list_issues",
+        AsyncMock(side_effect=GitHubAuthenticationError("auth failed")),
+    ):
+        with pytest.raises(GitHubAuthenticationError):
+            await poller.poll()

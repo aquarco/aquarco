@@ -808,3 +808,285 @@ async def test_sync_definitions_to_db_handles_exception_gracefully(
     ):
         # Must not raise — exceptions are caught internally
         await supervisor._sync_definitions_to_db()
+
+
+# ---------------------------------------------------------------------------
+# _dispatch_pending_tasks — auth-broken pausing
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dispatch_pauses_when_claude_auth_broken(sample_config: Any) -> None:
+    """When _claude_auth_broken is True, dispatch returns early without dispatching tasks."""
+    supervisor = Supervisor(sample_config, {})
+
+    mock_db = AsyncMock()
+    mock_tq = AsyncMock()
+    mock_registry = AsyncMock()
+    mock_executor = AsyncMock()
+
+    supervisor._db = mock_db
+    supervisor._tq = mock_tq
+    supervisor._registry = mock_registry
+    supervisor._executor = mock_executor
+    supervisor._claude_auth_broken = True
+
+    await supervisor._dispatch_pending_tasks()
+
+    # Should NOT query drain mode or dispatch any tasks
+    mock_tq.get_next_task.assert_not_called()
+    mock_db.fetch_val.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_pauses_when_github_auth_broken(sample_config: Any) -> None:
+    """When _github_auth_broken is True, dispatch returns early without dispatching tasks."""
+    supervisor = Supervisor(sample_config, {})
+
+    mock_db = AsyncMock()
+    # Drain check returns no drain
+    mock_db.fetch_one = AsyncMock(return_value={"drain_val": None, "active_count": 0, "executing_count": 0})
+    mock_tq = AsyncMock()
+    mock_registry = AsyncMock()
+    mock_executor = AsyncMock()
+
+    supervisor._db = mock_db
+    supervisor._tq = mock_tq
+    supervisor._registry = mock_registry
+    supervisor._executor = mock_executor
+    supervisor._github_auth_broken = True
+
+    await supervisor._dispatch_pending_tasks()
+
+    # Should NOT dispatch any tasks
+    mock_tq.get_next_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_claude_auth_broken_logs_periodically(sample_config: Any) -> None:
+    """When _claude_auth_broken, a warning is logged every 60s but not more often."""
+    supervisor = Supervisor(sample_config, {})
+
+    mock_db = AsyncMock()
+    mock_tq = AsyncMock()
+    mock_registry = AsyncMock()
+    mock_executor = AsyncMock()
+
+    supervisor._db = mock_db
+    supervisor._tq = mock_tq
+    supervisor._registry = mock_registry
+    supervisor._executor = mock_executor
+    supervisor._claude_auth_broken = True
+
+    with patch("aquarco_supervisor.main.log") as mock_log:
+        # First call: should log
+        await supervisor._dispatch_pending_tasks()
+        first_log_count = mock_log.warning.call_count
+
+        # Second call immediately: should NOT log again (within 60s window)
+        await supervisor._dispatch_pending_tasks()
+        second_log_count = mock_log.warning.call_count
+
+    assert first_log_count == 1, "Should log on first call"
+    assert second_log_count == 1, "Should NOT log again within 60s window"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_github_auth_broken_logs_periodically(sample_config: Any) -> None:
+    """When _github_auth_broken, a warning is logged every 60s but not more often."""
+    supervisor = Supervisor(sample_config, {})
+
+    mock_db = AsyncMock()
+    mock_db.fetch_one = AsyncMock(return_value={"drain_val": None, "active_count": 0, "executing_count": 0})
+    mock_tq = AsyncMock()
+    mock_registry = AsyncMock()
+    mock_executor = AsyncMock()
+
+    supervisor._db = mock_db
+    supervisor._tq = mock_tq
+    supervisor._registry = mock_registry
+    supervisor._executor = mock_executor
+    supervisor._github_auth_broken = True
+
+    with patch("aquarco_supervisor.main.log") as mock_log:
+        # First call: should log
+        await supervisor._dispatch_pending_tasks()
+        first_log_count = mock_log.warning.call_count
+
+        # Second call immediately: should NOT log again (within 60s window)
+        await supervisor._dispatch_pending_tasks()
+        second_log_count = mock_log.warning.call_count
+
+    assert first_log_count == 1, "Should log on first call"
+    assert second_log_count == 1, "Should NOT log again within 60s window"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_claude_auth_broken_logs_again_after_interval(sample_config: Any) -> None:
+    """After 60s pass, the claude_auth_broken warning is logged again."""
+    supervisor = Supervisor(sample_config, {})
+
+    mock_db = AsyncMock()
+    mock_tq = AsyncMock()
+    mock_registry = AsyncMock()
+    mock_executor = AsyncMock()
+
+    supervisor._db = mock_db
+    supervisor._tq = mock_tq
+    supervisor._registry = mock_registry
+    supervisor._executor = mock_executor
+    supervisor._claude_auth_broken = True
+
+    with patch("aquarco_supervisor.main.log") as mock_log, \
+         patch("aquarco_supervisor.main.time") as mock_time:
+        # First call at t=100
+        mock_time.monotonic.return_value = 100.0
+        mock_time.time = time.time
+        await supervisor._dispatch_pending_tasks()
+        assert mock_log.warning.call_count == 1
+
+        # Second call at t=170 (70s later, past the 60s threshold)
+        mock_time.monotonic.return_value = 170.0
+        await supervisor._dispatch_pending_tasks()
+        assert mock_log.warning.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# _run_pollers — GitHub auth error detection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_pollers_sets_github_auth_broken_on_auth_error(sample_config: Any) -> None:
+    """When a poller raises GitHubAuthenticationError, _github_auth_broken is set."""
+    from aquarco_supervisor.exceptions import GitHubAuthenticationError
+
+    supervisor = Supervisor(sample_config, {})
+    supervisor._db = AsyncMock()
+
+    mock_poller = MagicMock()
+    mock_poller.name = "test-poller"
+    mock_poller.is_enabled.return_value = True
+    mock_poller.get_interval.return_value = 0  # always ready
+    mock_poller.poll = AsyncMock(
+        side_effect=GitHubAuthenticationError("auth failed")
+    )
+
+    supervisor._pollers = [mock_poller]
+    assert supervisor._github_auth_broken is False
+
+    await supervisor._run_pollers()
+
+    assert supervisor._github_auth_broken is True
+
+
+@pytest.mark.asyncio
+async def test_run_pollers_generic_error_does_not_set_auth_broken(sample_config: Any) -> None:
+    """When a poller raises a generic error, _github_auth_broken stays False."""
+    supervisor = Supervisor(sample_config, {})
+
+    mock_poller = MagicMock()
+    mock_poller.name = "test-poller"
+    mock_poller.is_enabled.return_value = True
+    mock_poller.get_interval.return_value = 0
+    mock_poller.poll = AsyncMock(side_effect=RuntimeError("network issue"))
+
+    supervisor._pollers = [mock_poller]
+    assert supervisor._github_auth_broken is False
+
+    await supervisor._run_pollers()
+
+    assert supervisor._github_auth_broken is False
+
+
+# ---------------------------------------------------------------------------
+# _run_task — AuthenticationError pauses Claude auth
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_task_auth_error_sets_claude_auth_broken(sample_config: Any) -> None:
+    """If execute_pipeline raises AuthenticationError, _claude_auth_broken is set."""
+    from aquarco_supervisor.exceptions import AuthenticationError
+
+    supervisor = Supervisor(sample_config, {})
+
+    mock_tq = AsyncMock()
+    mock_executor = AsyncMock()
+    mock_executor.execute_pipeline = AsyncMock(
+        side_effect=AuthenticationError("Claude auth expired")
+    )
+    supervisor._db = AsyncMock()
+    supervisor._tq = mock_tq
+    supervisor._executor = mock_executor
+
+    assert supervisor._claude_auth_broken is False
+
+    await supervisor._run_task("task-003", "feature-pipeline", {})
+
+    assert supervisor._claude_auth_broken is True
+    mock_tq.reset_task_to_pending.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_task_retryable_error_postpones_task(sample_config: Any) -> None:
+    """If execute_pipeline raises RetryableError, the task is postponed."""
+    from aquarco_supervisor.exceptions import RateLimitError
+    from aquarco_supervisor.models import Task, TaskStatus
+
+    supervisor = Supervisor(sample_config, {})
+
+    mock_tq = AsyncMock()
+    mock_task_obj = MagicMock(spec=Task)
+    mock_task_obj.status = TaskStatus.EXECUTING  # Not yet RATE_LIMITED
+    mock_tq.get_task = AsyncMock(return_value=mock_task_obj)
+
+    mock_executor = AsyncMock()
+    mock_executor.execute_pipeline = AsyncMock(
+        side_effect=RateLimitError("rate limited")
+    )
+    supervisor._tq = mock_tq
+    supervisor._executor = mock_executor
+
+    await supervisor._run_task("task-004", "feature-pipeline", {})
+
+    mock_tq.postpone_task.assert_awaited_once()
+    # Verify the cooldown_minutes and max_retries from _cooldown_for_error
+    call_kwargs = mock_tq.postpone_task.call_args.kwargs
+    assert call_kwargs["cooldown_minutes"] == 60
+    assert call_kwargs["max_retries"] == 24
+
+
+# ---------------------------------------------------------------------------
+# Supervisor — initialization defaults
+# ---------------------------------------------------------------------------
+
+
+def test_supervisor_init_auth_tracking_defaults(sample_config: Any) -> None:
+    """Supervisor initializes with auth tracking flags set to False."""
+    supervisor = Supervisor(sample_config, {})
+    assert supervisor._claude_auth_broken is False
+    assert supervisor._github_auth_broken is False
+    assert supervisor._creds_file_mtime == 0.0
+
+
+# ---------------------------------------------------------------------------
+# _refresh_secrets — auth recovery
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_refresh_secrets_clears_github_auth_on_new_token(sample_config: Any) -> None:
+    """When a new GitHub token appears, _github_auth_broken is cleared."""
+    supervisor = Supervisor(sample_config, {})
+    supervisor._github_auth_broken = True
+    supervisor._secrets = {"github_token": None}
+    supervisor._db = AsyncMock()
+
+    with patch(
+        "aquarco_supervisor.main.load_secrets",
+        return_value={"github_token": "new-token-value"},
+    ):
+        supervisor._refresh_secrets()
+
+    assert supervisor._github_auth_broken is False
