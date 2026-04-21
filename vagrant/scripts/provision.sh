@@ -330,6 +330,23 @@ else
   }
 fi
 
+# Copy supervisor scripts to a stable well-known location so the auth helper
+# can find claude-auth-oauth.py even if the pip-installed package is missing it
+# (e.g. when upgrading from a pre-rc25 install where __init__.py was absent).
+mkdir -p /var/lib/aquarco/scripts
+SCRIPTS_SRC=""
+if [[ "${DEV_MODE}" == "1" ]]; then
+  SCRIPTS_SRC="${AGENT_HOME}/aquarco/supervisor/scripts"
+else
+  SCRIPTS_SRC="/tmp/aquarco-supervisor-python/src/aquarco_supervisor/scripts"
+  # Fall back to top-level scripts dir if package layout differs
+  [[ -d "${SCRIPTS_SRC}" ]] || SCRIPTS_SRC="/tmp/aquarco-supervisor-python/../scripts"
+fi
+if [[ -d "${SCRIPTS_SRC}" ]]; then
+  cp "${SCRIPTS_SRC}"/*.py /var/lib/aquarco/scripts/ 2>/dev/null || true
+  log "Supervisor scripts copied to /var/lib/aquarco/scripts/"
+fi
+
 # Lock the supervisor venv so agents cannot accidentally mutate it.
 # NOTE: To upgrade supervisor dependencies, temporarily restore write
 # permissions first:  chmod -R u+w "${AGENT_HOME}/.venv/lib/"
@@ -404,7 +421,7 @@ fi
 if [[ -f "${SYSTEMD_DEST}" ]]; then
   systemctl daemon-reload
   systemctl enable aquarco-supervisor-python.service
-  systemctl start aquarco-supervisor-python.service || true
+  systemctl restart aquarco-supervisor-python.service || true
   log "Supervisor (Python) service enabled and started"
 fi
 
@@ -456,7 +473,7 @@ if [[ -f "${CLAUDE_AUTH_DEST}" ]]; then
   chmod 0770 /var/lib/aquarco/claude-ipc
   systemctl daemon-reload
   systemctl enable aquarco-claude-auth.service
-  systemctl start aquarco-claude-auth.service || true
+  systemctl restart aquarco-claude-auth.service || true
   log "Claude auth helper service enabled and started"
 fi
 

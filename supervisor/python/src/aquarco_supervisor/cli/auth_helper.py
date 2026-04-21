@@ -93,8 +93,25 @@ async def _handle_login(ipc_dir: Path, oauth_script: Path | None) -> None:
             Path(__file__).parent.parent.parent.parent.parent / "scripts" / "claude-auth-oauth.py",
             # Explicit fallback for legacy/non-venv installs
             Path("/home/agent/aquarco/supervisor/scripts/claude-auth-oauth.py"),
+            # Stable install location (written by provision.sh on first/re-provision)
+            Path("/var/lib/aquarco/scripts/claude-auth-oauth.py"),
         ]
         oauth_script = next((p for p in candidates if p.exists()), None)
+
+        # Last resort: find the script in any checked-out git worktree.
+        # The supervisor checks out the repo into worktrees for pipeline execution,
+        # so the script is usually present there even when the package was installed
+        # before it was bundled.
+        if oauth_script is None:
+            worktree_root = Path("/var/lib/aquarco/worktrees")
+            if worktree_root.is_dir():
+                worktree_matches = sorted(
+                    worktree_root.glob("*/supervisor/scripts/claude-auth-oauth.py"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                if worktree_matches:
+                    oauth_script = worktree_matches[0]
 
     if oauth_script and oauth_script.exists():
         # Validate that the oauth script is within a trusted directory before
@@ -104,6 +121,8 @@ async def _handle_login(ipc_dir: Path, oauth_script: Path | None) -> None:
             Path(__file__).parent.parent / "scripts",
             Path(__file__).parent.parent.parent.parent.parent / "scripts",
             Path("/home/agent/aquarco/supervisor/scripts"),
+            Path("/var/lib/aquarco/scripts"),
+            Path("/var/lib/aquarco/worktrees"),
         ]
         resolved = oauth_script.resolve()
         if not any(
