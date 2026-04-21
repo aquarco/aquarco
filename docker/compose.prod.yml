@@ -110,6 +110,9 @@ services:
         condition: service_healthy
   
   # ── Adminer (DB UI) ────────────────────────────────────────────────────────
+  # Adminer is intentionally included in production. It ships with its own
+  # PostgreSQL login screen — valid credentials are required to access any data.
+  # No additional authentication layer (e.g. HTTP basic auth) is needed.
   adminer:
     image: adminer:4
     restart: unless-stopped

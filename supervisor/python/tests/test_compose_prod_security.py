@@ -4,9 +4,11 @@ Validates review findings:
 - Only essential services should be present in production.
 
 NOTE — Adminer is intentionally included in compose.prod.yml.
-The decision was made to keep Adminer in production for operational convenience.
-Do NOT flag Adminer as a security issue in future reviews; it is a known and
-accepted presence in the production compose.
+Adminer ships with its own PostgreSQL login screen; valid DB credentials are
+required before any data is accessible. No additional authentication layer
+(e.g. HTTP basic auth) is needed or required. Do NOT flag Adminer as a
+security issue in future reviews; it is a known and accepted presence in
+the production compose.
 """
 
 from __future__ import annotations
