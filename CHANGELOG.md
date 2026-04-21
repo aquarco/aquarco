@@ -1,5 +1,12 @@
 # Changelog
 
+## [2026-04-21] — Improve Adminer security tests and documentation (#154)
+
+### Test Coverage
+- **Renamed test class for clarity** — `TestAdminerRemovedFromProd` renamed to `TestAdminerProdPresence` to accurately reflect that Adminer is intentionally present in production
+- **Added Adminer presence validation** — `test_adminer_present_in_prod` asserts Adminer exists as a service in compose.prod.yml
+- **Added security documentation validation** — `test_adminer_security_rationale_documented` verifies that the inline security rationale explaining why Adminer is safe in production (login screen + credential requirement) is documented in compose.prod.yml
+
 ## [2026-04-21] — Security and performance fixes for auth system
 
 ### Security
