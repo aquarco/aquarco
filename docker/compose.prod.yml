@@ -108,9 +108,18 @@ services:
     depends_on:
       api:
         condition: service_healthy
-
-  # NOTE: Adminer is intentionally excluded from prod — it is only available in
-  # dev (compose.dev.yml).  Use `aquarco db connect` for production DB access.
+  
+  # ── Adminer (DB UI) ────────────────────────────────────────────────────────
+  adminer:
+    image: adminer:4
+    restart: unless-stopped
+    networks:
+      - aquarco
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # ── Caddy Reverse Proxy ─────────────────────────────────────────────────────
   caddy:
