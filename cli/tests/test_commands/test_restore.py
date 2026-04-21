@@ -232,6 +232,108 @@ class TestLatestBackupFunction:
         assert result is None
 
 
+class TestRunMigrationsComposePrefix:
+    """Tests that run_migrations uses the correct compose command per environment."""
+
+    @patch("aquarco_cli.commands.restore.get_compose_prefix", return_value="docker compose -f compose.prod.yml")
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_migrations_use_prod_compose_in_production(self, mock_cls, mock_prefix, tmp_path):
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        assert result.exit_code == 0
+        # Find the migration ssh call (the one with 'run --rm migrations')
+        migration_cmds = [
+            c.args[0] for c in vagrant.ssh.call_args_list
+            if "migrations" in c.args[0] and "run" in c.args[0]
+        ]
+        assert len(migration_cmds) >= 1
+        assert "compose.prod.yml" in migration_cmds[0]
+
+    @patch("aquarco_cli.commands.restore.get_compose_prefix", return_value="docker compose")
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_migrations_use_default_compose_in_development(self, mock_cls, mock_prefix, tmp_path):
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        assert result.exit_code == 0
+        migration_cmds = [
+            c.args[0] for c in vagrant.ssh.call_args_list
+            if "migrations" in c.args[0] and "run" in c.args[0]
+        ]
+        assert len(migration_cmds) >= 1
+        assert "compose.prod.yml" not in migration_cmds[0]
+        assert "docker compose" in migration_cmds[0]
+
+    @patch("aquarco_cli.commands.restore.get_compose_prefix", return_value="docker compose -f compose.prod.yml")
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_migrations_stream_output(self, mock_cls, mock_prefix, tmp_path):
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        migration_calls = [
+            c for c in vagrant.ssh.call_args_list
+            if "migrations" in c.args[0] and "run" in c.args[0]
+        ]
+        assert len(migration_calls) >= 1
+        assert migration_calls[0].kwargs.get("stream") is True
+
+    @patch("aquarco_cli.commands.restore.get_compose_prefix", return_value="docker compose")
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_migrations_failure_exits_nonzero(self, mock_cls, mock_prefix, tmp_path):
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        # First ssh call succeeds (db restore), second fails (migrations)
+        vagrant.ssh.side_effect = [
+            MagicMock(),  # db restore
+            MagicMock(),  # reset clone statuses
+            VagrantError("migrations failed"),  # migration
+        ]
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        assert result.exit_code == 1
+
+    @patch("aquarco_cli.commands.restore.get_compose_prefix")
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_get_compose_prefix_receives_vagrant_helper(self, mock_cls, mock_prefix, tmp_path):
+        """Verify get_compose_prefix is called with the VagrantHelper instance."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+        mock_prefix.return_value = "docker compose"
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        mock_prefix.assert_called_once_with(vagrant)
+
+    @patch("aquarco_cli.commands.restore.get_compose_prefix", return_value="docker compose -f compose.prod.yml")
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_migrations_not_run_when_db_skipped(self, mock_cls, mock_prefix, tmp_path):
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-db"])
+
+        migration_cmds = [
+            c.args[0] for c in vagrant.ssh.call_args_list
+            if "migrations" in str(c)
+        ]
+        assert len(migration_cmds) == 0
+        mock_prefix.assert_not_called()
+
+
 class TestRestoreSelectiveFlags:
     @patch("aquarco_cli.commands.restore.VagrantHelper")
     def test_no_db_skips_database(self, mock_cls, tmp_path):

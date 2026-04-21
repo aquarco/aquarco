@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, LOAD_SUPERVISOR_SECRETS, VagrantError, VagrantHelper
+from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, LOAD_SUPERVISOR_SECRETS, VagrantError, VagrantHelper, get_compose_prefix
 
 
 class TestVagrantConstants:
@@ -176,3 +176,74 @@ class TestVagrantHelperCwd:
         helper.status()
         kwargs = mock_run.call_args[1]
         assert kwargs["cwd"] == "/my/vagrant/dir"
+
+
+class TestGetComposePrefix:
+    """Tests for get_compose_prefix() environment detection."""
+
+    def _make_vagrant(self, ssh_stdout: str = "development") -> MagicMock:
+        v = MagicMock(spec=VagrantHelper)
+        v.ssh.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=ssh_stdout, stderr="",
+        )
+        return v
+
+    def test_returns_prod_compose_for_production(self):
+        vagrant = self._make_vagrant(ssh_stdout="production")
+        result = get_compose_prefix(vagrant)
+        assert result == "docker compose -f compose.prod.yml"
+
+    def test_returns_default_compose_for_development(self):
+        vagrant = self._make_vagrant(ssh_stdout="development")
+        result = get_compose_prefix(vagrant)
+        assert result == "docker compose"
+
+    def test_reads_env_file_via_ssh(self):
+        vagrant = self._make_vagrant(ssh_stdout="production")
+        get_compose_prefix(vagrant)
+        vagrant.ssh.assert_called_once()
+        cmd = vagrant.ssh.call_args[0][0]
+        assert "/etc/aquarco/env" in cmd
+
+    def test_strips_whitespace_from_env_value(self):
+        vagrant = self._make_vagrant(ssh_stdout="  production\n")
+        result = get_compose_prefix(vagrant)
+        assert result == "docker compose -f compose.prod.yml"
+
+    def test_defaults_to_development_on_ssh_exception(self):
+        vagrant = MagicMock(spec=VagrantHelper)
+        vagrant.ssh.side_effect = VagrantError("ssh connection failed")
+        result = get_compose_prefix(vagrant)
+        assert result == "docker compose"
+
+    def test_defaults_to_development_on_generic_exception(self):
+        vagrant = MagicMock(spec=VagrantHelper)
+        vagrant.ssh.side_effect = OSError("connection refused")
+        result = get_compose_prefix(vagrant)
+        assert result == "docker compose"
+
+    def test_defaults_to_development_when_stdout_is_none(self):
+        vagrant = MagicMock(spec=VagrantHelper)
+        vagrant.ssh.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=None, stderr="",
+        )
+        result = get_compose_prefix(vagrant)
+        assert result == "docker compose"
+
+    def test_unknown_env_value_defaults_to_dev(self):
+        """An unexpected env value (e.g. 'staging') should use default compose."""
+        vagrant = self._make_vagrant(ssh_stdout="staging")
+        result = get_compose_prefix(vagrant)
+        assert result == "docker compose"
+
+    def test_empty_string_defaults_to_dev(self):
+        vagrant = self._make_vagrant(ssh_stdout="")
+        result = get_compose_prefix(vagrant)
+        assert result == "docker compose"
+
+    def test_uses_sudo_cat(self):
+        """get_compose_prefix should use 'sudo cat' to read the env file."""
+        vagrant = self._make_vagrant(ssh_stdout="development")
+        get_compose_prefix(vagrant)
+        cmd = vagrant.ssh.call_args[0][0]
+        assert "sudo cat" in cmd
