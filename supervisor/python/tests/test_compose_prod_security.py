@@ -37,7 +37,7 @@ def _load_compose(relative_path: str) -> dict:
 
 
 # ===========================================================================
-# Adminer removal from production
+# Adminer production presence
 # ===========================================================================
 
 
