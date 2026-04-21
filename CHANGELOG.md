@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-04-21] — Document Adminer production decision and clarify security model
+
+### Infrastructure
+- **Adminer production inclusion documented** (`supervisor/python/tests/test_compose_prod_security.py`) — clarified that Adminer is intentionally included in `compose.prod.yml` for operational convenience. Access is protected by Caddy `basicauth` on the `/adminer/*` route. Removed the `test_adminer_not_in_prod_services` test that incorrectly enforced absence. Added compensating security tests: `test_caddyfile_adminer_route_has_basicauth` validates the Caddy basicauth directive, `test_adminer_prod_no_direct_ports` ensures Adminer doesn't expose direct ports, `test_adminer_prod_on_aquarco_network` confirms network configuration. Renamed test class from `TestAdminerRemovedFromProd` to `TestAdminerProdConfig` to match actual behavior.
+
 ## [2026-04-21] — Security and performance fixes for auth system
 
 ### Security
