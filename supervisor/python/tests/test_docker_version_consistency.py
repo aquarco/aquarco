@@ -3,7 +3,7 @@
 Validates that:
 - versions.env is the single source of truth for pinned Docker image versions.
 - All compose files use variable substitution with fallback defaults matching versions.env.
-- PostgreSQL stays at major version 16 (no accidental major-version jumps).
+- PostgreSQL stays at major version 18 (no accidental major-version jumps).
 - Monitoring images are pinned to specific versions (never :latest).
 - No dev/prod version skew exists.
 
@@ -148,25 +148,25 @@ class TestVersionsEnvCompleteness:
 
 
 class TestPostgresVersionSafety:
-    """PostgreSQL must stay on major version 16 across all compose files."""
+    """PostgreSQL must stay on major version 18 across all compose files."""
 
-    def test_versions_env_postgres_is_v16(self, versions_env: dict[str, str]) -> None:
-        """versions.env must pin PostgreSQL to 16-alpine."""
+    def test_versions_env_postgres_is_v18(self, versions_env: dict[str, str]) -> None:
+        """versions.env must pin PostgreSQL to 18-alpine."""
         pg_version = versions_env.get("AQUARCO_POSTGRES_VERSION", "")
-        assert pg_version.startswith("16"), (
-            f"AQUARCO_POSTGRES_VERSION={pg_version} — expected major version 16. "
+        assert pg_version.startswith("18"), (
+            f"AQUARCO_POSTGRES_VERSION={pg_version} — expected major version 18. "
             "A major version upgrade requires a pg_upgrade migration plan."
         )
 
-    def test_compose_yml_postgres_is_v16(self, compose_yml: dict) -> None:
-        """compose.yml postgres image must use version 16."""
+    def test_compose_yml_postgres_is_v18(self, compose_yml: dict) -> None:
+        """compose.yml postgres image must use version 18."""
         image = compose_yml["services"]["postgres"]["image"]
-        assert "16" in image, (
-            f"compose.yml postgres image is '{image}' — expected version 16."
+        assert "18" in image, (
+            f"compose.yml postgres image is '{image}' — expected version 18."
         )
 
-    def test_compose_prod_postgres_fallback_is_v16(self, compose_prod_raw: str) -> None:
-        """compose.prod.yml postgres fallback default must be 16-alpine."""
+    def test_compose_prod_postgres_fallback_is_v18(self, compose_prod_raw: str) -> None:
+        """compose.prod.yml postgres fallback default must be 18-alpine."""
         match = re.search(
             r'image:\s*postgres:\$\{AQUARCO_POSTGRES_VERSION:-([^}]+)\}',
             compose_prod_raw,
