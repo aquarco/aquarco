@@ -264,3 +264,58 @@ class TestMonitoringSubpathConsistency:
         'handle_path' so the prefix is stripped."""
         assert "handle_path /api/*" in caddyfile
         assert "handle_path /adminer/*" in caddyfile
+
+
+class TestAdminerCrossComposeConsistency:
+    """Validate Adminer configuration consistency across dev and prod compose files."""
+
+    @pytest.fixture
+    def compose_dev(self) -> dict:
+        return load_compose("docker/compose.yml")
+
+    @pytest.fixture
+    def compose_prod(self) -> dict:
+        return load_compose("docker/compose.prod.yml")
+
+    def test_adminer_service_in_both_dev_and_prod(
+        self, compose_dev: dict, compose_prod: dict
+    ):
+        """Adminer must be present in both dev and prod compose files."""
+        assert "adminer" in compose_dev.get("services", {}), (
+            "Adminer must exist in compose.yml (dev)"
+        )
+        assert "adminer" in compose_prod.get("services", {}), (
+            "Adminer must exist in compose.prod.yml (prod)"
+        )
+
+    def test_caddy_adminer_auth_env_in_both_composes(
+        self, compose_dev: dict, compose_prod: dict
+    ):
+        """Both dev and prod Caddy services must define ADMINER_AUTH env vars.
+
+        This ensures the Caddyfile {$ADMINER_AUTH_USER} and {$ADMINER_AUTH_HASH}
+        placeholders are always resolved — preventing Caddy startup failures.
+        """
+        for label, compose in [("dev", compose_dev), ("prod", compose_prod)]:
+            caddy = compose["services"]["caddy"]
+            env = caddy.get("environment", {})
+            env_str = str(env)
+            assert "ADMINER_AUTH_USER" in env_str, (
+                f"Caddy in {label} compose must define ADMINER_AUTH_USER"
+            )
+            assert "ADMINER_AUTH_HASH" in env_str, (
+                f"Caddy in {label} compose must define ADMINER_AUTH_HASH"
+            )
+
+    def test_adminer_image_consistent(
+        self, compose_dev: dict, compose_prod: dict
+    ):
+        """Adminer image should be consistent between dev and prod."""
+        dev_adminer = compose_dev["services"]["adminer"]
+        prod_adminer = compose_prod["services"]["adminer"]
+        dev_image = dev_adminer.get("image", "")
+        prod_image = prod_adminer.get("image", "")
+        assert dev_image == prod_image, (
+            f"Adminer image mismatch: dev={dev_image}, prod={prod_image}. "
+            "Both should use the same image version to avoid environment drift."
+        )

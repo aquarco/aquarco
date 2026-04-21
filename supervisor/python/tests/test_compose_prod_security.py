@@ -84,6 +84,54 @@ class TestAdminerProdConfig:
                     f"Service '{svc_name}' depends_on adminer in prod compose"
                 )
 
+    def test_adminer_exists_in_prod_compose(self, compose_prod: dict) -> None:
+        """Adminer must be present in compose.prod.yml (intentional decision)."""
+        services = compose_prod.get("services", {})
+        assert "adminer" in services, (
+            "Adminer must be present in compose.prod.yml. "
+            "This was an intentional decision — see module docstring."
+        )
+
+    def test_adminer_prod_no_direct_ports(self, compose_prod: dict) -> None:
+        """Adminer in prod must NOT expose any direct ports.
+
+        All access must go through Caddy's /adminer/* route, which is
+        protected by basicauth.
+        """
+        adminer = compose_prod["services"].get("adminer", {})
+        ports = adminer.get("ports", [])
+        assert len(ports) == 0, (
+            f"Adminer in prod must not expose direct ports (Caddy handles routing "
+            f"with basicauth), found: {ports}"
+        )
+
+    def test_adminer_prod_on_aquarco_network(self, compose_prod: dict) -> None:
+        """Adminer in prod must be on the aquarco network for Caddy reachability."""
+        adminer = compose_prod["services"].get("adminer", {})
+        networks = adminer.get("networks", [])
+        assert "aquarco" in networks, (
+            "Adminer must be on the aquarco network so Caddy can reverse-proxy to it."
+        )
+
+    def test_adminer_prod_depends_on_postgres(self, compose_prod: dict) -> None:
+        """Adminer in prod must depend on postgres (healthy) before starting."""
+        adminer = compose_prod["services"].get("adminer", {})
+        depends = adminer.get("depends_on", {})
+        if isinstance(depends, list):
+            assert "postgres" in depends, (
+                "Adminer must depend on postgres service."
+            )
+        elif isinstance(depends, dict):
+            assert "postgres" in depends, (
+                "Adminer must depend on postgres service."
+            )
+            condition = depends["postgres"].get("condition", "")
+            assert condition == "service_healthy", (
+                f"Adminer must wait for postgres to be healthy, got condition: {condition}"
+            )
+        else:
+            pytest.fail("Adminer must have depends_on postgres configured.")
+
     def test_caddyfile_adminer_route_has_basicauth(self, caddyfile_text: str) -> None:
         """The /adminer/* Caddy route MUST have a basicauth block.
 

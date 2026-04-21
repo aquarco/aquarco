@@ -174,6 +174,72 @@ class TestAdminerRouteAuth:
             "compose.yml must set ADMINER_AUTH_HASH for Caddy"
         )
 
+    def test_basicauth_before_reverse_proxy_in_adminer(self, caddyfile: str):
+        """basicauth directive must appear BEFORE reverse_proxy in the adminer block.
+
+        In Caddy, directive ordering within a block matters. The basicauth
+        must execute before the reverse_proxy passes the request through.
+        """
+        adminer_block = re.search(
+            r"handle_path /adminer/\*\s*\{([\s\S]*?)\n    \}", caddyfile
+        )
+        assert adminer_block, "Adminer handle_path block must exist"
+        block_content = adminer_block.group(1)
+        basicauth_pos = block_content.find("basicauth")
+        reverse_proxy_pos = block_content.find("reverse_proxy")
+        assert basicauth_pos != -1, "basicauth must be present in adminer block"
+        assert reverse_proxy_pos != -1, "reverse_proxy must be present in adminer block"
+        assert basicauth_pos < reverse_proxy_pos, (
+            "basicauth must appear BEFORE reverse_proxy in the adminer block. "
+            "If reverse_proxy comes first, requests are forwarded unauthenticated."
+        )
+
+    def test_prod_adminer_auth_env_fail_fast(self, compose_prod: dict):
+        """Production compose ADMINER_AUTH env vars must use fail-fast ?-syntax.
+
+        In production, ADMINER_AUTH_USER and ADMINER_AUTH_HASH must NOT have
+        defaults — the deploy MUST fail if the operator forgets to set them.
+        Docker Compose ``?`` syntax (e.g., ``${VAR:?msg}``) causes a fatal error
+        on startup when the variable is missing.
+        """
+        caddy = compose_prod["services"]["caddy"]
+        env = caddy.get("environment", {})
+
+        user_val = str(env.get("ADMINER_AUTH_USER", ""))
+        hash_val = str(env.get("ADMINER_AUTH_HASH", ""))
+
+        assert "?" in user_val, (
+            f"ADMINER_AUTH_USER in compose.prod.yml must use fail-fast syntax "
+            f"(${{VAR:?msg}}), got: {user_val}. Without this, production may "
+            "start with empty or default credentials."
+        )
+        assert "?" in hash_val, (
+            f"ADMINER_AUTH_HASH in compose.prod.yml must use fail-fast syntax "
+            f"(${{VAR:?msg}}), got: {hash_val}. Without this, production may "
+            "start with empty or default credentials."
+        )
+
+    def test_dev_adminer_auth_env_provides_defaults(self, compose_dev: dict):
+        """Dev compose ADMINER_AUTH env vars must provide safe defaults.
+
+        Unlike production, dev compose should start without requiring the
+        operator to set env vars — using ``${VAR:-default}`` syntax.
+        """
+        caddy = compose_dev["services"]["caddy"]
+        env = caddy.get("environment", {})
+
+        user_val = str(env.get("ADMINER_AUTH_USER", ""))
+        hash_val = str(env.get("ADMINER_AUTH_HASH", ""))
+
+        assert ":-" in user_val or "?" not in user_val, (
+            f"ADMINER_AUTH_USER in dev compose should have a default value, "
+            f"got: {user_val}"
+        )
+        assert ":-" in hash_val or "?" not in hash_val, (
+            f"ADMINER_AUTH_HASH in dev compose should have a default value, "
+            f"got: {hash_val}"
+        )
+
 
 # ===========================================================================
 # Port Exposure Security
