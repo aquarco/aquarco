@@ -30,7 +30,7 @@ services:
 
   # ── PostgreSQL ────────────────────────────────────────────────────────────────
   postgres:
-    image: postgres:${AQUARCO_POSTGRES_VERSION:-18-alpine}
+    image: postgres:${AQUARCO_POSTGRES_VERSION:-16-alpine}
     restart: unless-stopped
     networks:
       - aquarco
