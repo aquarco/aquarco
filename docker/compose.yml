@@ -13,7 +13,7 @@ services:
 
   # ── PostgreSQL ────────────────────────────────────────────────────────────────
   postgres:
-    image: postgres:18-alpine
+    image: postgres:${◊AQUARCO_POSTGRES_VERSION:-18-alpine}
     restart: unless-stopped
     networks:
       - aquarco
@@ -114,7 +114,7 @@ services:
 
   # ── Caddy Reverse Proxy ─────────────────────────────────────────────────────
   caddy:
-    image: caddy:2-alpine
+    image: caddy:${AQUARCO_CADDY_VERSION:-2-alpine}
     restart: unless-stopped
     networks:
       - aquarco
@@ -133,7 +133,7 @@ services:
 
   # ── Adminer (DB UI) ────────────────────────────────────────────────────────
   adminer:
-    image: adminer:5
+    image: adminer:${AQUARCO_ADMINER_VERSION:-5}
     restart: unless-stopped
     networks:
       - aquarco
