@@ -1,16 +1,20 @@
 # Changelog
 
-## [2026-04-17] — Fix GraphQL enum mappings and code quality issues
+## [2026-04-17] — Production migrations with pre-built images + code quality fixes
 
 ### Fixed
+- **Production migrations** — `run_migrations()` in `cli/src/aquarco_cli/commands/restore.py` now detects the VM environment (`/etc/aquarco/env`) and uses the appropriate Docker Compose file:
+  - **Production** — uses `compose.prod.yml` with pre-built registry images, eliminating the requirement for the source code tree to be present on the VM
+  - **Development** — uses regular `compose.yml` which builds images from the local `../db` source tree
+  - Replaced the previous directory-existence check with environment-based selection, ensuring migrations always run in production regardless of code availability
 - **GraphQL enum mappings** — added missing `CANCELLED` and `PLANNING` value mappings in `api/codegen.yml` to ensure TypeScript types match database enum values; regenerated `types.ts`
 - **Task status terminal detection** — added `CANCELLED` to `TERMINAL_STATUSES` set in `graphql_client.py` so the `follow_task()` helper correctly stops polling when a task is cancelled
 - **Restore logic short-circuit evaluation** — fixed error accumulation in `cli/src/aquarco_cli/commands/init.py` restore logic by correcting evaluation order (`ok and restore_db` instead of `restore_db and ok`)
 - **Configuration loading** — extracted `COMPOSE_DIR` and `LOAD_SUPERVISOR_SECRETS` constants to `vagrant.py` module for centralized secret-loading pattern; updated `config.py` to use shared constants
 
 ### Test Coverage
-- 30 new tests added covering refactored task, vagrant, and config modules
-- All 378 tests passing with 88% coverage
+- 44 new tests added covering migrations, vagrant, restore, and config modules  
+- All 394 tests passing with 94% coverage
 
 ## [2026-04-16] — Remove `--dev` flag; introduce `AQUARCO_VM_NAME`
 
