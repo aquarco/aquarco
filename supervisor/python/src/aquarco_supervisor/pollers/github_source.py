@@ -21,6 +21,7 @@ from ..pipeline.git_workflow import (
 from ..task_queue import TaskQueue
 from ..utils import run_git as _run_git
 from ..utils import url_to_slug as _url_to_slug
+from .auth_utils import is_github_auth_error as _is_github_auth_error
 from .base import BasePoller
 
 log = get_logger("github-source")
@@ -460,12 +461,6 @@ class GitHubSourcePoller(BasePoller):
                 created += 1
 
         return created
-
-
-def _is_github_auth_error(err_text: str) -> bool:
-    """Return True if the gh CLI stderr indicates an authentication failure."""
-    lower = err_text.lower()
-    return any(kw in lower for kw in ("401", "403", "authentication", "unauthorized", "bad credentials", "not logged in", "token"))
 
 
 async def _gh_list_prs(repo_slug: str, timeout: int = 60) -> list[dict[str, Any]]:

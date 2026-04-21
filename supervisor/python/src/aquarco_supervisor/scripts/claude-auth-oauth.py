@@ -116,7 +116,6 @@ def exchange_token(auth_code, code_verifier, state):
         "state": state,
     }
     log(f"Token exchange payload: code_len={len(auth_code)}, "
-        f"code_first8={auth_code[:8]}..., "
         f"redirect_uri={REDIRECT_URI}, "
         f"verifier_len={len(code_verifier)}")
     payload = json.dumps(body).encode("utf-8")

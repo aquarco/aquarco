@@ -1,5 +1,22 @@
 # Changelog
 
+## [2026-04-21] — Security and performance fixes for auth system
+
+### Security
+- **Tightened trusted script roots** (`supervisor/python/src/aquarco_supervisor/cli/auth_helper.py`) — instead of trusting the entire `/var/lib/aquarco/worktrees/` tree, only trust the specific `supervisor/scripts/` subpath within each worktree directory. Prevents unauthorized script execution from adjacent worktree paths.
+- **Removed partial auth code logging** (`supervisor/python/src/aquarco_supervisor/scripts/claude-auth-oauth.py`) — partial auth codes (`code_first8`) no longer logged to reduce credential exposure in logs.
+
+### Fixed
+- **GitHub auth error detection** — extracted `_is_github_auth_error()` into shared `supervisor/python/src/aquarco_supervisor/pollers/auth_utils.py` module (DRY fix). Fixes false-positive auth failure detection from overly-broad "token" keyword that was causing all pipelines to pause. Both `github_source.py` and `github_tasks.py` now import from the shared module.
+- **Auth pause visibility** (`supervisor/python/src/aquarco_supervisor/main.py`) — added periodic warning log messages (every 60 seconds) when task dispatch is paused due to broken Claude or GitHub authentication, making the pause reason visible in operational logs.
+
+### Performance
+- **Dashboard re-render optimization** (`web/src/app/page.tsx`) — extracted `ElapsedTicker` component so the 1-second timer interval only re-renders individual elapsed-time cells, not the entire dashboard (charts, stat cards, etc.).
+
+### Test Coverage
+- 62 new tests across auth utilities, dispatch pausing, CLI auth helpers, and component tests
+- All tests passing with 84% coverage
+
 ## [2026-04-17] — Fix GraphQL enum mappings and code quality issues
 
 ### Fixed

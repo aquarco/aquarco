@@ -776,6 +776,55 @@ async def test_poll_commits_skips_all_aquarco_subjects_v2(
     mock_tq.create_task.assert_not_called()
 
 
+# --- Shared auth_utils integration (DRY fix) ---
+
+def test_github_source_uses_shared_auth_utils() -> None:
+    """Verify that github_source imports is_github_auth_error from the shared auth_utils module.
+
+    This is a regression guard for the DRY fix: the function was extracted from
+    duplicated inline implementations in github_source.py and github_tasks.py
+    into pollers/auth_utils.py.
+    """
+    from aquarco_supervisor.pollers import github_source
+    from aquarco_supervisor.pollers import auth_utils
+
+    # The module-level _is_github_auth_error should be the same function object
+    assert github_source._is_github_auth_error is auth_utils.is_github_auth_error
+
+
+@pytest.mark.asyncio
+async def test_gh_list_prs_raises_auth_error_on_auth_failure(sample_config: Any) -> None:
+    """_gh_list_prs raises GitHubAuthenticationError when gh CLI reports auth failure."""
+    from aquarco_supervisor.exceptions import GitHubAuthenticationError
+    from aquarco_supervisor.pollers.github_source import _gh_list_prs
+
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 1
+    mock_proc.communicate = AsyncMock(
+        return_value=(b"", b"HTTP 401: Unauthorized")
+    )
+
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        with pytest.raises(GitHubAuthenticationError, match="authentication failed"):
+            await _gh_list_prs("owner/repo")
+
+
+@pytest.mark.asyncio
+async def test_gh_list_prs_raises_runtime_error_on_non_auth_failure() -> None:
+    """_gh_list_prs raises RuntimeError (not AuthError) for non-auth gh failures."""
+    from aquarco_supervisor.pollers.github_source import _gh_list_prs
+
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 1
+    mock_proc.communicate = AsyncMock(
+        return_value=(b"", b"network timeout connecting to api.github.com")
+    )
+
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        with pytest.raises(RuntimeError, match="gh pr list failed"):
+            await _gh_list_prs("owner/repo")
+
+
 @pytest.mark.asyncio
 async def test_poll_no_repos_from_db(sample_config: Any) -> None:
     """When DB returns no repos, nothing is polled."""

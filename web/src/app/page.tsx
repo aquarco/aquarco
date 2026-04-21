@@ -65,10 +65,18 @@ interface TaskRow {
   totalTokens?: number | null
 }
 
-export default function DashboardPage() {
-  const router = useRouter()
+/**
+ * Self-ticking elapsed-time display.  Keeps its own 1 s interval so only
+ * the individual cell re-renders — not the entire dashboard.
+ */
+function ElapsedTicker({ date }: { date: string }) {
   const [, tick] = useReducer((x: number) => x + 1, 0)
   useEffect(() => { const id = setInterval(tick, 1000); return () => clearInterval(id) }, [])
+  return <>{formatElapsed(date)}</>
+}
+
+export default function DashboardPage() {
+  const router = useRouter()
 
   const {
     data: statsData,
@@ -278,7 +286,7 @@ export default function DashboardPage() {
                     <TableCell title={formatDate(task.updatedAt)}>
                       {['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED', 'CLOSED'].includes(task.status?.toUpperCase())
                         ? formatDate(task.completedAt || task.updatedAt)
-                        : formatElapsed(task.updatedAt)}
+                        : <ElapsedTicker date={task.updatedAt} />}
                     </TableCell>
                   </TableRow>
                 ))}

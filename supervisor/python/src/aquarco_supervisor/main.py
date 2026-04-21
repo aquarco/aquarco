@@ -274,10 +274,18 @@ class Supervisor:
 
         # Skip dispatch while Claude auth is broken
         if self._claude_auth_broken:
+            now = time.monotonic()
+            if now - getattr(self, "_last_claude_auth_log", 0) >= 60:
+                log.warning("dispatch_paused_claude_auth", msg="Task dispatch paused — Claude authentication is broken. Run `aquarco auth claude` to fix.")
+                self._last_claude_auth_log = now
             return
 
         # Skip dispatch while GitHub auth is broken (pipeline stages use gh for PRs)
         if self._github_auth_broken:
+            now = time.monotonic()
+            if now - getattr(self, "_last_github_auth_log", 0) >= 60:
+                log.warning("dispatch_paused_github_auth", msg="Task dispatch paused — GitHub authentication is broken. Run `aquarco auth github` to fix.")
+                self._last_github_auth_log = now
             return
 
         # Check capacity
