@@ -1,5 +1,15 @@
 # Changelog
 
+## [2026-04-21] — Fix service restarts after pip install and auth script discovery
+
+### Fixed
+- **Service restart on provision** — changed `systemctl start` to `systemctl restart` for `aquarco-supervisor-python` and `aquarco-claude-auth` services in `provision.sh` to ensure services reload after pip install updates. This fixes issues where the old running service would continue using pre-install code.
+- **Auth helper script discovery** — added resilient fallback candidates in `auth_helper.py` for locating `claude-auth-oauth.py`:
+  - Stable install location: `/var/lib/aquarco/scripts/claude-auth-oauth.py` (copied by `provision.sh`)
+  - Git worktree glob: searches `/var/lib/aquarco/worktrees/*/supervisor/scripts/claude-auth-oauth.py` as last resort
+  - Addresses issues with VMs provisioned before script bundling was completed
+- **Provision.sh script stability** — added copying of supervisor scripts to `/var/lib/aquarco/scripts/` as a well-known stable location, with fallback logic to handle different package layouts
+
 ## [2026-04-17] — Fix GraphQL enum mappings and code quality issues
 
 ### Fixed
