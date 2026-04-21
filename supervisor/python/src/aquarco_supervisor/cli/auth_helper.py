@@ -105,13 +105,29 @@ async def _handle_login(ipc_dir: Path, oauth_script: Path | None) -> None:
         if oauth_script is None:
             worktree_root = Path("/var/lib/aquarco/worktrees")
             if worktree_root.is_dir():
-                worktree_matches = sorted(
-                    worktree_root.glob("*/supervisor/scripts/claude-auth-oauth.py"),
-                    key=lambda p: p.stat().st_mtime,
-                    reverse=True,
+                worktree_candidates = list(
+                    worktree_root.glob("*/supervisor/scripts/claude-auth-oauth.py")
                 )
-                if worktree_matches:
-                    oauth_script = worktree_matches[0]
+                # Sort by mtime (newest first) to prefer the most recently
+                # updated worktree.  Guard against FileNotFoundError in case
+                # a worktree is cleaned up between glob() and stat().
+                def _safe_mtime(p: Path) -> float:
+                    try:
+                        return p.stat().st_mtime
+                    except OSError:
+                        return 0.0
+
+                worktree_candidates.sort(key=_safe_mtime, reverse=True)
+                # Pick the first candidate that still exists (may have been
+                # removed between the sort and this check).
+                oauth_script = next(
+                    (p for p in worktree_candidates if p.exists()), None
+                )
+                if oauth_script is not None:
+                    log.info(
+                        "oauth_script_resolved_from_worktree",
+                        script=str(oauth_script),
+                    )
 
     if oauth_script and oauth_script.exists():
         # Validate that the oauth script is within a trusted directory before

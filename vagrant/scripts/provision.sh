@@ -338,13 +338,16 @@ SCRIPTS_SRC=""
 if [[ "${DEV_MODE}" == "1" ]]; then
   SCRIPTS_SRC="${AGENT_HOME}/aquarco/supervisor/scripts"
 else
+  # The Vagrantfile uploads supervisor/python/ to /tmp/aquarco-supervisor-python/.
+  # The bundled scripts live inside the Python package at src/aquarco_supervisor/scripts/.
   SCRIPTS_SRC="/tmp/aquarco-supervisor-python/src/aquarco_supervisor/scripts"
-  # Fall back to top-level scripts dir if package layout differs
-  [[ -d "${SCRIPTS_SRC}" ]] || SCRIPTS_SRC="/tmp/aquarco-supervisor-python/../scripts"
 fi
 if [[ -d "${SCRIPTS_SRC}" ]]; then
   cp "${SCRIPTS_SRC}"/*.py /var/lib/aquarco/scripts/ 2>/dev/null || true
+  chown -R "${AGENT_USER}:${AGENT_USER}" /var/lib/aquarco/scripts/
   log "Supervisor scripts copied to /var/lib/aquarco/scripts/"
+else
+  log "WARNING: scripts source not found at ${SCRIPTS_SRC}; /var/lib/aquarco/scripts/ may be empty"
 fi
 
 # Lock the supervisor venv so agents cannot accidentally mutate it.
