@@ -122,8 +122,15 @@ async def _handle_login(ipc_dir: Path, oauth_script: Path | None) -> None:
             Path(__file__).parent.parent.parent.parent.parent / "scripts",
             Path("/home/agent/aquarco/supervisor/scripts"),
             Path("/var/lib/aquarco/scripts"),
-            Path("/var/lib/aquarco/worktrees"),
         ]
+        # Also trust the oauth script inside any checked-out worktree, but
+        # only at the expected subpath to prevent a malicious repo from
+        # placing an arbitrary file that passes the trust check.
+        _wt_root = Path("/var/lib/aquarco/worktrees")
+        if _wt_root.is_dir():
+            for wt in _wt_root.iterdir():
+                if wt.is_dir():
+                    _TRUSTED_SCRIPT_ROOTS.append(wt / "supervisor" / "scripts")
         resolved = oauth_script.resolve()
         if not any(
             resolved.is_relative_to(root.resolve())

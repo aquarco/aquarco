@@ -13,6 +13,7 @@ from ..logging import get_logger
 from ..models import PipelineConfig, SupervisorConfig
 from ..task_queue import TaskQueue
 from ..utils import url_to_slug as _url_to_slug
+from .auth_utils import is_github_auth_error as _is_github_auth_error
 from .base import BasePoller
 
 # Map branch type → default pipeline name when rule has no explicit pipeline.
@@ -161,12 +162,6 @@ class GitHubTasksPoller(BasePoller):
                     return _BRANCH_TYPE_PIPELINE.get(branch_type, "feature-pipeline")
 
         return "feature-pipeline"
-
-
-def _is_github_auth_error(err_text: str) -> bool:
-    """Return True if the gh CLI stderr indicates an authentication failure."""
-    lower = err_text.lower()
-    return any(kw in lower for kw in ("401", "403", "authentication", "unauthorized", "bad credentials", "not logged in", "token"))
 
 
 async def _gh_list_issues(
