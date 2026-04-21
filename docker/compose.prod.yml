@@ -114,7 +114,7 @@ services:
   # PostgreSQL login screen — valid credentials are required to access any data.
   # No additional authentication layer (e.g. HTTP basic auth) is needed.
   adminer:
-    image: adminer:5
+    image: adminer:${AQUARCO_ADMINER_VERSION:-5}
     restart: unless-stopped
     networks:
       - aquarco

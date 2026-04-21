@@ -18,7 +18,7 @@ services:
 
   # ── Adminer — lightweight DB admin UI ────────────────────────────────────────
   adminer:
-    image: adminer:5
+    image: adminer:${AQUARCO_ADMINER_VERSION:-5}
     restart: unless-stopped
     networks:
       - aquarco
