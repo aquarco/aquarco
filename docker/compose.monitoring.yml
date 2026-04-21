@@ -16,7 +16,7 @@ services:
 
   # ── Prometheus ────────────────────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.11.2
     restart: unless-stopped
     networks:
       - default
@@ -40,7 +40,7 @@ services:
   # ── Grafana ───────────────────────────────────────────────────────────────────
   # Runs on port 3000 — separate from the Aquarco web UI (port 8080).
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.0.1
     restart: unless-stopped
     networks:
       - default
@@ -68,7 +68,7 @@ services:
 
   # ── Loki ──────────────────────────────────────────────────────────────────────
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.7.1
     restart: unless-stopped
     ports:
       - "127.0.0.1:3100:3100"

@@ -30,7 +30,7 @@ services:
 
   # ── PostgreSQL ────────────────────────────────────────────────────────────────
   postgres:
-    image: postgres:${AQUARCO_POSTGRES_VERSION:-16-alpine}
+    image: postgres:${AQUARCO_POSTGRES_VERSION:-18-alpine}
     restart: unless-stopped
     networks:
       - aquarco
@@ -114,7 +114,7 @@ services:
   # PostgreSQL login screen — valid credentials are required to access any data.
   # No additional authentication layer (e.g. HTTP basic auth) is needed.
   adminer:
-    image: adminer:4
+    image: adminer:5
     restart: unless-stopped
     networks:
       - aquarco
