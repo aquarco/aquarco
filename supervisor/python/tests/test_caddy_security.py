@@ -103,6 +103,79 @@ class TestCaddyAdminApiSecurity:
 
 
 # ===========================================================================
+# Adminer Route Authentication
+# ===========================================================================
+
+
+class TestAdminerRouteAuth:
+    """Validate that the Adminer route is protected by basic authentication."""
+
+    @pytest.fixture
+    def caddyfile(self) -> str:
+        return read_file("docker/caddy/Caddyfile")
+
+    @pytest.fixture
+    def compose_prod(self) -> dict:
+        return load_compose("docker/compose.prod.yml")
+
+    @pytest.fixture
+    def compose_dev(self) -> dict:
+        return load_compose("docker/compose.yml")
+
+    def test_adminer_route_has_basicauth(self, caddyfile: str):
+        """Adminer route must be protected by basicauth."""
+        # Find the adminer handle_path block and verify it contains basicauth
+        adminer_block = re.search(
+            r"handle_path /adminer/\*\s*\{([\s\S]*?)\n    \}", caddyfile
+        )
+        assert adminer_block, "Adminer handle_path block must exist"
+        block_content = adminer_block.group(1)
+        assert "basicauth" in block_content, (
+            "Adminer route must have basicauth directive. "
+            "Adminer is a database admin UI and must not be publicly accessible "
+            "without authentication."
+        )
+
+    def test_adminer_auth_uses_env_vars(self, caddyfile: str):
+        """Adminer basicauth must use environment variables (not hardcoded creds)."""
+        adminer_block = re.search(
+            r"handle_path /adminer/\*\s*\{([\s\S]*?)\n    \}", caddyfile
+        )
+        assert adminer_block, "Adminer handle_path block must exist"
+        block_content = adminer_block.group(1)
+        assert "{$ADMINER_AUTH_USER}" in block_content, (
+            "Adminer basicauth must use {$ADMINER_AUTH_USER} env var"
+        )
+        assert "{$ADMINER_AUTH_HASH}" in block_content, (
+            "Adminer basicauth must use {$ADMINER_AUTH_HASH} env var"
+        )
+
+    def test_prod_compose_requires_adminer_auth_env(self, compose_prod: dict):
+        """Production compose must pass ADMINER_AUTH_USER and ADMINER_AUTH_HASH to Caddy."""
+        caddy = compose_prod["services"]["caddy"]
+        env = caddy.get("environment", {})
+        env_str = str(env)
+        assert "ADMINER_AUTH_USER" in env_str, (
+            "compose.prod.yml must set ADMINER_AUTH_USER for Caddy"
+        )
+        assert "ADMINER_AUTH_HASH" in env_str, (
+            "compose.prod.yml must set ADMINER_AUTH_HASH for Caddy"
+        )
+
+    def test_dev_compose_has_adminer_auth_defaults(self, compose_dev: dict):
+        """Dev compose must provide default ADMINER_AUTH_* env vars for Caddy."""
+        caddy = compose_dev["services"]["caddy"]
+        env = caddy.get("environment", {})
+        env_str = str(env)
+        assert "ADMINER_AUTH_USER" in env_str, (
+            "compose.yml must set ADMINER_AUTH_USER for Caddy"
+        )
+        assert "ADMINER_AUTH_HASH" in env_str, (
+            "compose.yml must set ADMINER_AUTH_HASH for Caddy"
+        )
+
+
+# ===========================================================================
 # Port Exposure Security
 # ===========================================================================
 

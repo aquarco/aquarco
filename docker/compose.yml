@@ -125,6 +125,9 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    environment:
+      ADMINER_AUTH_USER: ${ADMINER_AUTH_USER:-admin}
+      ADMINER_AUTH_HASH: ${ADMINER_AUTH_HASH:-$$2b$$14$$TCRMgJUVWB1LWW0Rfed6Te3d4TyNBb8677/sCnROXVnmdIUdv0Qx2}
     depends_on:
       web:
         condition: service_healthy

@@ -84,7 +84,7 @@ class TestCaddyfile:
 
     def test_adminer_route_proxies_to_adminer_8080(self, caddyfile: str):
         adminer_block = re.search(
-            r"handle_path /adminer/\*\s*\{([^}]+)\}", caddyfile
+            r"handle_path /adminer/\*\s*\{([\s\S]*?)\n    \}", caddyfile
         )
         assert adminer_block, "Adminer handle_path block must exist"
         assert "reverse_proxy adminer:8080" in adminer_block.group(1)

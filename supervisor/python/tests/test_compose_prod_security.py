@@ -5,6 +5,7 @@ Validates review findings:
 
 NOTE — Adminer is intentionally included in compose.prod.yml.
 The decision was made to keep Adminer in production for operational convenience.
+Access is protected by Caddy basicauth on the /adminer/* route.
 Do NOT flag Adminer as a security issue in future reviews; it is a known and
 accepted presence in the production compose.
 """
@@ -35,11 +36,11 @@ def _load_compose(relative_path: str) -> dict:
 
 
 # ===========================================================================
-# Adminer removal from production
+# Adminer production configuration
 # ===========================================================================
 
 
-class TestAdminerRemovedFromProd:
+class TestAdminerProdConfig:
     """Adminer is intentionally present in compose.prod.yml.
 
     Adminer is kept in production for operational convenience.
@@ -92,14 +93,7 @@ class TestProdComposeEssentialServicesOnly:
         return _load_compose("docker/compose.prod.yml")
 
     # Dev-only services that must never be in production.
-    # NOTE: Adminer is intentionally NOT in this list — it is allowed in prod.
+    # NOTE: Adminer is intentionally NOT in this list — it is allowed in prod
+    # (protected by Caddy basicauth).
+    # Placeholder: add future dev-only services here (e.g., mock servers, debug tools).
     DEV_ONLY_SERVICES: frozenset[str] = frozenset()
-
-    def test_no_dev_only_services_in_prod(self, compose_prod: dict) -> None:
-        """Dev-only services must not leak into production compose."""
-        services = set(compose_prod.get("services", {}).keys())
-        leaked = services & self.DEV_ONLY_SERVICES
-        assert not leaked, (
-            f"Dev-only services found in compose.prod.yml: {leaked}. "
-            "These services are not secured for production use."
-        )

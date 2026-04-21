@@ -9,8 +9,11 @@
         reverse_proxy api:4000
     }
 
-    # Adminer — strip /adminer prefix
+    # Adminer — strip /adminer prefix; protected by basic auth
     handle_path /adminer/* {
+        basicauth {
+            {$ADMINER_AUTH_USER} {$ADMINER_AUTH_HASH}
+        }
         reverse_proxy adminer:8080
     }
 

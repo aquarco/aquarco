@@ -134,6 +134,9 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    environment:
+      ADMINER_AUTH_USER: ${ADMINER_AUTH_USER:?ADMINER_AUTH_USER must be set — generate hash with caddy hash-password}
+      ADMINER_AUTH_HASH: ${ADMINER_AUTH_HASH:?ADMINER_AUTH_HASH must be set — generate hash with caddy hash-password}
     depends_on:
       web:
         condition: service_healthy
