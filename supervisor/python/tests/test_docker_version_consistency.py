@@ -348,3 +348,154 @@ class TestMonitoringImagesPinned:
         assert re.match(r'^\d+\.\d+', version), (
             f"Loki version '{version}' doesn't look like a semver pin."
         )
+
+
+# ===========================================================================
+# compose.yml variable substitution coverage (review finding: missing tests)
+# ===========================================================================
+
+
+class TestComposeYmlVariableSubstitution:
+    """compose.yml must use variable substitution for all versioned images."""
+
+    def test_compose_yml_uses_postgres_var(self, compose_yml_raw: str) -> None:
+        """compose.yml postgres image must reference AQUARCO_POSTGRES_VERSION."""
+        assert "AQUARCO_POSTGRES_VERSION" in compose_yml_raw, (
+            "compose.yml must use ${AQUARCO_POSTGRES_VERSION:-...} for postgres."
+        )
+
+    def test_compose_yml_uses_caddy_var(self, compose_yml_raw: str) -> None:
+        """compose.yml caddy image must reference AQUARCO_CADDY_VERSION."""
+        assert "AQUARCO_CADDY_VERSION" in compose_yml_raw, (
+            "compose.yml must use ${AQUARCO_CADDY_VERSION:-...} for caddy."
+        )
+
+    def test_compose_yml_uses_adminer_var(self, compose_yml_raw: str) -> None:
+        """compose.yml adminer image must reference AQUARCO_ADMINER_VERSION."""
+        assert "AQUARCO_ADMINER_VERSION" in compose_yml_raw, (
+            "compose.yml must use ${AQUARCO_ADMINER_VERSION:-...} for adminer."
+        )
+
+
+# ===========================================================================
+# No stray Unicode in variable substitution patterns
+# ===========================================================================
+
+
+class TestNoStrayUnicodeInVariables:
+    """Variable names in compose files must be pure ASCII — no stray Unicode characters.
+
+    This catches the bug where a Unicode lozenge (U+25CA) was embedded in a
+    variable name, silently breaking env var substitution.
+    """
+
+    COMPOSE_FILES = [
+        "docker/compose.yml",
+        "docker/compose.prod.yml",
+        "docker/compose.dev.yml",
+        "docker/compose.monitoring.yml",
+    ]
+
+    @pytest.mark.parametrize("compose_file", COMPOSE_FILES)
+    def test_variable_names_are_ascii(self, compose_file: str) -> None:
+        """All ${VAR:-default} variable names must contain only ASCII characters."""
+        raw = _read_file(compose_file)
+        for match in re.finditer(r'\$\{([^}:]+?)(?::-)([^}]*)\}', raw):
+            var_name = match.group(0)
+            # Check every character in the variable reference is ASCII
+            for char in var_name:
+                assert ord(char) < 128, (
+                    f"{compose_file} contains non-ASCII character U+{ord(char):04X} "
+                    f"({char!r}) in variable substitution: {var_name!r}"
+                )
+
+    @pytest.mark.parametrize("compose_file", COMPOSE_FILES)
+    def test_no_invisible_characters_in_image_lines(self, compose_file: str) -> None:
+        """Image lines must not contain invisible Unicode characters (ZWJ, ZWNJ, BOM, etc.)."""
+        raw = _read_file(compose_file)
+        invisible_pattern = re.compile(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff\u25ca]')
+        for i, line in enumerate(raw.splitlines(), 1):
+            if 'image:' in line:
+                bad = invisible_pattern.findall(line)
+                assert not bad, (
+                    f"{compose_file}:{i} image line contains invisible/stray Unicode "
+                    f"characters: {[f'U+{ord(c):04X}' for c in bad]}"
+                )
+
+
+# ===========================================================================
+# Cross-file fallback agreement
+# ===========================================================================
+
+
+class TestCrossFileFallbackAgreement:
+    """When multiple compose files specify fallbacks for the same variable,
+    they must all agree on the default value."""
+
+    ALL_COMPOSE_FILES = [
+        "docker/compose.yml",
+        "docker/compose.prod.yml",
+        "docker/compose.dev.yml",
+        "docker/compose.monitoring.yml",
+    ]
+
+    @staticmethod
+    def _extract_fallbacks(raw_text: str) -> dict[str, str]:
+        fallbacks = {}
+        for match in re.finditer(r'\$\{(AQUARCO_\w+_VERSION):-([^}]+)\}', raw_text):
+            fallbacks[match.group(1)] = match.group(2)
+        return fallbacks
+
+    def test_no_fallback_skew_across_compose_files(self) -> None:
+        """All compose files must agree on fallback defaults for the same variable."""
+        seen: dict[str, dict[str, str]] = {}  # var -> {file: fallback}
+        for compose_file in self.ALL_COMPOSE_FILES:
+            raw = _read_file(compose_file)
+            for var, fallback in self._extract_fallbacks(raw).items():
+                if var not in seen:
+                    seen[var] = {}
+                seen[var][compose_file] = fallback
+
+        for var, file_fallbacks in seen.items():
+            values = set(file_fallbacks.values())
+            assert len(values) == 1, (
+                f"Fallback skew for {var}: {file_fallbacks}. "
+                "All compose files must use the same fallback default."
+            )
+
+
+# ===========================================================================
+# versions.env format validation
+# ===========================================================================
+
+
+class TestVersionsEnvFormat:
+    """versions.env must follow strict formatting rules."""
+
+    def test_no_quoted_values(self) -> None:
+        """Version values must not be wrapped in quotes."""
+        raw = _read_file("docker/versions.env")
+        for i, line in enumerate(raw.splitlines(), 1):
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            _, _, value = line.partition("=")
+            assert not (value.startswith('"') or value.startswith("'")), (
+                f"versions.env:{i} value is quoted: {line!r}. "
+                "Docker env_file does not strip quotes — they become part of the value."
+            )
+
+    def test_no_trailing_whitespace(self) -> None:
+        """Lines must not have trailing whitespace (can cause subtle env var issues)."""
+        raw = _read_file("docker/versions.env")
+        for i, line in enumerate(raw.splitlines(), 1):
+            assert line == line.rstrip(), (
+                f"versions.env:{i} has trailing whitespace: {line!r}"
+            )
+
+    def test_registry_is_defined(self) -> None:
+        """AQUARCO_REGISTRY must be defined for prod image references."""
+        env = _parse_versions_env(_read_file("docker/versions.env"))
+        assert "AQUARCO_REGISTRY" in env, (
+            "versions.env must define AQUARCO_REGISTRY for production image references."
+        )
