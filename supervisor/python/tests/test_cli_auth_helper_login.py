@@ -184,13 +184,20 @@ class TestWorktreeTrustedRoots:
 
     @pytest.mark.asyncio
     async def test_worktree_supervisor_scripts_path_is_trusted(self, tmp_path: Path) -> None:
-        """A script at worktree/*/supervisor/scripts/ should pass trust check."""
+        """A script at worktree/*/supervisor/scripts/ should pass trust check.
+
+        We create a real directory structure under tmp_path that mirrors
+        /var/lib/aquarco/worktrees/<repo>/supervisor/scripts/ and patch the
+        Path constructor so _handle_login sees our tmp structure as the
+        worktree root.
+        """
         ipc_dir = tmp_path / "ipc"
         ipc_dir.mkdir()
         (ipc_dir / "login-request").write_text("")
 
-        # Simulate a worktree structure
-        worktree = tmp_path / "worktrees" / "repo-abc123"
+        # Simulate the worktree structure at the exact path the code expects
+        worktrees_root = tmp_path / "worktrees"
+        worktree = worktrees_root / "repo-abc123"
         scripts_dir = worktree / "supervisor" / "scripts"
         scripts_dir.mkdir(parents=True)
         script = scripts_dir / "claude-auth-oauth.py"
@@ -199,9 +206,19 @@ class TestWorktreeTrustedRoots:
         mock_proc = AsyncMock()
         mock_proc.pid = 42
 
-        # We need to make the function find our script and trust it.
-        # The trust check uses _TRUSTED_SCRIPT_ROOTS which includes worktree paths.
-        # We patch Path("/var/lib/aquarco/worktrees") to point to our tmp_path worktrees dir.
+        # Monkey-patch the hardcoded worktree root Path so the function discovers
+        # our tmp-based worktree directories and adds them to _TRUSTED_SCRIPT_ROOTS.
+        original_path = Path
+
+        class PatchedPath(type(Path())):
+            """Path subclass that redirects the worktree root."""
+
+            def __new__(cls, *args, **kwargs):  # type: ignore[override]
+                p = original_path(*args, **kwargs)
+                if str(p) == "/var/lib/aquarco/worktrees":
+                    return original_path(worktrees_root)
+                return p
+
         with patch(
             "aquarco_supervisor.cli.auth_helper._kill_previous_login_processes"
         ), patch(
@@ -210,17 +227,74 @@ class TestWorktreeTrustedRoots:
         ), patch(
             "aquarco_supervisor.cli.auth_helper.asyncio.create_subprocess_exec",
             new=AsyncMock(return_value=mock_proc),
+        ), patch(
+            "aquarco_supervisor.cli.auth_helper.Path",
+            PatchedPath,
         ):
-            # The trust check in _handle_login constructs _TRUSTED_SCRIPT_ROOTS
-            # with Path("/var/lib/aquarco/worktrees") and iterates its children.
-            # Since this test doesn't have access to /var/lib/aquarco/worktrees,
-            # we pass the script explicitly and also need the trusted roots to include it.
-            # The easiest approach: directly pass the script and verify behavior via
-            # the Path __file__ parent resolution (which is the package scripts dir).
+            await _handle_login(ipc_dir, script)
 
-            # For a proper integration test, we would set up a mock filesystem.
-            # Here we verify the structural correctness of the tightened path.
-            pass
+        # If the script was trusted, no error response should have been written
+        response_file = ipc_dir / "login-response"
+        if response_file.exists():
+            response = json.loads(response_file.read_text())
+            assert "error" not in response, (
+                f"Script at worktree/supervisor/scripts/ should be trusted, "
+                f"but got error: {response}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_malicious_worktree_path_is_rejected(self, tmp_path: Path) -> None:
+        """A script at worktree/*/some/other/path/ must be rejected.
+
+        Before the fix, the entire worktree directory was trusted.
+        After the fix, only worktree/*/supervisor/scripts/ is trusted.
+        A malicious repo could place a file at any path within the worktree;
+        this test verifies that such a file is correctly rejected.
+        """
+        ipc_dir = tmp_path / "ipc"
+        ipc_dir.mkdir()
+        (ipc_dir / "login-request").write_text("")
+
+        # Create a script at a NON-standard path within a worktree
+        worktrees_root = tmp_path / "worktrees"
+        worktree = worktrees_root / "malicious-repo"
+        malicious_dir = worktree / "evil" / "scripts"
+        malicious_dir.mkdir(parents=True)
+        script = malicious_dir / "claude-auth-oauth.py"
+        script.write_text("# malicious script NOT in supervisor/scripts/")
+
+        original_path = Path
+
+        class PatchedPath(type(Path())):
+            """Redirect worktree root to our tmp dir."""
+
+            def __new__(cls, *args, **kwargs):  # type: ignore[override]
+                p = original_path(*args, **kwargs)
+                if str(p) == "/var/lib/aquarco/worktrees":
+                    return original_path(worktrees_root)
+                return p
+
+        with patch(
+            "aquarco_supervisor.cli.auth_helper._kill_previous_login_processes"
+        ), patch(
+            "aquarco_supervisor.cli.auth_helper.asyncio.sleep",
+            new=AsyncMock(),
+        ), patch(
+            "aquarco_supervisor.cli.auth_helper.Path",
+            PatchedPath,
+        ):
+            await _handle_login(ipc_dir, script)
+
+        # Script should be rejected — error response must be written
+        response_file = ipc_dir / "login-response"
+        assert response_file.exists(), (
+            "A script outside supervisor/scripts/ should produce an error response"
+        )
+        response = json.loads(response_file.read_text())
+        assert "error" in response, (
+            "Response should contain an error for untrusted script path"
+        )
+        assert "trusted" in response["error"].lower() or "outside" in response["error"].lower()
 
     def test_worktree_subpath_structure(self) -> None:
         """The trusted path should be worktree_child / supervisor / scripts, not just worktree_child."""
@@ -235,3 +309,25 @@ class TestWorktreeTrustedRoots:
         assert '"scripts"' in source
         # And NOT just appending the worktree root directly
         assert '_TRUSTED_SCRIPT_ROOTS.append(wt / "supervisor" / "scripts")' in source
+
+    def test_worktree_root_itself_is_not_trusted(self) -> None:
+        """The worktree root directory itself must NOT be in trusted roots.
+
+        Before the fix, the code appended the worktree child directly:
+            _TRUSTED_SCRIPT_ROOTS.append(wt)
+        After the fix, it appends the specific subpath:
+            _TRUSTED_SCRIPT_ROOTS.append(wt / "supervisor" / "scripts")
+        """
+        import inspect
+        from aquarco_supervisor.cli import auth_helper
+
+        source = inspect.getsource(auth_helper._handle_login)
+        # Must NOT have a bare append of the worktree directory
+        # The pattern "_TRUSTED_SCRIPT_ROOTS.append(wt)" without subpath would be insecure
+        lines = source.split("\n")
+        for line in lines:
+            if "_TRUSTED_SCRIPT_ROOTS.append(wt)" in line:
+                # If it's just `append(wt)` without a subpath, that's the old insecure pattern
+                assert "supervisor" in line, (
+                    f"Found bare worktree append without subpath restriction: {line.strip()}"
+                )

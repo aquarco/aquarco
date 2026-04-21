@@ -186,3 +186,53 @@ class TestIsGithubAuthErrorRealisticMessages:
     def test_gh_repo_not_found(self) -> None:
         msg = "GraphQL: Could not resolve to a Repository with the name 'owner/repo'."
         assert is_github_auth_error(msg) is False
+
+
+# ---------------------------------------------------------------------------
+# Rate-limit false positive documentation (review finding)
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimitFalsePositiveDocumentation:
+    """Document and track the known 403 rate-limit false positive.
+
+    The review agent flagged that '403' in _AUTH_ERROR_KEYWORDS causes
+    GitHub rate-limit responses (HTTP 403) to be misclassified as auth
+    failures.  These tests document the current behavior and will catch
+    if the keyword list is changed to address this.
+    """
+
+    def test_403_rate_limit_exceeded_matches(self) -> None:
+        """403 rate limit from GitHub currently triggers auth error (known false positive)."""
+        msg = "HTTP 403: API rate limit exceeded for user ID 12345"
+        assert is_github_auth_error(msg) is True
+
+    def test_403_secondary_rate_limit_matches(self) -> None:
+        """Secondary rate limits (abuse detection) also return 403."""
+        msg = "HTTP 403: You have exceeded a secondary rate limit. Please wait a few minutes."
+        assert is_github_auth_error(msg) is True
+
+    def test_403_sso_enforcement_matches(self) -> None:
+        """SSO enforcement 403 is a genuine auth error — correct match."""
+        msg = "HTTP 403: Resource protected by organization SAML enforcement. You must grant access."
+        assert is_github_auth_error(msg) is True
+
+    def test_403_ip_allow_list_matches(self) -> None:
+        """IP allow list 403 is arguably an auth error — documents current behavior."""
+        msg = "HTTP 403: Your request was blocked by IP allow list"
+        assert is_github_auth_error(msg) is True
+
+    def test_genuine_401_not_affected_by_403_discussion(self) -> None:
+        """401 responses are unambiguously auth failures — always correct."""
+        msg = "HTTP 401: Bad credentials"
+        assert is_github_auth_error(msg) is True
+
+    def test_429_rate_limit_does_not_match(self) -> None:
+        """HTTP 429 is not in the keyword list and should NOT match."""
+        msg = "HTTP 429: Too Many Requests — rate limit exceeded"
+        assert is_github_auth_error(msg) is False
+
+    def test_pure_rate_limit_message_without_403(self) -> None:
+        """A rate limit message without any auth keywords should not match."""
+        msg = "rate limit exceeded, retry after 60s"
+        assert is_github_auth_error(msg) is False

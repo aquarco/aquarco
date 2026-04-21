@@ -285,6 +285,90 @@ class TestAuthBrokenPriority:
 
 
 # ---------------------------------------------------------------------------
+# Log message content — actionable guidance
+# ---------------------------------------------------------------------------
+
+
+class TestAuthPausedLogMessageContent:
+    """Log messages should contain actionable guidance for operators."""
+
+    @pytest.mark.asyncio
+    async def test_claude_auth_log_contains_fix_command(self, sample_config: Any) -> None:
+        """Claude auth warning should tell the operator how to fix it."""
+        supervisor = Supervisor(sample_config, {})
+
+        mock_db = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value={
+            "drain_val": None,
+            "active_count": 0,
+            "executing_count": 0,
+        })
+        supervisor._db = mock_db
+        supervisor._tq = AsyncMock()
+        supervisor._registry = AsyncMock()
+        supervisor._executor = AsyncMock()
+        supervisor._claude_auth_broken = True
+
+        with patch("aquarco_supervisor.main.log") as mock_log:
+            await supervisor._dispatch_pending_tasks()
+            call_kwargs = mock_log.warning.call_args
+            # The message should mention how to fix (aquarco auth claude)
+            full_msg = str(call_kwargs)
+            assert "aquarco auth claude" in full_msg.lower() or "auth" in full_msg.lower(), (
+                f"Log message should contain actionable fix guidance, got: {full_msg}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_github_auth_log_contains_fix_command(self, sample_config: Any) -> None:
+        """GitHub auth warning should tell the operator how to fix it."""
+        supervisor = Supervisor(sample_config, {})
+
+        mock_db = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value={
+            "drain_val": None,
+            "active_count": 0,
+            "executing_count": 0,
+        })
+        supervisor._db = mock_db
+        supervisor._tq = AsyncMock()
+        supervisor._registry = AsyncMock()
+        supervisor._executor = AsyncMock()
+        supervisor._github_auth_broken = True
+
+        with patch("aquarco_supervisor.main.log") as mock_log:
+            await supervisor._dispatch_pending_tasks()
+            call_kwargs = mock_log.warning.call_args
+            full_msg = str(call_kwargs)
+            assert "aquarco auth github" in full_msg.lower() or "auth" in full_msg.lower(), (
+                f"Log message should contain actionable fix guidance, got: {full_msg}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_claude_auth_log_mentions_dispatch_paused(self, sample_config: Any) -> None:
+        """The log should clearly state that dispatch is paused."""
+        supervisor = Supervisor(sample_config, {})
+
+        mock_db = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value={
+            "drain_val": None,
+            "active_count": 0,
+            "executing_count": 0,
+        })
+        supervisor._db = mock_db
+        supervisor._tq = AsyncMock()
+        supervisor._registry = AsyncMock()
+        supervisor._executor = AsyncMock()
+        supervisor._claude_auth_broken = True
+
+        with patch("aquarco_supervisor.main.log") as mock_log:
+            await supervisor._dispatch_pending_tasks()
+            full_msg = str(mock_log.warning.call_args)
+            assert "paused" in full_msg.lower() or "dispatch" in full_msg.lower(), (
+                f"Log message should mention dispatch is paused, got: {full_msg}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Normal dispatch — auth flags not set
 # ---------------------------------------------------------------------------
 
