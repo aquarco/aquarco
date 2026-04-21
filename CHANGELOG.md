@@ -3,7 +3,6 @@
 ## [2026-04-21] — Security and performance fixes for auth system
 
 ### Security
-- **Removed Adminer from production** (`docker/compose.prod.yml`) — database admin UI was exposed unauthenticated on port 8080 in production deployments. Adminer remains available in dev mode via `compose.yml`. Production users should use alternative database administration tools or database-native clients.
 - **Tightened trusted script roots** (`supervisor/python/src/aquarco_supervisor/cli/auth_helper.py`) — instead of trusting the entire `/var/lib/aquarco/worktrees/` tree, only trust the specific `supervisor/scripts/` subpath within each worktree directory. Prevents unauthorized script execution from adjacent worktree paths.
 - **Removed partial auth code logging** (`supervisor/python/src/aquarco_supervisor/scripts/claude-auth-oauth.py`) — partial auth codes (`code_first8`) no longer logged to reduce credential exposure in logs.
 
