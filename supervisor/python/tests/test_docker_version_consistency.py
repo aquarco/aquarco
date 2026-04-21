@@ -159,10 +159,15 @@ class TestPostgresVersionSafety:
         )
 
     def test_compose_yml_postgres_is_v18(self, compose_yml: dict) -> None:
-        """compose.yml postgres image must use version 18."""
+        """compose.yml postgres image must use version 18 with clean variable substitution."""
         image = compose_yml["services"]["postgres"]["image"]
         assert "18" in image, (
             f"compose.yml postgres image is '{image}' — expected version 18."
+        )
+        # Ensure no stray characters in the variable substitution
+        assert image == "postgres:${AQUARCO_POSTGRES_VERSION:-18-alpine}", (
+            f"compose.yml postgres image has unexpected characters: '{image}'. "
+            "Expected 'postgres:${{AQUARCO_POSTGRES_VERSION:-18-alpine}}'."
         )
 
     def test_compose_prod_postgres_fallback_is_v18(self, compose_prod_raw: str) -> None:
@@ -173,8 +178,8 @@ class TestPostgresVersionSafety:
         )
         assert match, "compose.prod.yml postgres must use variable substitution."
         fallback = match.group(1)
-        assert fallback.startswith("16"), (
-            f"compose.prod.yml postgres fallback is '{fallback}' — expected 16-alpine."
+        assert fallback.startswith("18"), (
+            f"compose.prod.yml postgres fallback is '{fallback}' — expected 18-alpine."
         )
 
 

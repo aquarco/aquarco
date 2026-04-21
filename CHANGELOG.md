@@ -1,6 +1,6 @@
 # Changelog
 
-## [2026-04-21] — Docker image version management and PostgreSQL rollback
+## [2026-04-21] — Docker image version management and PostgreSQL upgrade
 
 ### Fixed
 - **Monitoring image versions not pinned** — added AQUARCO_PROMETHEUS_VERSION (v3.11.2), AQUARCO_GRAFANA_VERSION (13.0.1), AQUARCO_LOKI_VERSION (3.7.1), AQUARCO_POSTGRES_VERSION (18-alpine) and AQUARCO_ADMINER_VERSION (5) to `docker/versions.env` as the single source of truth for all Docker image versions
