@@ -316,11 +316,12 @@ class TestUiStartFailure:
 class TestDrainModeThreeWayPrompt:
     """Active work with no drain → prompt yes/no/plan."""
 
+    @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update.Prompt.ask", return_value="yes")
     @patch("aquarco_cli.commands.update._query_drain_status")
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_active_work_choose_yes_proceeds_with_update(self, mock_cls, mock_health, mock_drain, mock_prompt):
+    def test_active_work_choose_yes_proceeds_with_update(self, mock_cls, mock_health, mock_drain, mock_prompt, mock_ver):
         """User chooses 'yes' → immediate update proceeds."""
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
@@ -332,11 +333,12 @@ class TestDrainModeThreeWayPrompt:
         assert mock_vagrant.ssh.called
         assert "successfully" in result.output.lower() or "completed" in result.output.lower()
 
+    @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update.Prompt.ask", return_value="no")
     @patch("aquarco_cli.commands.update._query_drain_status")
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_active_work_choose_no_aborts(self, mock_cls, mock_drain, mock_prompt):
-        """User chooses 'no' → update aborted, no SSH calls."""
+    def test_active_work_choose_no_aborts(self, mock_cls, mock_drain, mock_prompt, mock_ver):
+        """User chooses 'no' → update aborted, no step SSH calls."""
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
         mock_drain.return_value = {"enabled": False, "activeAgents": 1, "activeTasks": 2}
@@ -344,12 +346,14 @@ class TestDrainModeThreeWayPrompt:
         result = runner.invoke(app, ["update"])
         assert result.exit_code == 0
         assert "aborted" in result.output.lower()
-        mock_vagrant.ssh.assert_not_called()
+        # get_compose_prefix makes 1 SSH call, but no update step SSH calls
+        assert mock_vagrant.ssh.call_count <= 1
 
+    @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update.Prompt.ask", return_value="plan")
     @patch("aquarco_cli.commands.update._query_drain_status")
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_active_work_choose_plan_enables_drain(self, mock_cls, mock_drain, mock_prompt):
+    def test_active_work_choose_plan_enables_drain(self, mock_cls, mock_drain, mock_prompt, mock_ver):
         """User chooses 'plan' → drain mode enabled via API."""
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
@@ -362,13 +366,15 @@ class TestDrainModeThreeWayPrompt:
 
         assert result.exit_code == 0
         assert "drain mode enabled" in result.output.lower()
-        mock_vagrant.ssh.assert_not_called()
+        # get_compose_prefix makes 1 SSH call, but no update step SSH calls
+        assert mock_vagrant.ssh.call_count <= 1
 
+    @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update.Prompt.ask", return_value="yes")
     @patch("aquarco_cli.commands.update._query_drain_status")
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_prompt_shows_agent_and_task_count(self, mock_cls, mock_health, mock_drain, mock_prompt):
+    def test_prompt_shows_agent_and_task_count(self, mock_cls, mock_health, mock_drain, mock_prompt, mock_ver):
         """Warning message shows the number of agents and tasks."""
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
@@ -382,10 +388,11 @@ class TestDrainModeThreeWayPrompt:
 class TestDrainModePendingPrompt:
     """Drain already active with work in progress → prompt keep/now/cancel."""
 
+    @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update.Prompt.ask", return_value="keep")
     @patch("aquarco_cli.commands.update._query_drain_status")
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_pending_drain_keep(self, mock_cls, mock_drain, mock_prompt):
+    def test_pending_drain_keep(self, mock_cls, mock_drain, mock_prompt, mock_ver):
         """User keeps waiting for drain to complete."""
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
@@ -394,13 +401,15 @@ class TestDrainModePendingPrompt:
         result = runner.invoke(app, ["update"])
         assert result.exit_code == 0
         assert "keeping" in result.output.lower() or "auto-restart" in result.output.lower()
-        mock_vagrant.ssh.assert_not_called()
+        # get_compose_prefix makes 1 SSH call, but no update step SSH calls
+        assert mock_vagrant.ssh.call_count <= 1
 
+    @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update.Prompt.ask", return_value="now")
     @patch("aquarco_cli.commands.update._query_drain_status")
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_pending_drain_force_now(self, mock_cls, mock_health, mock_drain, mock_prompt):
+    def test_pending_drain_force_now(self, mock_cls, mock_health, mock_drain, mock_prompt, mock_ver):
         """User forces immediate restart despite drain pending."""
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
@@ -415,10 +424,11 @@ class TestDrainModePendingPrompt:
         # Should have executed update steps
         assert mock_vagrant.ssh.called
 
+    @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update.Prompt.ask", return_value="cancel")
     @patch("aquarco_cli.commands.update._query_drain_status")
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_pending_drain_cancel(self, mock_cls, mock_drain, mock_prompt):
+    def test_pending_drain_cancel(self, mock_cls, mock_drain, mock_prompt, mock_ver):
         """User cancels planned update, disabling drain mode."""
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
@@ -431,12 +441,14 @@ class TestDrainModePendingPrompt:
 
         assert result.exit_code == 0
         assert "cancel" in result.output.lower() or "normal operation" in result.output.lower()
-        mock_vagrant.ssh.assert_not_called()
+        # get_compose_prefix makes 1 SSH call, but no update step SSH calls
+        assert mock_vagrant.ssh.call_count <= 1
 
+    @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update.Prompt.ask", return_value="cancel")
     @patch("aquarco_cli.commands.update._query_drain_status")
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_pending_drain_cancel_api_failure(self, mock_cls, mock_drain, mock_prompt):
+    def test_pending_drain_cancel_api_failure(self, mock_cls, mock_drain, mock_prompt, mock_ver):
         """Cancel fails because API is unreachable — exits with error."""
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
@@ -453,10 +465,11 @@ class TestDrainModePendingPrompt:
 class TestDrainModeEdgeCases:
     """Edge cases in drain mode logic."""
 
+    @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update._query_drain_status")
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_no_active_work_proceeds_without_prompt(self, mock_cls, mock_health, mock_drain):
+    def test_no_active_work_proceeds_without_prompt(self, mock_cls, mock_health, mock_drain, mock_ver):
         """When no agents and no tasks, update proceeds without prompting."""
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
@@ -466,10 +479,11 @@ class TestDrainModeEdgeCases:
         assert result.exit_code == 0
         assert mock_vagrant.ssh.called
 
+    @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update._query_drain_status", return_value=None)
     @patch("aquarco_cli.commands.update.print_health_table", return_value=True)
     @patch("aquarco_cli.commands.update.VagrantHelper")
-    def test_drain_query_fails_proceeds(self, mock_cls, mock_health, mock_drain):
+    def test_drain_query_fails_proceeds(self, mock_cls, mock_health, mock_drain, mock_ver):
         """If drain status query fails (returns None), update proceeds anyway."""
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
@@ -535,9 +549,10 @@ class TestInitPortPersistence:
 
 class TestNoGitPullInUpdate:
     def test_steps_contain_no_git_pull_command(self):
-        """Update STEPS must not contain any git pull command."""
-        from aquarco_cli.commands.update import STEPS
+        """Update steps must not contain any git pull command."""
+        from aquarco_cli.commands.update import _build_steps
 
+        STEPS = _build_steps("sudo docker compose")
         for name, cmd in STEPS:
             assert "git pull" not in cmd.lower(), f"STEPS contains git pull: {name} → {cmd}"
 
