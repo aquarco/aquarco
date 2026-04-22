@@ -519,6 +519,129 @@ class TestPostgresPgdataExplicit:
 # ===========================================================================
 
 
+class TestPerRepoTemplatePostgresCoupling:
+    """The per-repo sandbox template (``supervisor/templates/docker-compose.repo.yml.tmpl``)
+    intentionally stays on postgres:16-alpine with the legacy PGDATA layout
+    (``pgdata:/var/lib/postgresql/data``) while the main stack moves to
+    postgres:18-alpine with ``pgdata:/var/lib/postgresql``.
+
+    This is a fragile coupling: the mount path and postgres major must stay
+    in lockstep, otherwise a future maintainer bumping one without the other
+    will silently orphan data on next boot (pg18 expects PGDATA under a
+    versioned subdir, pg≤16 expects it at the volume root).
+
+    These tests lock in the invariant so a bump of the postgres image in this
+    template forces the mount path to be updated in the same commit (and
+    vice versa).
+    """
+
+    TEMPLATE_PATH = "supervisor/templates/docker-compose.repo.yml.tmpl"
+
+    @staticmethod
+    def _postgres_image(text: str) -> str:
+        """Extract the image tag used by the postgres service in a compose-file
+        template. Returns the raw ``image:`` value (e.g. ``postgres:16-alpine``).
+        """
+        # The template file is not valid YAML because of ``__PLACEHOLDER__``
+        # tokens and sed-style comments, so we parse it as text rather than
+        # feeding it through yaml.safe_load.
+        match = re.search(
+            r'^\s*postgres:\s*\n(?:[^\n]*\n)*?\s*image:\s*(\S+)',
+            text,
+            re.MULTILINE,
+        )
+        assert match, (
+            "could not locate a postgres service `image:` directive in "
+            f"{TestPerRepoTemplatePostgresCoupling.TEMPLATE_PATH}"
+        )
+        return match.group(1)
+
+    @staticmethod
+    def _postgres_mount(text: str) -> str:
+        """Extract the ``pgdata:<path>`` mount path used by the postgres service
+        in the per-repo template.
+        """
+        match = re.search(r'-\s*pgdata:(\S+)', text)
+        assert match, (
+            "could not locate a `pgdata:` volume mount in "
+            f"{TestPerRepoTemplatePostgresCoupling.TEMPLATE_PATH}"
+        )
+        # strip any trailing `:ro`/`:rw` modifier
+        return match.group(1).split(":", 1)[0]
+
+    def test_template_uses_postgres_16(self) -> None:
+        """Per-repo template must stay on postgres:16-alpine until the mount
+        path is also updated to the pg18 layout. If this assertion fails it
+        likely means someone bumped the image without updating the mount —
+        see the test below for the coupled invariant.
+        """
+        raw = _read_file(self.TEMPLATE_PATH)
+        image = self._postgres_image(raw)
+        assert image == "postgres:16-alpine", (
+            f"per-repo template postgres image is '{image}' — expected "
+            "'postgres:16-alpine'. If this image is being bumped, the "
+            "`pgdata:` mount path in the same file MUST be updated to "
+            "'/var/lib/postgresql' to match the pg18 layout (see the main "
+            "stack compose.yml / compose.prod.yml for the pattern)."
+        )
+
+    def test_template_uses_legacy_pgdata_mount(self) -> None:
+        """Per-repo template must mount pgdata at the legacy
+        ``/var/lib/postgresql/data`` path because it runs pg16. If this
+        assertion fails the template has drifted — either the mount was
+        moved without bumping the image (data-loss regression on next boot)
+        or the image was bumped without this test being updated.
+        """
+        raw = _read_file(self.TEMPLATE_PATH)
+        mount = self._postgres_mount(raw)
+        assert mount == "/var/lib/postgresql/data", (
+            f"per-repo template pgdata mount is '{mount}' — expected "
+            "'/var/lib/postgresql/data' to match the pg16 legacy PGDATA "
+            "layout. Mount path and postgres major MUST change together: "
+            "pg≤16 → '/var/lib/postgresql/data'; pg≥18 → '/var/lib/postgresql'."
+        )
+
+    def test_template_image_and_mount_are_coupled(self) -> None:
+        """Structurally pin the image/mount coupling rule so any future edit
+        that breaks the pairing fails loudly rather than causing silent
+        data loss on next ``docker compose up``.
+
+        Rule (same as the main stack):
+          - image major ≤ 16  →  mount at ``/var/lib/postgresql/data``
+          - image major ≥ 18  →  mount at ``/var/lib/postgresql``
+        """
+        raw = _read_file(self.TEMPLATE_PATH)
+        image = self._postgres_image(raw)
+        mount = self._postgres_mount(raw)
+
+        major_match = re.search(r'postgres:(\d+)', image)
+        assert major_match, (
+            f"postgres image '{image}' does not match the expected "
+            "'postgres:<MAJOR>[-suffix]' pattern."
+        )
+        major = int(major_match.group(1))
+
+        if major <= 16:
+            assert mount == "/var/lib/postgresql/data", (
+                f"postgres:{major} uses the legacy PGDATA layout but the "
+                f"template mounts pgdata at '{mount}'. The pg≤16 mount must "
+                "be '/var/lib/postgresql/data'."
+            )
+        elif major >= 18:
+            assert mount == "/var/lib/postgresql", (
+                f"postgres:{major} uses the versioned PGDATA layout but the "
+                f"template mounts pgdata at '{mount}'. The pg≥18 mount must "
+                "be '/var/lib/postgresql' (the image stores PGDATA at "
+                "'/var/lib/postgresql/<MAJOR>/docker' — the volume must be "
+                "mounted one level up)."
+            )
+        else:
+            pytest.fail(
+                f"postgres:{major} is in an untested range (17). The pg17 "
+                "PGDATA layout needs to be verified before this test can pass."
+            )
+
+
 class TestComposeVariableInterpolationsAreAscii:
     """Variable *names* inside `${...}` interpolations must be plain ASCII.
 
