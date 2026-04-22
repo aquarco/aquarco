@@ -33,18 +33,84 @@ class VagrantError(Exception):
     """Raised when a vagrant command exits non-zero."""
 
 
+def get_postgres_version_mismatch(vagrant: "VagrantHelper") -> tuple[str, str] | None:
+    """Return (data_version, configured_version) when the pgdata volume's PostgreSQL
+    major version differs from the version configured in compose files.
+
+    Returns None if versions match or if either version cannot be determined.
+
+    data_version       — major version read from the pgdata volume's PG_VERSION file
+    configured_version — major version from versions.env (prod) or compose.yml (dev)
+
+    This is a safety pre-flight check for ``aquarco update``. Starting a new
+    PostgreSQL major-version image against an existing data directory (e.g. pg16
+    data with a pg18 image) causes the container to refuse to start and can leave
+    the cluster in an inconsistent state. When a mismatch is detected, ``aquarco
+    update`` blocks and instructs the user to use the safe upgrade path:
+    ``aquarco destroy && aquarco init && aquarco restore``.
+
+    The check is intentionally non-fatal on SSH or Docker errors (returns None) so
+    that a missing volume or an unreachable Docker daemon never blocks unrelated
+    update steps. The worst outcome of a false-negative is the same container
+    startup failure that would have happened anyway.
+    """
+    try:
+        # Read PG_VERSION from the named Docker volume.
+        # sudo is required because the agent user is not in the docker group;
+        # provision.sh grants agent NOPASSWD sudo for /usr/bin/docker.
+        r = vagrant.ssh(
+            "sudo docker run --rm -v aquarco_pgdata:/pgdata:ro alpine "
+            "sh -c 'cat /pgdata/PG_VERSION 2>/dev/null || true'",
+            stream=False,
+        )
+        data_ver = (r.stdout or "").strip()
+        if not data_ver or not data_ver.isdigit():
+            return None
+
+        # Configured version: prefer versions.env (prod), fall back to compose.yml (dev).
+        # versions.env is the single source of truth for production image tags.
+        # compose.yml hard-codes the image tag for dev (no versions.env there).
+        r = vagrant.ssh(
+            "{ grep -E '^AQUARCO_POSTGRES_VERSION=' "
+            "/home/agent/aquarco/docker/versions.env 2>/dev/null "
+            "| cut -d= -f2 "
+            "|| grep -oP 'image: postgres:\\K[0-9]+' "
+            "/home/agent/aquarco/docker/compose.yml 2>/dev/null | head -1; }",
+            stream=False,
+        )
+        raw = (r.stdout or "").strip()
+        # Strip Alpine tag suffix so "18-alpine" and "18" both yield "18".
+        conf_ver = raw.split("-")[0].strip()
+        if not conf_ver or not conf_ver.isdigit():
+            return None
+
+        return (data_ver, conf_ver) if data_ver != conf_ver else None
+    except Exception:
+        # Non-fatal: SSH failure, no Docker, or volume not yet created.
+        # Callers treat None as "no mismatch detected" and proceed normally.
+        return None
+
+
 def get_compose_prefix(vagrant: "VagrantHelper") -> str:
     """Return the docker compose command prefix appropriate for the VM's environment.
 
     Production VMs use pre-built registry images via ``compose.prod.yml``.
     Dev VMs build from the source tree via the default ``compose.yml``.
+
+    The returned string always includes ``sudo`` before ``docker`` because the
+    ``agent`` user is not in the docker group on the VM. provision.sh grants
+    agent NOPASSWD sudo for ``/usr/bin/docker`` instead (see
+    ``/etc/sudoers.d/agent``). CLI commands run Docker operations as agent (via
+    ``sudo -u agent bash -c '...'``) so they can source secrets from
+    ``/etc/aquarco/docker-secrets.env`` (owned root:agent 640). The inner
+    ``sudo docker`` is therefore required to reach the Docker socket.
     """
     try:
         result = vagrant.ssh("sudo cat /etc/aquarco/env 2>/dev/null || echo development")
         env = (result.stdout or "").strip()
     except Exception:
         env = "development"
-    return "docker compose -f compose.prod.yml" if env == "production" else "docker compose"
+    return "sudo docker compose -f compose.prod.yml" if env == "production" else "sudo docker compose"
 
 
 class VagrantHelper:
