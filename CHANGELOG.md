@@ -1,5 +1,15 @@
 # Changelog
 
+## [2026-04-22] — Fix PostgreSQL version mismatch detection in CLI
+
+### Fixed
+- **Dead-code shell fallback in `get_postgres_version_mismatch()`** — corrected shell logic for version detection. Original code used `||` operator to check `cut` exit status (which always exits 0), making the `compose.yml` fallback unreachable when `versions.env` was missing. Restructured as explicit `if/then/else` with `-n` test so `versions.env` is preferred when present and `compose.yml` is correctly used as fallback.
+- **`aquarco update` PostgreSQL safety check** — enhanced version mismatch detection to reliably prevent data corruption from incompatible PostgreSQL major versions. The fix ensures the fallback logic in `get_postgres_version_mismatch()` works correctly in both development (compose.yml) and production (versions.env) environments.
+
+### Test Coverage
+- **8 new unit tests** in `TestGetPostgresVersionMismatchShellCommand` class covering shell command structure, `sudo docker` pattern, readonly mount, versions.env precedence, whitespace handling, and version suffix stripping
+- All 180 CLI tests passing with 93% coverage
+
 ## [2026-04-21] — Improve Adminer security tests and documentation (#154)
 
 ### Test Coverage

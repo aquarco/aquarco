@@ -243,6 +243,41 @@ class TestBackupDisableTriggers:
         assert "--disable-triggers" in str(pg_dump_calls[0])
 
 
+class TestBackupSudoDocker:
+    """Verify all Docker commands in backup use 'sudo docker' (not bare 'docker')."""
+
+    @patch("aquarco_cli.commands.backup.VagrantHelper")
+    def test_db_backup_uses_sudo_docker_compose(self, mock_cls, tmp_path):
+        """pg_dump command must use 'sudo docker compose', not bare 'docker compose'."""
+        vagrant = _make_vagrant()
+        vagrant.ssh.return_value.stdout = "dump"
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["backup", "--no-creds", "--output", str(tmp_path)])
+
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        pg_dump_cmds = [c for c in cmds if "pg_dump" in c]
+        assert len(pg_dump_cmds) == 1
+        assert "sudo docker compose" in pg_dump_cmds[0]
+
+    @patch("aquarco_cli.commands.backup.VagrantHelper")
+    def test_db_backup_command_has_inner_sudo_docker(self, mock_cls, tmp_path):
+        """The backup SSH command wraps 'sudo docker' inside 'sudo -u agent bash -c'."""
+        vagrant = _make_vagrant()
+        vagrant.ssh.return_value.stdout = "dump"
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["backup", "--no-creds", "--output", str(tmp_path)])
+
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        pg_dump_cmds = [c for c in cmds if "pg_dump" in c]
+        assert len(pg_dump_cmds) == 1
+        cmd = pg_dump_cmds[0]
+        # Must have both: outer sudo -u agent and inner sudo docker
+        assert "sudo -u agent" in cmd
+        assert "sudo docker compose exec" in cmd
+
+
 class TestBackupDefaultOutput:
     @patch("aquarco_cli.commands.backup.DEFAULT_BACKUP_ROOT")
     @patch("aquarco_cli.commands.backup.VagrantHelper")
