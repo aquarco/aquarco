@@ -20,7 +20,8 @@ class TestUiStart:
         mock_vagrant.is_running.return_value = True
         result = runner.invoke(app, ["ui", "--no-open"])
         assert result.exit_code == 0
-        mock_vagrant.ssh.assert_called_once()
+        # get_compose_prefix makes 1 SSH call + the compose up call = 2 total
+        assert mock_vagrant.ssh.call_count == 2
         assert "running" in result.output.lower()
 
     @patch("aquarco_cli.commands.ui.VagrantHelper")
