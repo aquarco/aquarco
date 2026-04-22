@@ -64,18 +64,23 @@ def get_postgres_version_mismatch(vagrant: "VagrantHelper") -> tuple[str, str] |
             stream=False,
         )
         data_ver = (r.stdout or "").strip()
+        # PG_VERSION contains only the major version integer (e.g. "16", not "16.2").
+        # PostgreSQL has used this convention since version 10.  If this ever
+        # changes, isdigit() will need updating to handle dotted versions.
         if not data_ver or not data_ver.isdigit():
             return None
 
         # Configured version: prefer versions.env (prod), fall back to compose.yml (dev).
         # versions.env is the single source of truth for production image tags.
         # compose.yml hard-codes the image tag for dev (no versions.env there).
+        # We use an explicit `if` instead of `||` because `cut` always exits 0
+        # even on empty input, which would make the fallback branch unreachable.
         r = vagrant.ssh(
-            "{ grep -E '^AQUARCO_POSTGRES_VERSION=' "
-            "/home/agent/aquarco/docker/versions.env 2>/dev/null "
-            "| cut -d= -f2 "
-            "|| grep -oP 'image: postgres:\\K[0-9]+' "
-            "/home/agent/aquarco/docker/compose.yml 2>/dev/null | head -1; }",
+            "if ver=$(grep -E '^AQUARCO_POSTGRES_VERSION=' "
+            "/home/agent/aquarco/docker/versions.env 2>/dev/null | cut -d= -f2) "
+            "&& [ -n \"$ver\" ]; then echo \"$ver\"; else "
+            "grep -oP 'image: postgres:\\K[0-9]+' "
+            "/home/agent/aquarco/docker/compose.yml 2>/dev/null | head -1; fi",
             stream=False,
         )
         raw = (r.stdout or "").strip()

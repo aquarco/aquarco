@@ -8,7 +8,15 @@ from unittest.mock import patch
 
 import pytest
 
-from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, LOAD_SUPERVISOR_SECRETS, VagrantError, VagrantHelper
+from aquarco_cli.vagrant import (
+    COMPOSE_DIR,
+    LOAD_SECRETS,
+    LOAD_SUPERVISOR_SECRETS,
+    VagrantError,
+    VagrantHelper,
+    get_compose_prefix,
+    get_postgres_version_mismatch,
+)
 
 
 class TestVagrantConstants:
@@ -162,6 +170,116 @@ class TestVagrantHelperWithVmName:
         self.helper.up(provision=True)
         args = mock_run.call_args[0][0]
         assert args == ["vagrant", "up", "myvm", "--provision"]
+
+
+class TestGetPostgresVersionMismatch:
+    """Tests for get_postgres_version_mismatch()."""
+
+    def setup_method(self):
+        self.helper = VagrantHelper(vagrant_dir=Path("/fake/vagrant"))
+
+    def _make_ssh_side_effect(self, pg_version_stdout: str, conf_version_stdout: str):
+        """Return a side_effect callable that returns pg_version on first call,
+        conf_version on second call."""
+        responses = iter([
+            subprocess.CompletedProcess(args=[], returncode=0, stdout=pg_version_stdout, stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout=conf_version_stdout, stderr=""),
+        ])
+        return lambda *a, **kw: next(responses)
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_returns_none_when_versions_match(self, mock_ssh):
+        mock_ssh.side_effect = self._make_ssh_side_effect("16\n", "16\n")
+        assert get_postgres_version_mismatch(self.helper) is None
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_returns_tuple_on_mismatch(self, mock_ssh):
+        mock_ssh.side_effect = self._make_ssh_side_effect("16\n", "18\n")
+        result = get_postgres_version_mismatch(self.helper)
+        assert result == ("16", "18")
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_returns_none_when_pg_version_empty(self, mock_ssh):
+        """Empty PG_VERSION means volume doesn't exist yet — no mismatch."""
+        mock_ssh.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr="",
+        )
+        assert get_postgres_version_mismatch(self.helper) is None
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_returns_none_when_pg_version_non_digit(self, mock_ssh):
+        """Non-digit PG_VERSION (e.g. garbage) should be treated as unknown."""
+        mock_ssh.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="not-a-number\n", stderr="",
+        )
+        assert get_postgres_version_mismatch(self.helper) is None
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_returns_none_when_conf_version_empty(self, mock_ssh):
+        mock_ssh.side_effect = self._make_ssh_side_effect("16\n", "\n")
+        assert get_postgres_version_mismatch(self.helper) is None
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_returns_none_when_conf_version_non_digit(self, mock_ssh):
+        mock_ssh.side_effect = self._make_ssh_side_effect("16\n", "abc\n")
+        assert get_postgres_version_mismatch(self.helper) is None
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_strips_alpine_suffix_from_conf_version(self, mock_ssh):
+        """'18-alpine' should be treated as version '18'."""
+        mock_ssh.side_effect = self._make_ssh_side_effect("18\n", "18-alpine\n")
+        assert get_postgres_version_mismatch(self.helper) is None
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_strips_alpine_suffix_mismatch(self, mock_ssh):
+        mock_ssh.side_effect = self._make_ssh_side_effect("16\n", "18-alpine\n")
+        result = get_postgres_version_mismatch(self.helper)
+        assert result == ("16", "18")
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_returns_none_on_ssh_exception(self, mock_ssh):
+        """SSH failures are non-fatal — return None."""
+        mock_ssh.side_effect = VagrantError("connection refused")
+        assert get_postgres_version_mismatch(self.helper) is None
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_returns_none_on_generic_exception(self, mock_ssh):
+        mock_ssh.side_effect = OSError("network down")
+        assert get_postgres_version_mismatch(self.helper) is None
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_returns_none_when_stdout_is_none(self, mock_ssh):
+        """Handle None stdout gracefully."""
+        mock_ssh.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=None, stderr="",
+        )
+        assert get_postgres_version_mismatch(self.helper) is None
+
+
+class TestGetComposePrefix:
+    """Tests for get_compose_prefix()."""
+
+    def setup_method(self):
+        self.helper = VagrantHelper(vagrant_dir=Path("/fake/vagrant"))
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_production_env(self, mock_ssh):
+        mock_ssh.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="production\n", stderr="",
+        )
+        assert get_compose_prefix(self.helper) == "sudo docker compose -f compose.prod.yml"
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_development_env(self, mock_ssh):
+        mock_ssh.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="development\n", stderr="",
+        )
+        assert get_compose_prefix(self.helper) == "sudo docker compose"
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_fallback_on_ssh_error(self, mock_ssh):
+        mock_ssh.side_effect = VagrantError("connection failed")
+        assert get_compose_prefix(self.helper) == "sudo docker compose"
 
 
 class TestVagrantHelperCwd:
