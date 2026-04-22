@@ -13,14 +13,14 @@ services:
 
   # ── PostgreSQL ────────────────────────────────────────────────────────────────
   postgres:
-    image: postgres:${◊AQUARCO_POSTGRES_VERSION:-18-alpine}
+    image: postgres:${AQUARCO_POSTGRES_VERSION:-18-alpine}
     restart: unless-stopped
     networks:
       - aquarco
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-aquarco}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set — source /etc/aquarco/docker-secrets.env}
