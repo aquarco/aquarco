@@ -17,7 +17,7 @@ from aquarco_cli.graphql_client import (
     QUERY_DRAIN_STATUS,
     GraphQLClient,
 )
-from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, VagrantError, VagrantHelper, get_compose_prefix, get_postgres_version_mismatch
+from aquarco_cli.vagrant import COMPOSE_DIR, VagrantError, VagrantHelper, get_compose_prefix, get_postgres_version_mismatch
 
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
@@ -25,9 +25,9 @@ app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 def _build_steps(dc: str) -> list[tuple[str, str]]:
     return [
         ("Update OS packages", "sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --with-new-pkgs"),
-        ("Pull latest Docker images", f"sudo bash -c '{LOAD_SECRETS}; cd {COMPOSE_DIR} && {dc} pull'"),
-        ("Run database migrations", f"sudo bash -c '{LOAD_SECRETS}; cd {COMPOSE_DIR} && {dc} run --rm migrations'"),
-        ("Restart Docker services", f"sudo bash -c '{LOAD_SECRETS}; cd {COMPOSE_DIR} && {dc} up -d'"),
+        ("Pull latest Docker images", f"sudo -u agent HOME=/home/agent bash -c 'cd {COMPOSE_DIR} && {dc} pull'"),
+        ("Run database migrations", f"sudo -u agent HOME=/home/agent bash -c 'cd {COMPOSE_DIR} && {dc} run --rm migrations'"),
+        ("Restart Docker services", f"sudo -u agent HOME=/home/agent bash -c 'cd {COMPOSE_DIR} && {dc} up -d'"),
         ("Fix venv permissions", "sudo chown -R agent:agent /home/agent/.venv && sudo chmod -R u+w /home/agent/.venv"),
         ("Upgrade supervisor package", "sudo -u agent /home/agent/.venv/bin/pip install -e /home/agent/aquarco/supervisor/python/"),
         ("Lock venv", "sudo chmod -R a-w /home/agent/.venv/lib/"),

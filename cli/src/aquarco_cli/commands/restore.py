@@ -8,7 +8,7 @@ from pathlib import Path
 import typer
 
 from aquarco_cli.console import print_error, print_info, print_success, print_warning
-from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, VagrantError, VagrantHelper, get_compose_prefix
+from aquarco_cli.vagrant import COMPOSE_DIR, VagrantError, VagrantHelper, get_compose_prefix
 
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
@@ -39,13 +39,20 @@ def restore_db(vagrant: VagrantHelper, src: Path) -> bool:
         return False
     try:
         sql = sql_file.read_text()
-        # sudo -u agent: required to source /etc/aquarco/docker-secrets.env (root:agent 640).
-        # sudo docker:   required because agent is not in the docker group;
-        #                provision.sh grants agent NOPASSWD sudo for /usr/bin/docker.
+        # Drop the aquarco schema for a clean slate so CREATE TABLE/SCHEMA in the
+        # dump don't collide with migration-created objects.  Disable FK triggers
+        # via session_replication_role so the circular stages↔tasks FK dependency
+        # doesn't block the COPY statements (pg_dump adds FKs after data).
+        preamble = (
+            "DROP SCHEMA IF EXISTS aquarco CASCADE;\n"
+            "SET session_replication_role = 'replica';\n"
+        )
+        dc = get_compose_prefix(vagrant)
         vagrant.ssh(
             f"sudo -u agent HOME=/home/agent bash -c "
-            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && sudo docker compose exec -T postgres psql -U aquarco aquarco'",
-            input=sql,
+            f"'cd {COMPOSE_DIR} && {dc}"
+            f" exec -T postgres psql -U aquarco aquarco'",
+            input=preamble + sql,
         )
         print_success(f"Database ← {sql_file}")
     except (VagrantError, subprocess.CalledProcessError, OSError) as exc:
@@ -55,12 +62,15 @@ def restore_db(vagrant: VagrantHelper, src: Path) -> bool:
     # Reset all repos to 'pending' so the clone worker re-verifies them on this VM.
     # Safe even if dirs already exist: clone_worker skips repos with a valid .git dir.
     try:
+        dc = get_compose_prefix(vagrant)
+        reset_sql = (
+            "UPDATE aquarco.repositories SET clone_status = 'pending', error_message = NULL "
+            "WHERE clone_status IN ('ready', 'error');\n"
+        )
         vagrant.ssh(
             f"sudo -u agent HOME=/home/agent bash -c "
-            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && sudo docker compose exec -T postgres psql -U aquarco aquarco "
-            f"-c \"UPDATE aquarco.repositories SET clone_status = '\\''pending'\\'',"
-            f" error_message = NULL WHERE clone_status IN ('\\''ready'\\'',"
-            f" '\\''error'\\'');\"'",
+            f"'cd {COMPOSE_DIR} && {dc} exec -T postgres psql -U aquarco aquarco'",
+            input=reset_sql,
         )
         print_success("  Reset repository clone statuses to pending")
     except (VagrantError, subprocess.CalledProcessError, OSError):
@@ -75,8 +85,7 @@ def run_migrations(vagrant: VagrantHelper) -> bool:
     dc = get_compose_prefix(vagrant)
     try:
         vagrant.ssh(
-            f"sudo -u agent HOME=/home/agent bash -c "
-            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && {dc} run --rm migrations'",
+            f"sudo -u agent HOME=/home/agent bash -c 'cd {COMPOSE_DIR} && {dc} run --rm migrations'",
             stream=True,
         )
         print_success("Migrations applied")

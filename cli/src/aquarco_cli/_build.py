@@ -5,4 +5,5 @@ patches this file to ``"production"`` so that ``aquarco update`` is
 disabled for public installs.
 """
 
-BUILD_TYPE: str = "development"
+import os
+BUILD_TYPE: str = os.environ.get("AQUARCO_BUILD_TYPE", "development")

@@ -19,9 +19,20 @@ from aquarco_cli.config import get_config
 COMPOSE_DIR = "/home/agent/aquarco/docker"
 
 #: Shell snippet that exports secrets from the provisioned env file.
-#: Required before any ``docker compose`` invocation because compose.yml
-#: declares POSTGRES_PASSWORD and DATABASE_URL as required variables.
+#: Use only for non-compose commands (e.g. supervisor CLI). For ``docker compose``
+#: invocations prefer ``COMPOSE_ENV_FLAGS`` which passes secrets directly via
+#: ``--env-file`` and survives the sudo environment reset.
 LOAD_SECRETS = "set -a; . /etc/aquarco/docker-secrets.env; . /home/agent/aquarco/docker/versions.env; set +a"
+
+#: ``docker compose --env-file`` flags that pass secrets and version pins directly
+#: to compose without relying on shell environment inheritance through sudo.
+#: The inner ``sudo docker`` resets the environment, so env vars exported by
+#: LOAD_SECRETS are stripped before compose reads the compose file. Using
+#: ``--env-file`` bypasses this because compose reads the files itself as root.
+COMPOSE_ENV_FLAGS = (
+    "--env-file /etc/aquarco/docker-secrets.env"
+    " --env-file /home/agent/aquarco/docker/versions.env"
+)
 
 #: Shell snippet that exports the supervisor's host-side secrets (DATABASE_URL
 #: pointing to localhost, API keys, etc.).  Used by ``aquarco config`` and any
@@ -115,7 +126,8 @@ def get_compose_prefix(vagrant: "VagrantHelper") -> str:
         env = (result.stdout or "").strip()
     except Exception:
         env = "development"
-    return "sudo docker compose -f compose.prod.yml" if env == "production" else "sudo docker compose"
+    base = "docker compose -f compose.prod.yml" if env == "production" else "docker compose"
+    return f"{base} {COMPOSE_ENV_FLAGS}"
 
 
 class VagrantHelper:

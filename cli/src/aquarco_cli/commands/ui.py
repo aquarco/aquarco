@@ -8,7 +8,7 @@ import typer
 
 from aquarco_cli.config import get_config
 from aquarco_cli.console import print_error, print_info, print_success
-from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, VagrantHelper, get_compose_prefix
+from aquarco_cli.vagrant import COMPOSE_DIR, VagrantHelper, get_compose_prefix
 
 app = typer.Typer(
     help="Start or stop the Aquarco web UI.",
@@ -33,7 +33,7 @@ def _start_and_open(
 ) -> None:
     """Start compose services, print URL, and optionally open browser."""
     dc = get_compose_prefix(vagrant)
-    cmd = f"sudo bash -c '{LOAD_SECRETS}; cd {COMPOSE_DIR} && {dc} up -d {services}'"
+    cmd = f"sudo -u agent HOME=/home/agent bash -c 'cd {COMPOSE_DIR} && {dc} up -d {services}'"
     try:
         vagrant.ssh(cmd, stream=True)
     except Exception as exc:
@@ -120,7 +120,7 @@ def stop() -> None:
 
     print_info("Stopping UI services...")
     dc = get_compose_prefix(vagrant)
-    cmd = f"sudo bash -c '{LOAD_SECRETS}; cd {COMPOSE_DIR} && {dc} stop web adminer'"
+    cmd = f"sudo -u agent HOME=/home/agent bash -c 'cd {COMPOSE_DIR} && {dc} stop web adminer'"
     try:
         vagrant.ssh(cmd, stream=True)
     except Exception as exc:

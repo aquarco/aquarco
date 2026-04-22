@@ -9,7 +9,7 @@ from pathlib import Path
 import typer
 
 from aquarco_cli.console import print_error, print_info, print_success, print_warning
-from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, VagrantError, VagrantHelper
+from aquarco_cli.vagrant import COMPOSE_DIR, COMPOSE_ENV_FLAGS, VagrantError, VagrantHelper
 
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
@@ -29,16 +29,22 @@ _CRED_FILES = {
 def _backup_db(vagrant: VagrantHelper, dest: Path) -> bool:
     """Stream pg_dump from the postgres container to a file on the host."""
     try:
-        # sudo -u agent: required to source /etc/aquarco/docker-secrets.env (root:agent 640).
-        # sudo docker:   required because agent is not in the docker group;
-        #                provision.sh grants agent NOPASSWD sudo for /usr/bin/docker.
         result = vagrant.ssh(
             f"sudo -u agent HOME=/home/agent bash -c "
-            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && sudo docker compose exec -T postgres pg_dump --disable-triggers -U aquarco aquarco'",
+            f"'cd {COMPOSE_DIR} && docker compose {COMPOSE_ENV_FLAGS}"
+            f" exec -T postgres pg_dump -U aquarco aquarco'",
             stream=False,
         )
+        # vagrant ssh -c mixes SSH session-management tokens into stdout.
+        # Strip lines like "\restrict <token>" and "\unrestrict <token>" so the
+        # saved file is clean SQL that psql and other tools can process without
+        # hitting spurious backslash-command errors.
+        sql = "\n".join(
+            line for line in result.stdout.splitlines()
+            if not line.startswith(("\\restrict ", "\\unrestrict "))
+        ) + "\n"
         out = dest / "aquarco.sql"
-        out.write_text(result.stdout)
+        out.write_text(sql)
         out.chmod(0o600)
         print_success(f"Database → {out}")
         return True
