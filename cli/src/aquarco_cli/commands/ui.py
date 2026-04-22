@@ -7,7 +7,7 @@ import webbrowser
 import typer
 
 from aquarco_cli.config import get_config
-from aquarco_cli.console import print_error, print_info, print_success
+from aquarco_cli.console import print_error, print_info, print_success, print_warning
 from aquarco_cli.vagrant import COMPOSE_DIR, VagrantHelper, get_compose_prefix
 
 app = typer.Typer(
@@ -96,6 +96,24 @@ def db(
         f"http://localhost:{port}/adminer/",
         no_open,
     )
+
+    # Read the DB password from the VM secrets file and print Adminer credentials.
+    try:
+        result = vagrant.ssh(
+            "sudo grep '^POSTGRES_PASSWORD=' /etc/aquarco/docker-secrets.env"
+        )
+        password = (result.stdout or "").strip().removeprefix("POSTGRES_PASSWORD=")
+    except Exception:
+        password = None
+
+    print_info("Adminer credentials:")
+    print_info("  Server:   postgres")
+    print_info("  Database: aquarco")
+    print_info("  Username: aquarco")
+    if password:
+        print_info(f"  Password: {password}")
+    else:
+        print_warning("  Password: (could not read — check /etc/aquarco/docker-secrets.env on VM)")
 
 
 @app.command()
