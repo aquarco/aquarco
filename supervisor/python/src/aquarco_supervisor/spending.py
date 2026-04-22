@@ -1,8 +1,8 @@
 """NDJSON spending parser for Claude CLI output.
 
 Parses raw_output or live_output NDJSON streams to extract per-turn token
-usage and compute running cost totals. Follows the same four-bucket model
-as claude-spend: Input, Cache Writes, Cache Reads, Output.
+usage and compute running cost totals. Follows the four-bucket model:
+Input, Cache Writes, Cache Reads, Output.
 
 When a ``type: "result"`` line is present, its ``total_cost_usd`` is used as
 the authoritative cost.  Otherwise, cost is estimated using model pricing.
@@ -15,15 +15,24 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-# Model pricing per million tokens (same table as claude-spend)
+# Model pricing per million tokens.
+# Source: https://platform.claude.com/docs/en/about-claude/pricing
 _MODEL_PRICING: dict[str, dict[str, float]] = {
+    # Opus 4.x (4.5, 4.6, 4.7) — $5/$25
     "opus-4.5": {"input": 5, "output": 25, "cache_write": 6.25, "cache_read": 0.50},
     "opus-4.6": {"input": 5, "output": 25, "cache_write": 6.25, "cache_read": 0.50},
+    "opus-4.7": {"input": 5, "output": 25, "cache_write": 6.25, "cache_read": 0.50},
+    # Opus 4.0, 4.1 — $15/$75
     "opus-4.0": {"input": 15, "output": 75, "cache_write": 18.75, "cache_read": 1.50},
     "opus-4.1": {"input": 15, "output": 75, "cache_write": 18.75, "cache_read": 1.50},
+    # Sonnet (all versions) — $3/$15
     "sonnet": {"input": 3, "output": 15, "cache_write": 3.75, "cache_read": 0.30},
+    # Haiku 4.5 — $1/$5
     "haiku-4.5": {"input": 1, "output": 5, "cache_write": 1.25, "cache_read": 0.10},
+    # Haiku 3.5 — $0.80/$4
     "haiku-3.5": {"input": 0.80, "output": 4, "cache_write": 1.00, "cache_read": 0.08},
+    # Haiku 3 — $0.25/$1.25
+    "haiku-3": {"input": 0.25, "output": 1.25, "cache_write": 0.30, "cache_read": 0.03},
 }
 
 # Default pricing (Sonnet) for unknown models
@@ -34,13 +43,17 @@ def get_pricing(model: str) -> dict[str, float]:
     """Return pricing dict for a model name string."""
     lower = model.lower()
     if "opus" in lower:
+        if "4-7" in lower or "4.7" in lower:
+            return _MODEL_PRICING["opus-4.7"]
         if "4-6" in lower or "4.6" in lower or "4-5" in lower or "4.5" in lower:
             return _MODEL_PRICING["opus-4.5"]
         return _MODEL_PRICING["opus-4.0"]
     if "haiku" in lower:
         if "4-5" in lower or "4.5" in lower:
             return _MODEL_PRICING["haiku-4.5"]
-        return _MODEL_PRICING["haiku-3.5"]
+        if "3-5" in lower or "3.5" in lower:
+            return _MODEL_PRICING["haiku-3.5"]
+        return _MODEL_PRICING["haiku-3"]
     return _DEFAULT_PRICING
 
 

@@ -21,6 +21,17 @@
 ### Test Coverage
 - **26 new tests** added for the new Adminer credentials display (happy path + unreadable secrets fallback), updated 10 existing tests in `TestGetComposePrefix` for the new prefix format, updated assertions in `TestBackupDatabase` and `TestRestoreDatabase` for new backup file format (trailing newline preservation, --env-file flag insertion)
 - All 441 CLI tests passing with 89% coverage
+## [2026-04-22] — Improve `aquarco --version` output and short flag (#160)
+
+### Breaking
+- **CLI short flag for `--version` changed from `-V` to `-v`** in `cli/src/aquarco_cli/main.py`. Any scripts invoking `aquarco -V` must be updated to `aquarco -v` (or use the long form `aquarco --version`). The old `-V` flag is now rejected with a non-zero exit.
+
+### Changed
+- **`aquarco --version` dev-mode output** (`cli/src/aquarco_cli/main.py`) — development builds (`BUILD_TYPE == "development"`) now resolve the current aquarco branch and short commit hash at runtime and print `aquarco local-dev <branch>@<hash>` instead of the obsolete static `__version__` string. Git lookups are anchored to the installed `aquarco_cli` package directory so the output always describes the aquarco checkout regardless of the user's current working directory. Falls back to `aquarco local-dev unknown` when git is unavailable, the package directory is not inside a git repo, or the git output is empty. Production builds continue to print the static `__version__`.
+- **`__version__` reconciled with `pyproject.toml`** (`cli/src/aquarco_cli/__init__.py`) — downgraded from `1.0.0rc2` to `1.0.0rc1` so the module constant matches the installed package metadata. Release builds continue to patch `__version__` from the git tag in `.github/workflows/release.yml`.
+
+### Test Coverage
+- 6 new tests in `cli/tests/test_main.py` covering the new `-v` short flag, rejection of the old `-V` flag, dev-mode with git available, dev-mode with git missing (`FileNotFoundError`), dev-mode with git erroring (`CalledProcessError`), dev-mode with empty git output, dev-mode cwd anchoring to the package directory, and production-mode output.
 
 ## [2026-04-22] — Fix PostgreSQL version mismatch detection in CLI
 
