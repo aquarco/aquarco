@@ -75,6 +75,26 @@ class TestMainApp:
         assert result.exit_code == 0
         assert "aquarco local-dev unknown" in result.output
 
+    def test_version_dev_mode_git_oserror(self, monkeypatch):
+        """Development build where git raises a generic OSError (permissions, ENOEXEC, etc.)
+        still falls back to `local-dev unknown`.
+
+        ``_get_dev_version`` catches ``OSError`` in addition to the more specific
+        ``FileNotFoundError`` / ``CalledProcessError``. This test exercises that
+        broader safety-net branch directly.
+        """
+        monkeypatch.setattr("aquarco_cli.main.BUILD_TYPE", "development")
+
+        def fake_check_output(cmd, *args, **kwargs):
+            raise OSError("permission denied")
+
+        monkeypatch.setattr(
+            "aquarco_cli.main.subprocess.check_output", fake_check_output
+        )
+        result = runner.invoke(app, ["--version"])
+        assert result.exit_code == 0
+        assert "aquarco local-dev unknown" in result.output
+
     def test_version_dev_mode_git_empty_output(self, monkeypatch):
         """Development build where git returns empty branch/commit falls back to `local-dev unknown`.
 
