@@ -39,9 +39,12 @@ def restore_db(vagrant: VagrantHelper, src: Path) -> bool:
         return False
     try:
         sql = sql_file.read_text()
+        # sudo -u agent: required to source /etc/aquarco/docker-secrets.env (root:agent 640).
+        # sudo docker:   required because agent is not in the docker group;
+        #                provision.sh grants agent NOPASSWD sudo for /usr/bin/docker.
         vagrant.ssh(
             f"sudo -u agent HOME=/home/agent bash -c "
-            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose exec -T postgres psql -U aquarco aquarco'",
+            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && sudo docker compose exec -T postgres psql -U aquarco aquarco'",
             input=sql,
         )
         print_success(f"Database ← {sql_file}")
@@ -54,7 +57,7 @@ def restore_db(vagrant: VagrantHelper, src: Path) -> bool:
     try:
         vagrant.ssh(
             f"sudo -u agent HOME=/home/agent bash -c "
-            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose exec -T postgres psql -U aquarco aquarco "
+            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && sudo docker compose exec -T postgres psql -U aquarco aquarco "
             f"-c \"UPDATE aquarco.repositories SET clone_status = '\\''pending'\\'',"
             f" error_message = NULL WHERE clone_status IN ('\\''ready'\\'',"
             f" '\\''error'\\'');\"'",

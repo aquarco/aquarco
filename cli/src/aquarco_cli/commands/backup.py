@@ -29,9 +29,12 @@ _CRED_FILES = {
 def _backup_db(vagrant: VagrantHelper, dest: Path) -> bool:
     """Stream pg_dump from the postgres container to a file on the host."""
     try:
+        # sudo -u agent: required to source /etc/aquarco/docker-secrets.env (root:agent 640).
+        # sudo docker:   required because agent is not in the docker group;
+        #                provision.sh grants agent NOPASSWD sudo for /usr/bin/docker.
         result = vagrant.ssh(
             f"sudo -u agent HOME=/home/agent bash -c "
-            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && docker compose exec -T postgres pg_dump --disable-triggers -U aquarco aquarco'",
+            f"'{LOAD_SECRETS}; cd {COMPOSE_DIR} && sudo docker compose exec -T postgres pg_dump --disable-triggers -U aquarco aquarco'",
             stream=False,
         )
         out = dest / "aquarco.sql"

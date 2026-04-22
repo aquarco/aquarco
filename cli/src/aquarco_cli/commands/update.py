@@ -17,7 +17,7 @@ from aquarco_cli.graphql_client import (
     QUERY_DRAIN_STATUS,
     GraphQLClient,
 )
-from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, VagrantError, VagrantHelper, get_compose_prefix
+from aquarco_cli.vagrant import COMPOSE_DIR, LOAD_SECRETS, VagrantError, VagrantHelper, get_compose_prefix, get_postgres_version_mismatch
 
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
@@ -142,6 +142,20 @@ def update(
 
     if not vagrant.is_running():
         print_error("VM is not running. Start it with 'aquarco init' first.")
+        raise typer.Exit(code=1)
+
+    # Block if the pgdata volume's PostgreSQL version differs from the configured image
+    # version. Running `docker compose up` in that state would try to start a new
+    # major-version image against incompatible on-disk data and corrupt the cluster.
+    mismatch = get_postgres_version_mismatch(vagrant)
+    if mismatch:
+        data_ver, conf_ver = mismatch
+        print_error(
+            f"PostgreSQL version mismatch: data directory is version {data_ver} "
+            f"but the configured image is version {conf_ver}. "
+            f"To upgrade, run:\n\n"
+            f"  aquarco destroy && aquarco init && aquarco restore\n"
+        )
         raise typer.Exit(code=1)
 
     steps = _build_steps(get_compose_prefix(vagrant))
