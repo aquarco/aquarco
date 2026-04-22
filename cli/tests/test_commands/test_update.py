@@ -215,6 +215,28 @@ class TestStepsDefinition:
         restart_idx = step_names.index("Restart supervisor service")
         assert fix_idx < upgrade_idx < lock_idx < restart_idx
 
+    def test_production_prefix_in_steps(self):
+        """Steps generated with production prefix must use compose.prod.yml."""
+        STEPS = _get_steps("sudo docker compose -f compose.prod.yml")
+        docker_steps = [(n, c) for n, c in STEPS if "docker compose" in c]
+        assert len(docker_steps) > 0, "Should have at least one docker compose step"
+        for name, cmd in docker_steps:
+            assert "compose.prod.yml" in cmd, (
+                f"Step '{name}' should use prod compose file"
+            )
+
+    def test_production_and_dev_steps_same_count(self):
+        """Production and dev step lists must have the same number of steps."""
+        dev_steps = _get_steps("sudo docker compose")
+        prod_steps = _get_steps("sudo docker compose -f compose.prod.yml")
+        assert len(dev_steps) == len(prod_steps)
+
+    def test_production_and_dev_step_names_match(self):
+        """Step names must be identical regardless of compose prefix."""
+        dev_names = [n for n, _ in _get_steps("sudo docker compose")]
+        prod_names = [n for n, _ in _get_steps("sudo docker compose -f compose.prod.yml")]
+        assert dev_names == prod_names
+
 
 class TestLockVenvExecution:
     """Tests that the lock venv step is actually executed via SSH."""

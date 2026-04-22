@@ -346,8 +346,8 @@ class TestDrainModeThreeWayPrompt:
         result = runner.invoke(app, ["update"])
         assert result.exit_code == 0
         assert "aborted" in result.output.lower()
-        # get_compose_prefix makes 1 SSH call, but no update step SSH calls
-        assert mock_vagrant.ssh.call_count <= 1
+        # get_compose_prefix makes exactly 1 SSH call, but no update step SSH calls
+        assert mock_vagrant.ssh.call_count == 1
 
     @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update.Prompt.ask", return_value="plan")
@@ -366,8 +366,8 @@ class TestDrainModeThreeWayPrompt:
 
         assert result.exit_code == 0
         assert "drain mode enabled" in result.output.lower()
-        # get_compose_prefix makes 1 SSH call, but no update step SSH calls
-        assert mock_vagrant.ssh.call_count <= 1
+        # get_compose_prefix makes exactly 1 SSH call, but no update step SSH calls
+        assert mock_vagrant.ssh.call_count == 1
 
     @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update.Prompt.ask", return_value="yes")
@@ -401,8 +401,8 @@ class TestDrainModePendingPrompt:
         result = runner.invoke(app, ["update"])
         assert result.exit_code == 0
         assert "keeping" in result.output.lower() or "auto-restart" in result.output.lower()
-        # get_compose_prefix makes 1 SSH call, but no update step SSH calls
-        assert mock_vagrant.ssh.call_count <= 1
+        # get_compose_prefix makes exactly 1 SSH call, but no update step SSH calls
+        assert mock_vagrant.ssh.call_count == 1
 
     @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update.Prompt.ask", return_value="now")
@@ -441,8 +441,8 @@ class TestDrainModePendingPrompt:
 
         assert result.exit_code == 0
         assert "cancel" in result.output.lower() or "normal operation" in result.output.lower()
-        # get_compose_prefix makes 1 SSH call, but no update step SSH calls
-        assert mock_vagrant.ssh.call_count <= 1
+        # get_compose_prefix makes exactly 1 SSH call, but no update step SSH calls
+        assert mock_vagrant.ssh.call_count == 1
 
     @patch("aquarco_cli.commands.update.get_postgres_version_mismatch", return_value=None)
     @patch("aquarco_cli.commands.update.Prompt.ask", return_value="cancel")
