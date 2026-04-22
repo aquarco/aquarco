@@ -9,7 +9,7 @@ from pathlib import Path
 import typer
 
 from aquarco_cli.console import print_error, print_info, print_success, print_warning
-from aquarco_cli.vagrant import COMPOSE_DIR, COMPOSE_ENV_FLAGS, VagrantError, VagrantHelper
+from aquarco_cli.vagrant import COMPOSE_DIR, VagrantError, VagrantHelper, get_compose_prefix
 
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
@@ -29,16 +29,19 @@ _CRED_FILES = {
 def _backup_db(vagrant: VagrantHelper, dest: Path) -> bool:
     """Stream pg_dump from the postgres container to a file on the host."""
     try:
+        dc = get_compose_prefix(vagrant)
         result = vagrant.ssh(
             f"sudo -u agent HOME=/home/agent bash -c "
-            f"'cd {COMPOSE_DIR} && docker compose {COMPOSE_ENV_FLAGS}"
+            f"'cd {COMPOSE_DIR} && {dc}"
             f" exec -T postgres pg_dump -U aquarco aquarco'",
             stream=False,
         )
         # vagrant ssh -c mixes SSH session-management tokens into stdout.
         # Strip lines like "\restrict <token>" and "\unrestrict <token>" so the
         # saved file is clean SQL that psql and other tools can process without
-        # hitting spurious backslash-command errors.
+        # hitting spurious backslash-command errors. We preserve the trailing
+        # newline from pg_dump so the written file is a well-formed text file
+        # (POSIX convention: text files end with \n).
         sql = "\n".join(
             line for line in result.stdout.splitlines()
             if not line.startswith(("\\restrict ", "\\unrestrict "))

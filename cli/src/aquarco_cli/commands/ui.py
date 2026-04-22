@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import subprocess
 import webbrowser
 
 import typer
 
 from aquarco_cli.config import get_config
 from aquarco_cli.console import print_error, print_info, print_success, print_warning
-from aquarco_cli.vagrant import COMPOSE_DIR, VagrantHelper, get_compose_prefix
+from aquarco_cli.vagrant import COMPOSE_DIR, VagrantError, VagrantHelper, get_compose_prefix
 
 app = typer.Typer(
     help="Start or stop the Aquarco web UI.",
@@ -87,7 +88,13 @@ def web(
 def db(
     no_open: bool = typer.Option(False, "--no-open", help="Do not open the browser"),
 ) -> None:
-    """Start Adminer (database UI) and open it in the browser."""
+    """Start Adminer (database UI) and open it in the browser.
+
+    After starting the service, the Adminer connection credentials
+    (server, database, username, password) are printed to the terminal so the
+    user can paste them into the Adminer login form. The password is printed
+    in plaintext — this command is intended for local developer VMs only.
+    """
     port = get_config().port
     vagrant = _ensure_running()
     _start_and_open(
@@ -98,12 +105,16 @@ def db(
     )
 
     # Read the DB password from the VM secrets file and print Adminer credentials.
+    # The password is printed in plaintext to ease the local developer workflow
+    # (there is no other way for the user to learn it without SSH'ing into the VM).
+    # This is only meaningful on a local developer VM; be mindful of terminal
+    # recordings and screen shares when using this command.
     try:
         result = vagrant.ssh(
             "sudo grep '^POSTGRES_PASSWORD=' /etc/aquarco/docker-secrets.env"
         )
         password = (result.stdout or "").strip().removeprefix("POSTGRES_PASSWORD=")
-    except Exception:
+    except (VagrantError, subprocess.CalledProcessError, OSError):
         password = None
 
     print_info("Adminer credentials:")

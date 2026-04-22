@@ -21,14 +21,14 @@ COMPOSE_DIR = "/home/agent/aquarco/docker"
 #: Shell snippet that exports secrets from the provisioned env file.
 #: Use only for non-compose commands (e.g. supervisor CLI). For ``docker compose``
 #: invocations prefer ``COMPOSE_ENV_FLAGS`` which passes secrets directly via
-#: ``--env-file`` and survives the sudo environment reset.
+#: ``--env-file`` and does not rely on inherited shell environment.
 LOAD_SECRETS = "set -a; . /etc/aquarco/docker-secrets.env; . /home/agent/aquarco/docker/versions.env; set +a"
 
 #: ``docker compose --env-file`` flags that pass secrets and version pins directly
-#: to compose without relying on shell environment inheritance through sudo.
-#: The inner ``sudo docker`` resets the environment, so env vars exported by
-#: LOAD_SECRETS are stripped before compose reads the compose file. Using
-#: ``--env-file`` bypasses this because compose reads the files itself as root.
+#: to compose without relying on shell environment inheritance. Provision.sh runs
+#: ``usermod -aG docker agent`` so the agent user can invoke ``docker`` directly
+#: (no inner sudo needed). Using ``--env-file`` keeps secrets out of the process
+#: environment and survives any wrapper that resets env vars (e.g. sudo).
 COMPOSE_ENV_FLAGS = (
     "--env-file /etc/aquarco/docker-secrets.env"
     " --env-file /home/agent/aquarco/docker/versions.env"
@@ -67,8 +67,9 @@ def get_postgres_version_mismatch(vagrant: "VagrantHelper") -> tuple[str, str] |
     """
     try:
         # Read PG_VERSION from the named Docker volume.
-        # sudo is required because the agent user is not in the docker group;
-        # provision.sh grants agent NOPASSWD sudo for /usr/bin/docker.
+        # This runs via `vagrant ssh -c` as the vagrant user (not agent), and the
+        # vagrant user is not in the docker group, so `sudo docker` is required.
+        # provision.sh grants vagrant NOPASSWD sudo for /usr/bin/docker.
         r = vagrant.ssh(
             "sudo docker run --rm -v aquarco_pgdata:/pgdata:ro alpine "
             "sh -c 'cat /pgdata/PG_VERSION 2>/dev/null || true'",
@@ -113,13 +114,15 @@ def get_compose_prefix(vagrant: "VagrantHelper") -> str:
     Production VMs use pre-built registry images via ``compose.prod.yml``.
     Dev VMs build from the source tree via the default ``compose.yml``.
 
-    The returned string always includes ``sudo`` before ``docker`` because the
-    ``agent`` user is not in the docker group on the VM. provision.sh grants
-    agent NOPASSWD sudo for ``/usr/bin/docker`` instead (see
-    ``/etc/sudoers.d/agent``). CLI commands run Docker operations as agent (via
-    ``sudo -u agent bash -c '...'``) so they can source secrets from
-    ``/etc/aquarco/docker-secrets.env`` (owned root:agent 640). The inner
-    ``sudo docker`` is therefore required to reach the Docker socket.
+    The returned string calls ``docker`` directly (no ``sudo``) because
+    ``provision.sh`` adds the ``agent`` user to the ``docker`` group
+    (``usermod -aG docker agent``), so the socket is reachable without elevation.
+    The prefix appends ``COMPOSE_ENV_FLAGS`` (two ``--env-file`` flags) so that
+    secrets from ``/etc/aquarco/docker-secrets.env`` and version pins from
+    ``versions.env`` are read directly by compose rather than inherited through
+    the shell — this survives any wrapper that resets the process environment
+    (such as ``sudo -u agent``, which CLI commands still use for file ownership
+    reasons even though docker itself no longer needs sudo).
     """
     try:
         result = vagrant.ssh("sudo cat /etc/aquarco/env 2>/dev/null || echo development")

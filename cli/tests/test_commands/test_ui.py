@@ -2,13 +2,42 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
 from aquarco_cli.main import app
+from aquarco_cli.vagrant import VagrantError
 
 runner = CliRunner()
+
+
+def _make_db_ssh_side_effect(password_stdout: str | None = "POSTGRES_PASSWORD=s3cret"):
+    """Return an ssh.side_effect that mimics the three SSH calls made by `ui db`.
+
+    The calls in order are:
+      1. get_compose_prefix — reads /etc/aquarco/env
+      2. docker compose up -d adminer postgres
+      3. sudo grep POSTGRES_PASSWORD=... (only reached if the first two succeed)
+
+    If ``password_stdout`` is None the third call raises VagrantError so the
+    fallback warning path can be exercised.
+    """
+    calls = [
+        # 1. get_compose_prefix probes env
+        MagicMock(stdout="development\n", stderr=""),
+        # 2. compose up (stdout not used)
+        MagicMock(stdout="", stderr=""),
+    ]
+
+    def _side_effect(cmd, *args, **kwargs):
+        if "/etc/aquarco/docker-secrets.env" in cmd and "grep" in cmd:
+            if password_stdout is None:
+                raise VagrantError("secrets file missing")
+            return MagicMock(stdout=password_stdout, stderr="")
+        return calls.pop(0) if calls else MagicMock(stdout="", stderr="")
+
+    return _side_effect
 
 
 class TestUiStart:
@@ -77,9 +106,46 @@ class TestUiDb:
         mock_config.return_value.port = 9090
         mock_vagrant = mock_cls.return_value
         mock_vagrant.is_running.return_value = True
+        mock_vagrant.ssh.side_effect = _make_db_ssh_side_effect()
         result = runner.invoke(app, ["ui", "db", "--no-open"])
         assert result.exit_code == 0
         assert "9090/adminer" in result.output
+
+    @patch("aquarco_cli.commands.ui.webbrowser.open")
+    @patch("aquarco_cli.commands.ui.get_config")
+    @patch("aquarco_cli.commands.ui.VagrantHelper")
+    def test_ui_db_prints_adminer_credentials(self, mock_cls, mock_config, mock_browser):
+        """`ui db` must print Server/Database/Username/Password so the user can
+        paste them into the Adminer login form."""
+        mock_config.return_value.port = 8080
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_vagrant.ssh.side_effect = _make_db_ssh_side_effect(
+            password_stdout="POSTGRES_PASSWORD=s3cret",
+        )
+        result = runner.invoke(app, ["ui", "db", "--no-open"])
+        assert result.exit_code == 0
+        assert "Server:   postgres" in result.output
+        assert "Database: aquarco" in result.output
+        assert "Username: aquarco" in result.output
+        assert "Password: s3cret" in result.output
+
+    @patch("aquarco_cli.commands.ui.webbrowser.open")
+    @patch("aquarco_cli.commands.ui.get_config")
+    @patch("aquarco_cli.commands.ui.VagrantHelper")
+    def test_ui_db_warns_when_password_unreadable(self, mock_cls, mock_config, mock_browser):
+        """When the secrets file read fails, the command warns but does not exit."""
+        mock_config.return_value.port = 8080
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_vagrant.ssh.side_effect = _make_db_ssh_side_effect(password_stdout=None)
+        result = runner.invoke(app, ["ui", "db", "--no-open"])
+        assert result.exit_code == 0
+        # Credentials block still prints the known fields...
+        assert "Server:   postgres" in result.output
+        assert "Username: aquarco" in result.output
+        # ...and a warning replaces the password line.
+        assert "could not read" in result.output.lower()
 
 
 class TestUiApi:

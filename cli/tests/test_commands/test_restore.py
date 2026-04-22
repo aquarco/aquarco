@@ -123,7 +123,12 @@ class TestRestoreDatabase:
         runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
 
         cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
-        assert any("docker compose exec -T postgres" in cmd for cmd in cmds)
+        # The compose prefix now includes --env-file flags between
+        # 'docker compose' and 'exec', so assert on the components separately.
+        assert any(
+            "docker compose" in cmd and "exec -T postgres" in cmd
+            for cmd in cmds
+        )
 
     @patch("aquarco_cli.commands.restore.VagrantHelper")
     def test_db_restore_runs_as_agent_user(self, mock_cls, tmp_path):
@@ -232,12 +237,18 @@ class TestLatestBackupFunction:
         assert result is None
 
 
-class TestRestoreSudoDocker:
-    """Verify all Docker commands in restore use 'sudo docker' (not bare 'docker')."""
+class TestRestoreComposeCommand:
+    """Verify Docker commands in restore use the new 'agent + --env-file' contract.
+
+    After the provision.sh change that adds agent to the docker group, the compose
+    prefix no longer prepends ``sudo docker``. Instead, compose is invoked as the
+    agent user (via the outer ``sudo -u agent``) and secrets are passed via
+    ``--env-file`` so they survive the environment reset performed by sudo.
+    """
 
     @patch("aquarco_cli.commands.restore.VagrantHelper")
-    def test_db_restore_uses_sudo_docker_compose(self, mock_cls, tmp_path):
-        """psql command must use 'sudo docker compose', not bare 'docker compose'."""
+    def test_db_restore_uses_docker_compose(self, mock_cls, tmp_path):
+        """psql command must invoke 'docker compose' (agent is in the docker group)."""
         backup_dir = _make_backup_dir(tmp_path)
         vagrant = _make_vagrant()
         mock_cls.return_value = vagrant
@@ -248,13 +259,17 @@ class TestRestoreSudoDocker:
         psql_cmds = [c for c in cmds if "psql" in c]
         assert len(psql_cmds) >= 1
         for cmd in psql_cmds:
-            assert "sudo docker compose" in cmd, (
-                f"Expected 'sudo docker compose' in restore command. Got: {cmd}"
+            assert "docker compose" in cmd, (
+                f"Expected 'docker compose' in restore command. Got: {cmd}"
+            )
+            # Inner 'sudo docker' was intentionally dropped — agent is in docker group now.
+            assert "sudo docker" not in cmd, (
+                f"Did not expect inner 'sudo docker' in restore command. Got: {cmd}"
             )
 
     @patch("aquarco_cli.commands.restore.VagrantHelper")
-    def test_db_restore_command_has_inner_sudo_docker(self, mock_cls, tmp_path):
-        """The restore SSH command wraps 'sudo docker' inside 'sudo -u agent bash -c'."""
+    def test_db_restore_command_runs_as_agent_with_env_files(self, mock_cls, tmp_path):
+        """The restore SSH command wraps 'docker compose --env-file ...' inside 'sudo -u agent bash -c'."""
         backup_dir = _make_backup_dir(tmp_path)
         vagrant = _make_vagrant()
         mock_cls.return_value = vagrant
@@ -265,11 +280,14 @@ class TestRestoreSudoDocker:
         psql_cmds = [c for c in cmds if "psql" in c]
         for cmd in psql_cmds:
             assert "sudo -u agent" in cmd
-            assert "sudo docker compose exec" in cmd
+            assert "docker compose" in cmd
+            # Secrets and version pins must be passed via --env-file to survive sudo's env reset.
+            assert "--env-file /etc/aquarco/docker-secrets.env" in cmd
+            assert "--env-file /home/agent/aquarco/docker/versions.env" in cmd
 
     @patch("aquarco_cli.commands.restore.VagrantHelper")
-    def test_migrations_use_sudo_docker_compose(self, mock_cls, tmp_path):
-        """Migration step in restore must use 'sudo docker compose'."""
+    def test_migrations_use_docker_compose(self, mock_cls, tmp_path):
+        """Migration step in restore must use 'docker compose' (no inner sudo)."""
         backup_dir = _make_backup_dir(tmp_path)
         vagrant = _make_vagrant()
         mock_cls.return_value = vagrant
@@ -279,8 +297,11 @@ class TestRestoreSudoDocker:
         cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
         migration_cmds = [c for c in cmds if "migrations" in c]
         for cmd in migration_cmds:
-            assert "sudo docker compose" in cmd, (
-                f"Expected 'sudo docker compose' in migration command. Got: {cmd}"
+            assert "docker compose" in cmd, (
+                f"Expected 'docker compose' in migration command. Got: {cmd}"
+            )
+            assert "sudo docker" not in cmd, (
+                f"Did not expect inner 'sudo docker' in migration command. Got: {cmd}"
             )
 
 
