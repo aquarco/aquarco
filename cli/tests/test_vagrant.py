@@ -256,6 +256,85 @@ class TestGetPostgresVersionMismatch:
         assert get_postgres_version_mismatch(self.helper) is None
 
 
+class TestGetPostgresVersionMismatchShellCommand:
+    """Tests for the shell command structure in get_postgres_version_mismatch().
+
+    These tests validate the corrected shell fallback (if/then/else instead of ||)
+    and the sudo docker pattern used in the PG_VERSION read.
+    """
+
+    def setup_method(self):
+        self.helper = VagrantHelper(vagrant_dir=Path("/fake/vagrant"))
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_first_ssh_uses_sudo_docker(self, mock_ssh):
+        """PG_VERSION read must use 'sudo docker run' (not bare 'docker')."""
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+        ]
+        get_postgres_version_mismatch(self.helper)
+        first_call_cmd = mock_ssh.call_args_list[0][0][0]
+        assert "sudo docker run" in first_call_cmd
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_second_ssh_uses_if_not_pipe_or(self, mock_ssh):
+        """Config version shell must use 'if ... then ... else' (not '||' fallback).
+
+        The original code used '||' which checked 'cut' exit status (always 0),
+        making the compose.yml fallback unreachable. The fix uses 'if ... -n'.
+        """
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+        ]
+        get_postgres_version_mismatch(self.helper)
+        second_call_cmd = mock_ssh.call_args_list[1][0][0]
+        assert "if " in second_call_cmd
+        assert '[ -n' in second_call_cmd
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_pg_version_read_mounts_volume_readonly(self, mock_ssh):
+        """PG_VERSION read uses ':ro' mount for safety."""
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+        ]
+        get_postgres_version_mismatch(self.helper)
+        first_call_cmd = mock_ssh.call_args_list[0][0][0]
+        assert ":ro" in first_call_cmd
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_conf_version_checks_versions_env_first(self, mock_ssh):
+        """Config version command must check versions.env before compose.yml."""
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+        ]
+        get_postgres_version_mismatch(self.helper)
+        second_call_cmd = mock_ssh.call_args_list[1][0][0]
+        assert "versions.env" in second_call_cmd
+        assert "compose.yml" in second_call_cmd
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_returns_none_when_pg_version_has_trailing_newlines(self, mock_ssh):
+        """PG_VERSION with extra whitespace/newlines should still work."""
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n\n\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+        ]
+        assert get_postgres_version_mismatch(self.helper) is None
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_conf_version_with_dash_suffix_other_than_alpine(self, mock_ssh):
+        """Suffixes like '18-bookworm' should also be stripped to '18'."""
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="18\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="18-bookworm\n", stderr=""),
+        ]
+        assert get_postgres_version_mismatch(self.helper) is None
+
+
 class TestGetComposePrefix:
     """Tests for get_compose_prefix()."""
 

@@ -232,6 +232,58 @@ class TestLatestBackupFunction:
         assert result is None
 
 
+class TestRestoreSudoDocker:
+    """Verify all Docker commands in restore use 'sudo docker' (not bare 'docker')."""
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_db_restore_uses_sudo_docker_compose(self, mock_cls, tmp_path):
+        """psql command must use 'sudo docker compose', not bare 'docker compose'."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        psql_cmds = [c for c in cmds if "psql" in c]
+        assert len(psql_cmds) >= 1
+        for cmd in psql_cmds:
+            assert "sudo docker compose" in cmd, (
+                f"Expected 'sudo docker compose' in restore command. Got: {cmd}"
+            )
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_db_restore_command_has_inner_sudo_docker(self, mock_cls, tmp_path):
+        """The restore SSH command wraps 'sudo docker' inside 'sudo -u agent bash -c'."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        psql_cmds = [c for c in cmds if "psql" in c]
+        for cmd in psql_cmds:
+            assert "sudo -u agent" in cmd
+            assert "sudo docker compose exec" in cmd
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_migrations_use_sudo_docker_compose(self, mock_cls, tmp_path):
+        """Migration step in restore must use 'sudo docker compose'."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
+        migration_cmds = [c for c in cmds if "migrations" in c]
+        for cmd in migration_cmds:
+            assert "sudo docker compose" in cmd, (
+                f"Expected 'sudo docker compose' in migration command. Got: {cmd}"
+            )
+
+
 class TestRestoreSelectiveFlags:
     @patch("aquarco_cli.commands.restore.VagrantHelper")
     def test_no_db_skips_database(self, mock_cls, tmp_path):
