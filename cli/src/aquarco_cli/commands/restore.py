@@ -43,8 +43,13 @@ def restore_db(vagrant: VagrantHelper, src: Path) -> bool:
         # dump don't collide with migration-created objects.  Disable FK triggers
         # via session_replication_role so the circular stages↔tasks FK dependency
         # doesn't block the COPY statements (pg_dump adds FKs after data).
+        # Drop yoyo tracking tables so the backup restores them from a clean slate —
+        # prevents stale migration history from a prior init run causing run_migrations
+        # to skip migrations that are needed to bring the schema up to date.
         preamble = (
             "DROP SCHEMA IF EXISTS aquarco CASCADE;\n"
+            "DROP TABLE IF EXISTS public._yoyo_migration, public._yoyo_log,"
+            " public._yoyo_version, public.yoyo_lock CASCADE;\n"
             "SET session_replication_role = 'replica';\n"
         )
         dc = get_compose_prefix(vagrant)
