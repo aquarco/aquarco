@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import subprocess
+
 import typer
 
 from aquarco_cli import __version__
+from aquarco_cli._build import BUILD_TYPE
 from aquarco_cli.commands import auth, backup, config, init, repos, restore, run, status, ui, update, vm
 
 app = typer.Typer(
@@ -15,16 +18,44 @@ app = typer.Typer(
 )
 
 
+def _get_dev_version() -> str:
+    """Return a development version string of the form ``local-dev <branch>@<hash>``.
+
+    Calls ``git`` at runtime to resolve the current branch and short commit hash.
+    Falls back to ``local-dev unknown`` if git is not available or the current
+    working directory is not inside a git repository.
+    """
+    try:
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        if not branch or not commit:
+            return "local-dev unknown"
+        return f"local-dev {branch}@{commit}"
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return "local-dev unknown"
+
+
 def _version_callback(value: bool) -> None:
     if value:
-        typer.echo(f"aquarco {__version__}")
+        if BUILD_TYPE == "development":
+            typer.echo(f"aquarco {_get_dev_version()}")
+        else:
+            typer.echo(f"aquarco {__version__}")
         raise typer.Exit()
 
 
 @app.callback()
 def main(
     version: bool = typer.Option(
-        False, "--version", "-V", callback=_version_callback, is_eager=True,
+        False, "--version", "-v", callback=_version_callback, is_eager=True,
         help="Show version and exit.",
     ),
 ) -> None:
