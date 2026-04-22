@@ -309,12 +309,19 @@ class TestRestorePreamble:
     """Verify the SQL preamble that fixes 'restore broken on fresh VM'.
 
     Commit 78b0c40 introduced two critical preamble statements that must be
-    piped into psql *before* the dump contents:
+    piped into psql *before* the dump contents, and a later follow-up added
+    a third (yoyo tracking-table drop):
 
       1. ``DROP SCHEMA IF EXISTS aquarco CASCADE`` — wipes migration-seeded
          state on a fresh VM so CREATE TABLE/SCHEMA statements in the dump
          don't collide with already-existing objects.
-      2. ``SET session_replication_role = 'replica'`` — disables FK trigger
+      2. ``DROP TABLE IF EXISTS ... _yoyo_migration / _yoyo_log /
+         _yoyo_version / yoyo_lock`` — clears yoyo's migration-tracking
+         tables from the ``public`` schema so the backup restores them
+         cleanly. Without this, stale migration history from the VM's
+         earlier ``init`` run causes ``run_migrations`` to skip migrations
+         that the restored schema still needs.
+      3. ``SET session_replication_role = 'replica'`` — disables FK trigger
          enforcement for the duration of the psql session so the circular
          ``stages ↔ tasks`` FK dependency doesn't block COPY statements
          (pg_dump emits data via COPY before re-adding FKs).
@@ -355,6 +362,63 @@ class TestRestorePreamble:
         ]
         assert len(psql_inputs) == 1
         assert "SET session_replication_role = 'replica'" in psql_inputs[0]
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_preamble_drops_yoyo_tracking_tables(self, mock_cls, tmp_path):
+        """All four yoyo tracking tables must be dropped with CASCADE so the
+        backup can recreate them from a clean slate. Missing any one of these
+        lets stale migration history survive the restore and silently cause
+        ``run_migrations`` to skip pending migrations."""
+        backup_dir = _make_backup_dir(tmp_path, sql="-- dump contents")
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        psql_inputs = [
+            c.kwargs.get("input", "")
+            for c in vagrant.ssh.call_args_list
+            if "psql" in c.args[0] and "-- dump contents" in (c.kwargs.get("input") or "")
+        ]
+        assert len(psql_inputs) == 1
+        body = psql_inputs[0]
+        # One DROP TABLE statement covering all four yoyo tables.
+        assert "DROP TABLE IF EXISTS" in body
+        for table in (
+            "public._yoyo_migration",
+            "public._yoyo_log",
+            "public._yoyo_version",
+            "public.yoyo_lock",
+        ):
+            assert table in body, (
+                f"Expected yoyo table {table!r} to be dropped in preamble. "
+                f"Got: {body[:400]}"
+            )
+        assert "CASCADE" in body
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_preamble_yoyo_drop_precedes_dump_contents(self, mock_cls, tmp_path):
+        """The yoyo drop must execute *before* the dump body so the restored
+        CREATE TABLE statements for the yoyo tables don't collide with the
+        pre-existing ones left behind by ``init``."""
+        backup_dir = _make_backup_dir(tmp_path, sql="-- DUMP_BODY_MARKER")
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        psql_inputs = [
+            c.kwargs.get("input", "")
+            for c in vagrant.ssh.call_args_list
+            if "psql" in c.args[0] and "-- DUMP_BODY_MARKER" in (c.kwargs.get("input") or "")
+        ]
+        assert len(psql_inputs) == 1
+        body = psql_inputs[0]
+        yoyo_idx = body.find("_yoyo_migration")
+        dump_idx = body.find("-- DUMP_BODY_MARKER")
+        assert 0 <= yoyo_idx < dump_idx, (
+            "Yoyo table drop must appear before the dump body."
+        )
 
     @patch("aquarco_cli.commands.restore.VagrantHelper")
     def test_preamble_precedes_dump_contents(self, mock_cls, tmp_path):
