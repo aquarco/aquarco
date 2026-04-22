@@ -1,5 +1,23 @@
 # Changelog
 
+## [2026-04-22] — PostgreSQL 18 mount-point fix and version-mismatch guard
+
+### Breaking
+- **`pgdata` volume mount point changed** (`docker/compose.yml`, `docker/compose.prod.yml`) — the PostgreSQL service now mounts the `pgdata` named volume at `/var/lib/postgresql` instead of `/var/lib/postgresql/data`. This is required by the `postgres:18` Docker image, which stores PGDATA at a versioned subdirectory `/var/lib/postgresql/<MAJOR>/docker/` rather than at the mount root. Existing VMs with pre-pg18 data will find their old `PG_VERSION`/`base`/`global`/… files at `/var/lib/postgresql/*` but `postgres:18` will look for them under `/var/lib/postgresql/18/docker/*` and attempt to initialise a fresh empty cluster. **Existing data is not automatically migrated.** The supported upgrade procedure for any VM carrying pre-pg18 data is:
+  1. `aquarco backup` — capture current database into the host-side backup directory.
+  2. `aquarco destroy` — remove the VM and its Docker volumes (including the old `pgdata`).
+  3. `aquarco init` — recreate the VM, which provisions pg18 with the new mount layout.
+  4. `aquarco restore` — reload the backup into the fresh pg18 cluster.
+  The existing `aquarco update` safety guard (`get_postgres_version_mismatch()`) continues to block accidental version skew on this path — see the "Fixed" section below for the companion pre-flight fix.
+
+### Fixed
+- **`get_postgres_version_mismatch()` now finds `PG_VERSION` in both layouts** (`cli/src/aquarco_cli/vagrant.py`) — the pre-flight check previously `cat`'d `/pgdata/PG_VERSION`, which assumed the legacy volume-root layout (mount=`/var/lib/postgresql/data`). Under the new mount (`/var/lib/postgresql`) combined with pg18's versioned PGDATA, fresh pg18 installs store `PG_VERSION` at `/pgdata/<MAJOR>/docker/PG_VERSION` and the check silently returned `None`, disabling the `aquarco update` safety guard that prevents cross-major upgrades against existing data. Switched to `find /pgdata -maxdepth 3 -name PG_VERSION -type f` so the check locates the version file under either layout, restoring the guard for both the legacy→pg18 transition path and any future pg18→pg19+ upgrades.
+- **Stray non-ASCII character in `${AQUARCO_POSTGRES_VERSION}` interpolation** (`docker/compose.yml`) — removed a `◊` lozenge that had been inserted in front of the variable name, which would have silently broken the default-tag fallback whenever `AQUARCO_POSTGRES_VERSION` was unset.
+
+### Test Coverage
+- New unit tests in `cli/tests/test_vagrant.py` covering the updated `find`-based `PG_VERSION` read: asserts the shell uses `find /pgdata -maxdepth 3 -name PG_VERSION`, and covers the mismatch-detection path for both the legacy volume-root layout (pg16 data vs pg18 image) and the pg18 versioned-subdir layout (pg18 data vs a hypothetical pg20 image).
+- New test in `supervisor/python/tests/test_docker_version_consistency.py` asserting that `docker/compose.yml` and `docker/compose.prod.yml` stay in sync on the `pgdata` mount path, and that the path is `/var/lib/postgresql` (pg18 layout) rather than the legacy `/var/lib/postgresql/data`.
+
 ## [2026-04-22] — Adminer credentials display and restore fix
 
 ### Added

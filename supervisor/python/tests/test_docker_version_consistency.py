@@ -166,15 +166,19 @@ class TestPostgresVersionSafety:
         )
 
     def test_compose_prod_postgres_fallback_is_v18(self, compose_prod_raw: str) -> None:
-        """compose.prod.yml postgres fallback default must be 18-alpine."""
+        """compose.prod.yml postgres fallback default must start with 18."""
         match = re.search(
             r'image:\s*postgres:\$\{AQUARCO_POSTGRES_VERSION:-([^}]+)\}',
             compose_prod_raw,
         )
         assert match, "compose.prod.yml postgres must use variable substitution."
         fallback = match.group(1)
-        assert fallback.startswith("16"), (
-            f"compose.prod.yml postgres fallback is '{fallback}' — expected 16-alpine."
+        # Major-version jumps require a pg_upgrade migration plan. Fallback
+        # must track the main-stack version (currently 18). The previous
+        # assertion asserted `startswith("16")` — a stale literal left over
+        # from the pre-pg18 era that made this test silently wrong.
+        assert fallback.startswith("18"), (
+            f"compose.prod.yml postgres fallback is '{fallback}' — expected 18-alpine."
         )
 
 
@@ -342,4 +346,128 @@ class TestMonitoringImagesPinned:
         version = versions_env.get("AQUARCO_LOKI_VERSION", "")
         assert re.match(r'^\d+\.\d+', version), (
             f"Loki version '{version}' doesn't look like a semver pin."
+        )
+
+
+# ===========================================================================
+# PostgreSQL volume mount layout (pg18 requirement)
+# ===========================================================================
+
+
+class TestPostgresVolumeMountLayout:
+    """The pgdata volume mount point must match the PGDATA layout the
+    configured postgres image uses.
+
+    postgres:18 stores PGDATA at /var/lib/postgresql/<MAJOR>/docker and
+    requires the host volume to be mounted at /var/lib/postgresql (NOT at
+    the legacy /var/lib/postgresql/data). The main-stack compose files
+    (compose.yml, compose.prod.yml) therefore use the new mount point.
+
+    Drift between dev and prod mount points is a ship-stopper: backups
+    captured on one layout cannot be restored into the other without manual
+    intervention, and the `aquarco update` safety guard relies on both files
+    agreeing on where PG_VERSION lives.
+    """
+
+    @staticmethod
+    def _postgres_mount_path(compose: dict) -> str:
+        """Return the host→container mount path for the pgdata named volume."""
+        volumes = compose["services"]["postgres"].get("volumes", [])
+        for entry in volumes:
+            # entries are strings of the form "named_volume:/container/path[:ro]"
+            if not isinstance(entry, str):
+                continue
+            if entry.startswith("pgdata:"):
+                # drop the "pgdata:" prefix and any trailing ":ro"/":rw"
+                rest = entry.split(":", 1)[1]
+                return rest.split(":", 1)[0]
+        raise AssertionError(
+            "postgres service has no `pgdata:` named-volume mount."
+        )
+
+    def test_compose_yml_mounts_pgdata_at_postgres_root(
+        self, compose_yml: dict
+    ) -> None:
+        """dev compose must mount pgdata at /var/lib/postgresql (pg18 layout)."""
+        mount = self._postgres_mount_path(compose_yml)
+        assert mount == "/var/lib/postgresql", (
+            f"compose.yml pgdata mount is '{mount}' — expected "
+            "'/var/lib/postgresql' for pg18 layout. The legacy "
+            "'/var/lib/postgresql/data' mount will cause pg18 to initialise "
+            "a fresh empty cluster and orphan existing data."
+        )
+
+    def test_compose_prod_mounts_pgdata_at_postgres_root(
+        self, compose_prod: dict
+    ) -> None:
+        """prod compose must mount pgdata at /var/lib/postgresql (pg18 layout)."""
+        mount = self._postgres_mount_path(compose_prod)
+        assert mount == "/var/lib/postgresql", (
+            f"compose.prod.yml pgdata mount is '{mount}' — expected "
+            "'/var/lib/postgresql' for pg18 layout."
+        )
+
+    def test_dev_and_prod_mount_points_agree(
+        self, compose_yml: dict, compose_prod: dict
+    ) -> None:
+        """dev and prod compose files must not drift on the pgdata mount path.
+
+        Backups captured on one layout cannot be restored into the other, and
+        the pre-flight check in `get_postgres_version_mismatch()` assumes both
+        files agree.
+        """
+        dev_mount = self._postgres_mount_path(compose_yml)
+        prod_mount = self._postgres_mount_path(compose_prod)
+        assert dev_mount == prod_mount, (
+            f"compose.yml mounts pgdata at '{dev_mount}' but "
+            f"compose.prod.yml mounts it at '{prod_mount}'. The two must "
+            "stay in sync so backup/restore and the version-mismatch "
+            "pre-flight check work identically on dev and prod VMs."
+        )
+
+
+# ===========================================================================
+# Compose variable interpolations must be plain ASCII
+# ===========================================================================
+
+
+class TestComposeVariableInterpolationsAreAscii:
+    """Variable *names* inside `${...}` interpolations must be plain ASCII.
+
+    Lesson learned from a stray `◊` (U+25CA) lozenge that slipped into
+    `${◊AQUARCO_POSTGRES_VERSION:-18-alpine}` and would have silently broken
+    the default-tag fallback: Docker Compose does not substitute a variable
+    whose name contains a non-ASCII character, so the literal text would have
+    ended up as the image tag. Easier to catch in a lint test than at deploy
+    time.
+
+    We only check the variable-name portion (before the first `:` separator)
+    because `${VAR:?message}` error messages legitimately contain non-ASCII
+    prose such as em-dashes.
+    """
+
+    @pytest.mark.parametrize(
+        "compose_file",
+        [
+            "docker/compose.yml",
+            "docker/compose.prod.yml",
+            "docker/compose.dev.yml",
+            "docker/compose.monitoring.yml",
+        ],
+    )
+    def test_no_non_ascii_in_variable_names(self, compose_file: str) -> None:
+        raw = _read_file(compose_file)
+        bad: list[tuple[int, str]] = []
+        for line_no, line in enumerate(raw.splitlines(), start=1):
+            for match in re.finditer(r'\$\{([^}]*)\}', line):
+                inner = match.group(1)
+                # Split off the optional `:-default` or `:?message` suffix.
+                var_name = inner.split(":", 1)[0]
+                if not var_name.isascii():
+                    bad.append((line_no, match.group(0)))
+        assert not bad, (
+            f"{compose_file} contains non-ASCII characters in variable names "
+            f"inside ${{...}} interpolations: {bad}. Docker Compose will not "
+            "substitute a variable whose name contains non-ASCII characters, "
+            "so the literal text would leak into the rendered value."
         )

@@ -70,9 +70,23 @@ def get_postgres_version_mismatch(vagrant: "VagrantHelper") -> tuple[str, str] |
         # This runs via `vagrant ssh -c` as the vagrant user (not agent), and the
         # vagrant user is not in the docker group, so `sudo docker` is required.
         # provision.sh grants vagrant NOPASSWD sudo for /usr/bin/docker.
+        #
+        # PG_VERSION location depends on the compose mount point AND the
+        # postgres image layout:
+        #   - Legacy layout (pg ≤ 16, mount=/var/lib/postgresql/data):
+        #     PG_VERSION lives at the volume root  → /pgdata/PG_VERSION
+        #   - Postgres 18 layout (mount=/var/lib/postgresql,
+        #     PGDATA=/var/lib/postgresql/<MAJOR>/docker):
+        #     PG_VERSION lives at /pgdata/<MAJOR>/docker/PG_VERSION
+        # We use `find -maxdepth 3` so the check works regardless of which
+        # layout is on disk — this is critical for the upgrade path where the
+        # old data (at /pgdata/PG_VERSION) would otherwise be invisible to
+        # pg18 expecting the versioned subdirectory, and the pre-flight guard
+        # in `aquarco update` would silently miss the mismatch.
         r = vagrant.ssh(
             "sudo docker run --rm -v aquarco_pgdata:/pgdata:ro alpine "
-            "sh -c 'cat /pgdata/PG_VERSION 2>/dev/null || true'",
+            "sh -c 'f=$(find /pgdata -maxdepth 3 -name PG_VERSION -type f "
+            "2>/dev/null | head -1); [ -n \"$f\" ] && cat \"$f\" 2>/dev/null || true'",
             stream=False,
         )
         data_ver = (r.stdout or "").strip()

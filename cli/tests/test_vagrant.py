@@ -335,6 +335,51 @@ class TestGetPostgresVersionMismatchShellCommand:
         ]
         assert get_postgres_version_mismatch(self.helper) is None
 
+    @patch.object(VagrantHelper, "ssh")
+    def test_pg_version_read_uses_find_for_both_layouts(self, mock_ssh):
+        """PG_VERSION read must use `find` so it locates the file under both:
+          - legacy layout: /pgdata/PG_VERSION (pg ≤ 16, data-dir mount)
+          - pg18 layout:   /pgdata/<MAJOR>/docker/PG_VERSION (versioned subdir)
+        """
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+        ]
+        get_postgres_version_mismatch(self.helper)
+        first_call_cmd = mock_ssh.call_args_list[0][0][0]
+        assert "find /pgdata" in first_call_cmd
+        assert "-name PG_VERSION" in first_call_cmd
+        # maxdepth 3 is enough to cover /pgdata/<MAJOR>/docker/PG_VERSION
+        assert "-maxdepth 3" in first_call_cmd
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_mismatch_detected_with_legacy_layout_data(self, mock_ssh):
+        """Simulate existing pg16 data at volume root (legacy layout) being
+        read against a pg18-configured image. The check must still detect
+        the mismatch so `aquarco update` can block the unsafe upgrade.
+        """
+        # The shell command returns '16' (from /pgdata/PG_VERSION, legacy).
+        # The configured version is '18-alpine' (pg18 image in compose).
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="18-alpine\n", stderr=""),
+        ]
+        result = get_postgres_version_mismatch(self.helper)
+        assert result == ("16", "18")
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_mismatch_detected_with_pg18_versioned_layout(self, mock_ssh):
+        """Simulate pg18 data at /pgdata/18/docker/PG_VERSION against a pg20
+        configured image. The `find` traversal must locate the versioned
+        PG_VERSION and return the correct major for comparison.
+        """
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="18\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="20-alpine\n", stderr=""),
+        ]
+        result = get_postgres_version_mismatch(self.helper)
+        assert result == ("18", "20")
+
 
 class TestGetComposePrefix:
     """Tests for get_compose_prefix().
