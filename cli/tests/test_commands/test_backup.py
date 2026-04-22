@@ -301,6 +301,73 @@ class TestBackupComposeCommand:
         assert "--env-file /home/agent/aquarco/docker/versions.env" in cmd
 
 
+class TestBackupRestrictStripping:
+    """The backup post-processes pg_dump output to strip psql meta-commands.
+
+    PostgreSQL 17's pg_dump emits ``\\restrict <token>`` and ``\\unrestrict <token>``
+    as a security feature to prevent psql meta-command injection when restoring
+    untrusted dumps. Since aquarco dumps are produced and consumed on the same
+    trusted VM, stripping these lines restores compatibility with older psql
+    clients without losing any real protection.
+    """
+
+    @patch("aquarco_cli.commands.backup.VagrantHelper")
+    def test_strips_restrict_lines(self, mock_cls, tmp_path):
+        vagrant = _make_vagrant()
+        vagrant.ssh.return_value.stdout = (
+            "\\restrict ABC123\n"
+            "CREATE TABLE foo (id int);\n"
+            "\\unrestrict ABC123\n"
+        )
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["backup", "--no-creds", "--output", str(tmp_path)])
+
+        assert result.exit_code == 0
+        sql = next(tmp_path.rglob("aquarco.sql")).read_text()
+        assert "\\restrict" not in sql
+        assert "\\unrestrict" not in sql
+        assert "CREATE TABLE foo (id int);" in sql
+
+    @patch("aquarco_cli.commands.backup.VagrantHelper")
+    def test_preserves_non_restrict_backslash_content(self, mock_cls, tmp_path):
+        """Only lines beginning with \\restrict or \\unrestrict should be stripped.
+        Other backslash content inside SQL (e.g. inside COPY data) must be
+        preserved verbatim."""
+        vagrant = _make_vagrant()
+        vagrant.ssh.return_value.stdout = (
+            "\\restrict TOK\n"
+            "COPY foo (name) FROM stdin;\n"
+            "a\\tb\\nc\n"
+            "\\.\n"
+            "\\unrestrict TOK\n"
+        )
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["backup", "--no-creds", "--output", str(tmp_path)])
+
+        sql = next(tmp_path.rglob("aquarco.sql")).read_text()
+        assert "COPY foo (name) FROM stdin;" in sql
+        # COPY body (non-restrict backslashes) must survive.
+        assert "a\\tb\\nc" in sql
+        assert "\\.\n" in sql
+        # But \restrict/\unrestrict lines are gone.
+        assert "\\restrict" not in sql
+        assert "\\unrestrict" not in sql
+
+    @patch("aquarco_cli.commands.backup.VagrantHelper")
+    def test_output_ends_with_newline(self, mock_cls, tmp_path):
+        """POSIX convention: text files end with \\n."""
+        vagrant = _make_vagrant()
+        vagrant.ssh.return_value.stdout = "SELECT 1;"  # no trailing newline
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["backup", "--no-creds", "--output", str(tmp_path)])
+
+        sql = next(tmp_path.rglob("aquarco.sql")).read_text()
+        assert sql.endswith("\n")
+
+
 class TestBackupDefaultOutput:
     @patch("aquarco_cli.commands.backup.DEFAULT_BACKUP_ROOT")
     @patch("aquarco_cli.commands.backup.VagrantHelper")

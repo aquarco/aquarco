@@ -148,6 +148,117 @@ class TestUiDb:
         assert "could not read" in result.output.lower()
 
 
+class TestUiDbHelpDocumentation:
+    """The `ui db` help text must warn the user that the password is printed
+    in plaintext, so users are aware before recording terminals or screen
+    shares."""
+
+    def test_help_mentions_plaintext_password(self):
+        result = runner.invoke(app, ["ui", "db", "--help"])
+        assert result.exit_code == 0
+        # Help text must flag the plaintext-password behavior so the user is
+        # not surprised by it showing up in terminal recordings / screenshots.
+        assert "plaintext" in result.output.lower()
+
+    def test_help_mentions_local_developer_scope(self):
+        result = runner.invoke(app, ["ui", "db", "--help"])
+        assert result.exit_code == 0
+        # Clarifies that the credentials display is for local dev, not prod.
+        assert "local" in result.output.lower()
+
+
+class TestUiDbExceptionHandling:
+    """The password-read block narrowed its exception handler from bare
+    ``except Exception`` to ``(VagrantError, CalledProcessError, OSError)``.
+    Ensure unexpected exception types propagate so they are not silently
+    swallowed (e.g. KeyboardInterrupt, programming errors)."""
+
+    @patch("aquarco_cli.commands.ui.webbrowser.open")
+    @patch("aquarco_cli.commands.ui.get_config")
+    @patch("aquarco_cli.commands.ui.VagrantHelper")
+    def test_unexpected_exception_propagates(self, mock_cls, mock_config, mock_browser):
+        """A TypeError from a programming error must NOT be swallowed."""
+        mock_config.return_value.port = 8080
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+
+        calls = {"n": 0}
+
+        def _ssh(cmd, *args, **kwargs):
+            calls["n"] += 1
+            # 1st = compose prefix probe, 2nd = compose up
+            if calls["n"] <= 2:
+                return MagicMock(stdout="development\n" if calls["n"] == 1 else "", stderr="")
+            # 3rd = password read — raise a type not in the narrowed tuple
+            raise TypeError("unexpected bug")
+
+        mock_vagrant.ssh.side_effect = _ssh
+        result = runner.invoke(app, ["ui", "db", "--no-open"])
+        # TypeError is outside the narrowed except clause; must propagate.
+        assert result.exit_code != 0
+        assert isinstance(result.exception, TypeError)
+
+    @patch("aquarco_cli.commands.ui.webbrowser.open")
+    @patch("aquarco_cli.commands.ui.get_config")
+    @patch("aquarco_cli.commands.ui.VagrantHelper")
+    def test_oserror_is_handled(self, mock_cls, mock_config, mock_browser):
+        """OSError (e.g. SSH socket failure) during password read must be
+        caught and produce the fallback warning."""
+        mock_config.return_value.port = 8080
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+
+        calls = {"n": 0}
+
+        def _ssh(cmd, *args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                return MagicMock(stdout="development\n" if calls["n"] == 1 else "", stderr="")
+            raise OSError("connection reset")
+
+        mock_vagrant.ssh.side_effect = _ssh
+        result = runner.invoke(app, ["ui", "db", "--no-open"])
+        assert result.exit_code == 0
+        assert "could not read" in result.output.lower()
+
+
+class TestUiDbPasswordParsing:
+    """Verify the password is correctly extracted from the env-file line."""
+
+    @patch("aquarco_cli.commands.ui.webbrowser.open")
+    @patch("aquarco_cli.commands.ui.get_config")
+    @patch("aquarco_cli.commands.ui.VagrantHelper")
+    def test_password_with_trailing_whitespace_is_stripped(self, mock_cls, mock_config, mock_browser):
+        mock_config.return_value.port = 8080
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_vagrant.ssh.side_effect = _make_db_ssh_side_effect(
+            password_stdout="POSTGRES_PASSWORD=hunter2   \n",
+        )
+        result = runner.invoke(app, ["ui", "db", "--no-open"])
+        assert result.exit_code == 0
+        assert "Password: hunter2" in result.output
+        # Ensure trailing whitespace from SSH stdout is stripped.
+        assert "hunter2   " not in result.output
+
+    @patch("aquarco_cli.commands.ui.webbrowser.open")
+    @patch("aquarco_cli.commands.ui.get_config")
+    @patch("aquarco_cli.commands.ui.VagrantHelper")
+    def test_empty_password_line_triggers_warning(self, mock_cls, mock_config, mock_browser):
+        """If grep returns an empty line (key present with empty value), the
+        falsy check in ui.py triggers the fallback warning."""
+        mock_config.return_value.port = 8080
+        mock_vagrant = mock_cls.return_value
+        mock_vagrant.is_running.return_value = True
+        mock_vagrant.ssh.side_effect = _make_db_ssh_side_effect(
+            password_stdout="POSTGRES_PASSWORD=\n",  # key present, empty value
+        )
+        result = runner.invoke(app, ["ui", "db", "--no-open"])
+        assert result.exit_code == 0
+        # Empty password → falsy → fallback warning path.
+        assert "could not read" in result.output.lower()
+
+
 class TestUiApi:
     @patch("aquarco_cli.commands.ui.webbrowser.open")
     @patch("aquarco_cli.commands.ui.get_config")

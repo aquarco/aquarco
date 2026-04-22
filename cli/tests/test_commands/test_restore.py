@@ -305,6 +305,125 @@ class TestRestoreComposeCommand:
             )
 
 
+class TestRestorePreamble:
+    """Verify the SQL preamble that fixes 'restore broken on fresh VM'.
+
+    Commit 78b0c40 introduced two critical preamble statements that must be
+    piped into psql *before* the dump contents:
+
+      1. ``DROP SCHEMA IF EXISTS aquarco CASCADE`` — wipes migration-seeded
+         state on a fresh VM so CREATE TABLE/SCHEMA statements in the dump
+         don't collide with already-existing objects.
+      2. ``SET session_replication_role = 'replica'`` — disables FK trigger
+         enforcement for the duration of the psql session so the circular
+         ``stages ↔ tasks`` FK dependency doesn't block COPY statements
+         (pg_dump emits data via COPY before re-adding FKs).
+
+    These tests guard against a regression where the preamble is dropped or
+    reordered.
+    """
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_preamble_drops_aquarco_schema_cascade(self, mock_cls, tmp_path):
+        backup_dir = _make_backup_dir(tmp_path, sql="-- dump contents")
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        # Locate the psql restore call (not the repository-reset call).
+        psql_inputs = [
+            c.kwargs.get("input", "")
+            for c in vagrant.ssh.call_args_list
+            if "psql" in c.args[0] and "-- dump contents" in (c.kwargs.get("input") or "")
+        ]
+        assert len(psql_inputs) == 1
+        assert "DROP SCHEMA IF EXISTS aquarco CASCADE" in psql_inputs[0]
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_preamble_sets_session_replication_role_replica(self, mock_cls, tmp_path):
+        backup_dir = _make_backup_dir(tmp_path, sql="-- dump contents")
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        psql_inputs = [
+            c.kwargs.get("input", "")
+            for c in vagrant.ssh.call_args_list
+            if "psql" in c.args[0] and "-- dump contents" in (c.kwargs.get("input") or "")
+        ]
+        assert len(psql_inputs) == 1
+        assert "SET session_replication_role = 'replica'" in psql_inputs[0]
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_preamble_precedes_dump_contents(self, mock_cls, tmp_path):
+        """Preamble must appear *before* the dump so the session is set up
+        before any COPY/CREATE statement runs."""
+        backup_dir = _make_backup_dir(tmp_path, sql="-- DUMP_BODY_MARKER")
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        psql_inputs = [
+            c.kwargs.get("input", "")
+            for c in vagrant.ssh.call_args_list
+            if "psql" in c.args[0] and "-- DUMP_BODY_MARKER" in (c.kwargs.get("input") or "")
+        ]
+        assert len(psql_inputs) == 1
+        body = psql_inputs[0]
+        drop_idx = body.find("DROP SCHEMA IF EXISTS aquarco CASCADE")
+        role_idx = body.find("SET session_replication_role")
+        dump_idx = body.find("-- DUMP_BODY_MARKER")
+        assert 0 <= drop_idx < dump_idx
+        assert 0 <= role_idx < dump_idx
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_repo_reset_sql_uses_pending_status(self, mock_cls, tmp_path):
+        """After the dump restore, repositories.clone_status is reset to
+        'pending' so the clone worker re-verifies them on the new VM."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+
+        inputs = [c.kwargs.get("input", "") or "" for c in vagrant.ssh.call_args_list]
+        reset_sqls = [i for i in inputs if "clone_status" in i]
+        assert len(reset_sqls) == 1
+        assert "UPDATE aquarco.repositories" in reset_sqls[0]
+        assert "'pending'" in reset_sqls[0]
+        # Should only reset ready/error repos, not ones already pending.
+        assert "IN ('ready', 'error')" in reset_sqls[0]
+
+    @patch("aquarco_cli.commands.restore.VagrantHelper")
+    def test_repo_reset_failure_is_non_fatal(self, mock_cls, tmp_path):
+        """If the repo reset step fails, the overall restore still succeeds
+        (the clone worker recovers stale statuses on its own)."""
+        backup_dir = _make_backup_dir(tmp_path)
+        vagrant = _make_vagrant()
+
+        # First ssh = compose prefix probe, 2nd = psql dump, 3rd = compose prefix probe,
+        # 4th = repo reset (raises). Subsequent calls succeed (migrations etc.).
+        call_count = {"n": 0}
+
+        def _ssh(cmd, *args, **kwargs):
+            call_count["n"] += 1
+            if "clone_status" in (kwargs.get("input") or ""):
+                raise VagrantError("reset failed")
+            m = MagicMock()
+            m.stdout = "development\n"
+            return m
+
+        vagrant.ssh.side_effect = _ssh
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["restore", "--from-file", str(backup_dir), "--no-creds"])
+        # Non-fatal: restore still reports completion.
+        assert "could not reset clone statuses" in result.output.lower()
+
+
 class TestRestoreSelectiveFlags:
     @patch("aquarco_cli.commands.restore.VagrantHelper")
     def test_no_db_skips_database(self, mock_cls, tmp_path):
