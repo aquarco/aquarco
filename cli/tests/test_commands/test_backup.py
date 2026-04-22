@@ -49,7 +49,10 @@ class TestBackupDatabase:
         assert result.exit_code == 0
         dumps = list(tmp_path.rglob("aquarco.sql"))
         assert len(dumps) == 1
-        assert dumps[0].read_text() == "SELECT 1;\n-- pg_dump output"
+        # _backup_db post-processes pg_dump output: it strips \restrict/\unrestrict
+        # lines (SSH session tokens) and appends a trailing newline so the file is
+        # a well-formed text file (POSIX convention).
+        assert dumps[0].read_text() == "SELECT 1;\n-- pg_dump output\n"
 
     @patch("aquarco_cli.commands.backup.VagrantHelper")
     def test_db_backup_uses_pg_dump_via_docker_compose(self, mock_cls, tmp_path):
@@ -61,7 +64,12 @@ class TestBackupDatabase:
 
         cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
         assert any("pg_dump" in cmd for cmd in cmds)
-        assert any("docker compose exec -T postgres" in cmd for cmd in cmds)
+        # The compose prefix now inserts --env-file flags between
+        # 'docker compose' and 'exec', so check for the components separately.
+        assert any(
+            "docker compose" in cmd and "exec -T postgres" in cmd
+            for cmd in cmds
+        )
 
     @patch("aquarco_cli.commands.backup.VagrantHelper")
     def test_db_backup_runs_as_agent_user(self, mock_cls, tmp_path):
@@ -227,28 +235,39 @@ class TestBackupBoth:
 
 
 class TestBackupDisableTriggers:
-    """Verify pg_dump uses --disable-triggers flag."""
+    """Verify pg_dump does NOT use --disable-triggers.
+
+    --disable-triggers is only meaningful for data-only dumps (--data-only). Our
+    pg_dump is a full schema+data dump where CREATE TABLE happens before COPY,
+    so the flag is a no-op and was intentionally removed. FK trigger bypass
+    during restore is handled via ``SET session_replication_role = 'replica'``
+    inside the psql session (see restore.py).
+    """
 
     @patch("aquarco_cli.commands.backup.VagrantHelper")
-    def test_backup_uses_disable_triggers(self, mock_cls, tmp_path):
+    def test_backup_does_not_use_disable_triggers(self, mock_cls, tmp_path):
         vagrant = _make_vagrant()
         vagrant.ssh.return_value.stdout = "content"
         mock_cls.return_value = vagrant
         result = runner.invoke(app, ["backup", "--output", str(tmp_path)])
         assert result.exit_code == 0
-        # Verify the pg_dump command includes --disable-triggers
         ssh_calls = vagrant.ssh.call_args_list
         pg_dump_calls = [c for c in ssh_calls if "pg_dump" in str(c)]
         assert len(pg_dump_calls) > 0
-        assert "--disable-triggers" in str(pg_dump_calls[0])
+        assert "--disable-triggers" not in str(pg_dump_calls[0])
 
 
-class TestBackupSudoDocker:
-    """Verify all Docker commands in backup use 'sudo docker' (not bare 'docker')."""
+class TestBackupComposeCommand:
+    """Verify Docker commands in backup use the new 'agent + --env-file' contract.
+
+    After provision.sh adds agent to the docker group, the compose prefix no
+    longer prepends ``sudo docker``. Secrets are passed via ``--env-file`` so
+    they survive the environment reset performed by ``sudo -u agent``.
+    """
 
     @patch("aquarco_cli.commands.backup.VagrantHelper")
-    def test_db_backup_uses_sudo_docker_compose(self, mock_cls, tmp_path):
-        """pg_dump command must use 'sudo docker compose', not bare 'docker compose'."""
+    def test_db_backup_uses_docker_compose(self, mock_cls, tmp_path):
+        """pg_dump command must use 'docker compose' (agent is in the docker group)."""
         vagrant = _make_vagrant()
         vagrant.ssh.return_value.stdout = "dump"
         mock_cls.return_value = vagrant
@@ -258,11 +277,13 @@ class TestBackupSudoDocker:
         cmds = [c.args[0] for c in vagrant.ssh.call_args_list]
         pg_dump_cmds = [c for c in cmds if "pg_dump" in c]
         assert len(pg_dump_cmds) == 1
-        assert "sudo docker compose" in pg_dump_cmds[0]
+        assert "docker compose" in pg_dump_cmds[0]
+        # Inner 'sudo docker' was intentionally dropped.
+        assert "sudo docker" not in pg_dump_cmds[0]
 
     @patch("aquarco_cli.commands.backup.VagrantHelper")
-    def test_db_backup_command_has_inner_sudo_docker(self, mock_cls, tmp_path):
-        """The backup SSH command wraps 'sudo docker' inside 'sudo -u agent bash -c'."""
+    def test_db_backup_runs_as_agent_with_env_files(self, mock_cls, tmp_path):
+        """The backup SSH command wraps 'docker compose --env-file ...' inside 'sudo -u agent bash -c'."""
         vagrant = _make_vagrant()
         vagrant.ssh.return_value.stdout = "dump"
         mock_cls.return_value = vagrant
@@ -273,9 +294,78 @@ class TestBackupSudoDocker:
         pg_dump_cmds = [c for c in cmds if "pg_dump" in c]
         assert len(pg_dump_cmds) == 1
         cmd = pg_dump_cmds[0]
-        # Must have both: outer sudo -u agent and inner sudo docker
+        # Must run as agent user and pass secrets via --env-file.
         assert "sudo -u agent" in cmd
-        assert "sudo docker compose exec" in cmd
+        assert "docker compose" in cmd
+        assert "--env-file /etc/aquarco/docker-secrets.env" in cmd
+        assert "--env-file /home/agent/aquarco/docker/versions.env" in cmd
+
+
+class TestBackupRestrictStripping:
+    """The backup post-processes pg_dump output to strip psql meta-commands.
+
+    PostgreSQL 17's pg_dump emits ``\\restrict <token>`` and ``\\unrestrict <token>``
+    as a security feature to prevent psql meta-command injection when restoring
+    untrusted dumps. Since aquarco dumps are produced and consumed on the same
+    trusted VM, stripping these lines restores compatibility with older psql
+    clients without losing any real protection.
+    """
+
+    @patch("aquarco_cli.commands.backup.VagrantHelper")
+    def test_strips_restrict_lines(self, mock_cls, tmp_path):
+        vagrant = _make_vagrant()
+        vagrant.ssh.return_value.stdout = (
+            "\\restrict ABC123\n"
+            "CREATE TABLE foo (id int);\n"
+            "\\unrestrict ABC123\n"
+        )
+        mock_cls.return_value = vagrant
+
+        result = runner.invoke(app, ["backup", "--no-creds", "--output", str(tmp_path)])
+
+        assert result.exit_code == 0
+        sql = next(tmp_path.rglob("aquarco.sql")).read_text()
+        assert "\\restrict" not in sql
+        assert "\\unrestrict" not in sql
+        assert "CREATE TABLE foo (id int);" in sql
+
+    @patch("aquarco_cli.commands.backup.VagrantHelper")
+    def test_preserves_non_restrict_backslash_content(self, mock_cls, tmp_path):
+        """Only lines beginning with \\restrict or \\unrestrict should be stripped.
+        Other backslash content inside SQL (e.g. inside COPY data) must be
+        preserved verbatim."""
+        vagrant = _make_vagrant()
+        vagrant.ssh.return_value.stdout = (
+            "\\restrict TOK\n"
+            "COPY foo (name) FROM stdin;\n"
+            "a\\tb\\nc\n"
+            "\\.\n"
+            "\\unrestrict TOK\n"
+        )
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["backup", "--no-creds", "--output", str(tmp_path)])
+
+        sql = next(tmp_path.rglob("aquarco.sql")).read_text()
+        assert "COPY foo (name) FROM stdin;" in sql
+        # COPY body (non-restrict backslashes) must survive.
+        assert "a\\tb\\nc" in sql
+        assert "\\.\n" in sql
+        # But \restrict/\unrestrict lines are gone.
+        assert "\\restrict" not in sql
+        assert "\\unrestrict" not in sql
+
+    @patch("aquarco_cli.commands.backup.VagrantHelper")
+    def test_output_ends_with_newline(self, mock_cls, tmp_path):
+        """POSIX convention: text files end with \\n."""
+        vagrant = _make_vagrant()
+        vagrant.ssh.return_value.stdout = "SELECT 1;"  # no trailing newline
+        mock_cls.return_value = vagrant
+
+        runner.invoke(app, ["backup", "--no-creds", "--output", str(tmp_path)])
+
+        sql = next(tmp_path.rglob("aquarco.sql")).read_text()
+        assert sql.endswith("\n")
 
 
 class TestBackupDefaultOutput:

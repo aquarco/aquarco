@@ -1,5 +1,26 @@
 # Changelog
 
+## [2026-04-22] — Adminer credentials display and restore fix
+
+### Added
+- **Adminer login credentials display** (`aquarco ui db`) — after starting the Adminer service, the CLI now reads `POSTGRES_PASSWORD` from `/etc/aquarco/docker-secrets.env` and prints the database connection details (server, database, username, password) so users can log in directly without manual password lookup. Password is printed plaintext for convenience on local developer VMs only.
+
+### Fixed
+- **Database restore broken on fresh VMs** — prepended `DROP SCHEMA CASCADE` and `SET session_replication_role='replica'` to backup SQL before restore, resolving circular foreign-key dependencies between `stages` and `tasks` tables and duplicate-key errors on migration-seeded tables (agent_definitions, etc.)
+- **Restore and backup compose invocation inconsistency** — `backup.py` now calls `get_compose_prefix(vagrant)` to use `compose.prod.yml` on production VMs (previously hardcoded `compose.yml`, missing prod-specific configuration). Ensures dev and prod backup/restore code paths match.
+- **Vagrant SSH command environment handling** — refactored CLI commands from `LOAD_SECRETS` (shell environment variables) to `COMPOSE_ENV_FLAGS` (compose `--env-file` flags) so secrets survive `sudo` environment resets. Docker group membership (`usermod -aG docker agent`) is now relied upon instead of sudo elevation for docker socket access.
+- **SSH noise in backup output** — `pg_dump` output now strips `\restrict` and `\unrestrict` lines (SSH session-management tokens) that were interfering with SQL parsing
+- **Removed no-op pg_dump flag** — `--disable-triggers` removed from `pg_dump` invocation as it is only meaningful for data-only dumps. FK bypass during restore is now handled via `SET session_replication_role='replica'` in the restore session.
+- **Build-type environment variable** — `_build.py` now reads `AQUARCO_BUILD_TYPE` env var for local testing (previously hardcoded)
+- **Release workflow pattern matching** — GitHub Actions release workflow broadened sed pattern to match env-var form of `BUILD_TYPE`
+
+### Changed
+- **`get_compose_prefix()` contract** — docstring updated to reflect that the agent user is in the docker group (no inner sudo), secrets are passed via `--env-file` flags rather than shell environment inheritance
+- **`COMPOSE_ENV_FLAGS` documentation** — clarified that flags pass secrets directly to compose without relying on shell environment, improving robustness when compose is invoked through wrappers that reset env
+
+### Test Coverage
+- **26 new tests** added for the new Adminer credentials display (happy path + unreadable secrets fallback), updated 10 existing tests in `TestGetComposePrefix` for the new prefix format, updated assertions in `TestBackupDatabase` and `TestRestoreDatabase` for new backup file format (trailing newline preservation, --env-file flag insertion)
+- All 441 CLI tests passing with 89% coverage
 ## [2026-04-22] — Improve `aquarco --version` output and short flag (#160)
 
 ### Breaking

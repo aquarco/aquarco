@@ -10,6 +10,7 @@ import pytest
 
 from aquarco_cli.vagrant import (
     COMPOSE_DIR,
+    COMPOSE_ENV_FLAGS,
     LOAD_SECRETS,
     LOAD_SUPERVISOR_SECRETS,
     VagrantError,
@@ -336,7 +337,14 @@ class TestGetPostgresVersionMismatchShellCommand:
 
 
 class TestGetComposePrefix:
-    """Tests for get_compose_prefix()."""
+    """Tests for get_compose_prefix().
+
+    The prefix no longer includes ``sudo`` because the agent user is now in
+    the docker group (provision.sh runs ``usermod -aG docker agent``). The
+    prefix appends ``COMPOSE_ENV_FLAGS`` to pass secrets and version pins via
+    ``--env-file`` so compose reads them directly instead of relying on
+    inherited shell environment.
+    """
 
     def setup_method(self):
         self.helper = VagrantHelper(vagrant_dir=Path("/fake/vagrant"))
@@ -346,25 +354,27 @@ class TestGetComposePrefix:
         mock_ssh.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="production\n", stderr="",
         )
-        assert get_compose_prefix(self.helper) == "sudo docker compose -f compose.prod.yml"
+        assert get_compose_prefix(self.helper) == (
+            f"docker compose -f compose.prod.yml {COMPOSE_ENV_FLAGS}"
+        )
 
     @patch.object(VagrantHelper, "ssh")
     def test_development_env(self, mock_ssh):
         mock_ssh.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="development\n", stderr="",
         )
-        assert get_compose_prefix(self.helper) == "sudo docker compose"
+        assert get_compose_prefix(self.helper) == f"docker compose {COMPOSE_ENV_FLAGS}"
 
     @patch.object(VagrantHelper, "ssh")
     def test_fallback_on_ssh_error(self, mock_ssh):
         mock_ssh.side_effect = VagrantError("connection failed")
-        assert get_compose_prefix(self.helper) == "sudo docker compose"
+        assert get_compose_prefix(self.helper) == f"docker compose {COMPOSE_ENV_FLAGS}"
 
     @patch.object(VagrantHelper, "ssh")
     def test_fallback_on_generic_exception(self, mock_ssh):
         """Non-VagrantError exceptions also fall back to development."""
         mock_ssh.side_effect = OSError("network down")
-        assert get_compose_prefix(self.helper) == "sudo docker compose"
+        assert get_compose_prefix(self.helper) == f"docker compose {COMPOSE_ENV_FLAGS}"
 
     @patch.object(VagrantHelper, "ssh")
     def test_multiline_stdout_uses_full_strip(self, mock_ssh):
@@ -372,7 +382,9 @@ class TestGetComposePrefix:
         mock_ssh.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="production\n\n", stderr="",
         )
-        assert get_compose_prefix(self.helper) == "sudo docker compose -f compose.prod.yml"
+        assert get_compose_prefix(self.helper) == (
+            f"docker compose -f compose.prod.yml {COMPOSE_ENV_FLAGS}"
+        )
 
     @patch.object(VagrantHelper, "ssh")
     def test_empty_env_defaults_to_development(self, mock_ssh):
@@ -380,7 +392,7 @@ class TestGetComposePrefix:
         mock_ssh.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="", stderr="",
         )
-        assert get_compose_prefix(self.helper) == "sudo docker compose"
+        assert get_compose_prefix(self.helper) == f"docker compose {COMPOSE_ENV_FLAGS}"
 
     @patch.object(VagrantHelper, "ssh")
     def test_unknown_env_defaults_to_development(self, mock_ssh):
@@ -388,7 +400,7 @@ class TestGetComposePrefix:
         mock_ssh.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="staging\n", stderr="",
         )
-        assert get_compose_prefix(self.helper) == "sudo docker compose"
+        assert get_compose_prefix(self.helper) == f"docker compose {COMPOSE_ENV_FLAGS}"
 
     @patch.object(VagrantHelper, "ssh")
     def test_stdout_none_defaults_to_development(self, mock_ssh):
@@ -397,7 +409,7 @@ class TestGetComposePrefix:
             args=[], returncode=0, stdout=None, stderr="",
         )
         # stdout=None → (None or "").strip() = "" → not "production" → dev
-        assert get_compose_prefix(self.helper) == "sudo docker compose"
+        assert get_compose_prefix(self.helper) == f"docker compose {COMPOSE_ENV_FLAGS}"
 
     @patch.object(VagrantHelper, "ssh")
     def test_ssh_command_uses_sudo_cat(self, mock_ssh):
@@ -411,13 +423,24 @@ class TestGetComposePrefix:
         assert "/etc/aquarco/env" in cmd
 
     @patch.object(VagrantHelper, "ssh")
-    def test_prefix_always_includes_sudo(self, mock_ssh):
-        """Both prod and dev prefixes must include 'sudo docker'."""
+    def test_prefix_does_not_include_sudo_docker(self, mock_ssh):
+        """Agent user is in the docker group; docker runs without sudo."""
         mock_ssh.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="production\n", stderr="",
         )
         result = get_compose_prefix(self.helper)
-        assert result.startswith("sudo docker compose")
+        assert result.startswith("docker compose")
+        assert "sudo docker" not in result
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_prefix_includes_env_file_flags(self, mock_ssh):
+        """Both prod and dev prefixes must append --env-file flags."""
+        mock_ssh.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="development\n", stderr="",
+        )
+        result = get_compose_prefix(self.helper)
+        assert "--env-file /etc/aquarco/docker-secrets.env" in result
+        assert "--env-file /home/agent/aquarco/docker/versions.env" in result
 
 
 class TestVagrantHelperCwd:

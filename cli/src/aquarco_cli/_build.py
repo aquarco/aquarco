@@ -6,4 +6,5 @@ disabled for public installs.
 """
 
 import os
+
 BUILD_TYPE: str = os.environ.get("AQUARCO_BUILD_TYPE", "development")
