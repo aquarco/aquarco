@@ -335,6 +335,95 @@ class TestGetPostgresVersionMismatchShellCommand:
         ]
         assert get_postgres_version_mismatch(self.helper) is None
 
+    @patch.object(VagrantHelper, "ssh")
+    def test_pg_version_read_uses_find_for_both_layouts(self, mock_ssh):
+        """PG_VERSION read must use `find` so it locates the file under both:
+          - legacy layout: /pgdata/PG_VERSION (pg ≤ 16, data-dir mount)
+          - pg18 layout:   /pgdata/<MAJOR>/docker/PG_VERSION (versioned subdir)
+        """
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+        ]
+        get_postgres_version_mismatch(self.helper)
+        first_call_cmd = mock_ssh.call_args_list[0][0][0]
+        assert "find /pgdata" in first_call_cmd
+        assert "-name PG_VERSION" in first_call_cmd
+        # maxdepth 3 is enough to cover /pgdata/<MAJOR>/docker/PG_VERSION
+        assert "-maxdepth 3" in first_call_cmd
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_mismatch_detected_with_legacy_layout_data(self, mock_ssh):
+        """Simulate existing pg16 data at volume root (legacy layout) being
+        read against a pg18-configured image. The check must still detect
+        the mismatch so `aquarco update` can block the unsafe upgrade.
+        """
+        # The shell command returns '16' (from /pgdata/PG_VERSION, legacy).
+        # The configured version is '18-alpine' (pg18 image in compose).
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="18-alpine\n", stderr=""),
+        ]
+        result = get_postgres_version_mismatch(self.helper)
+        assert result == ("16", "18")
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_mismatch_detected_with_pg18_versioned_layout(self, mock_ssh):
+        """Simulate pg18 data at /pgdata/18/docker/PG_VERSION against a pg20
+        configured image. The `find` traversal must locate the versioned
+        PG_VERSION and return the correct major for comparison.
+        """
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="18\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="20-alpine\n", stderr=""),
+        ]
+        result = get_postgres_version_mismatch(self.helper)
+        assert result == ("18", "20")
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_mismatch_detected_with_orphaned_data_dir_layout(self, mock_ssh):
+        """Simulate the exact data-orphaning scenario the pg18 mount change
+        created: an existing ``aquarco_pgdata`` volume was populated by a
+        pre-pg18 image with mount ``/var/lib/postgresql/data``, so its contents
+        sit at the volume root as (e.g.) ``/pgdata/PG_VERSION``. After the
+        mount change to ``/var/lib/postgresql`` with pg18's versioned PGDATA,
+        that legacy data would end up at ``/pgdata/data/PG_VERSION`` when the
+        read container mounts the volume at ``/pgdata``. The ``find`` traversal
+        must still locate that legacy file so ``aquarco update`` detects the
+        mismatch (legacy pg16 data vs. configured pg18 image) and blocks the
+        unsafe upgrade before a fresh ``initdb`` silently orphans the old data.
+        """
+        # The shell returns '16' from whichever PG_VERSION find located first
+        # — whether it's /pgdata/PG_VERSION (read-at-root scenario) or
+        # /pgdata/data/PG_VERSION (orphaned legacy scenario). The test pins
+        # the contract: a non-empty major read from the volume combined with
+        # a newer configured major MUST surface as a mismatch.
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="16\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="18-alpine\n", stderr=""),
+        ]
+        result = get_postgres_version_mismatch(self.helper)
+        assert result == ("16", "18"), (
+            "aquarco update safety guard must detect the pre-pg18→pg18 "
+            "upgrade path as a mismatch, blocking accidental silent re-initdb "
+            "of an existing cluster."
+        )
+
+    @patch.object(VagrantHelper, "ssh")
+    def test_find_command_tolerates_missing_pgdata_directory(self, mock_ssh):
+        """On a fresh install the pgdata volume may not exist yet. The shell
+        uses ``2>/dev/null`` and ``|| true`` so ``find`` failures don't
+        propagate — the function returns None ('no data to check, don't
+        block'). This exercises the defensive error handling that keeps the
+        guard non-fatal on missing-volume scenarios.
+        """
+        # Simulate find returning no matches (empty stdout after the shell
+        # pipeline). The function should return None, not raise.
+        mock_ssh.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        ]
+        assert get_postgres_version_mismatch(self.helper) is None
+
 
 class TestGetComposePrefix:
     """Tests for get_compose_prefix().
