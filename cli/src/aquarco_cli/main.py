@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 
 import typer
@@ -9,6 +10,11 @@ import typer
 from aquarco_cli import __version__
 from aquarco_cli._build import BUILD_TYPE
 from aquarco_cli.commands import auth, backup, config, init, repos, restore, run, status, ui, update, vm
+
+# Directory containing the installed ``aquarco_cli`` package. Used to anchor
+# ``git`` lookups for the dev version so they always describe the aquarco
+# checkout regardless of the user's current working directory.
+_PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = typer.Typer(
     name="aquarco",
@@ -21,20 +27,27 @@ app = typer.Typer(
 def _get_dev_version() -> str:
     """Return a development version string of the form ``local-dev <branch>@<hash>``.
 
-    Calls ``git`` at runtime to resolve the current branch and short commit hash.
-    Falls back to ``local-dev unknown`` if git is not available or the current
-    working directory is not inside a git repository.
+    Calls ``git`` at runtime to resolve the current branch and short commit hash
+    of the ``aquarco_cli`` package's own source tree. Anchoring to
+    :data:`_PACKAGE_DIR` ensures the reported branch/hash always describes the
+    installed aquarco checkout, not whatever repository the user happens to be
+    standing in when they invoke ``aquarco --version``.
+
+    Falls back to ``local-dev unknown`` if git is not available or the package
+    directory is not inside a git repository (e.g. installed from a wheel).
     """
     try:
         branch = subprocess.check_output(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             stderr=subprocess.DEVNULL,
             text=True,
+            cwd=_PACKAGE_DIR,
         ).strip()
         commit = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
             stderr=subprocess.DEVNULL,
             text=True,
+            cwd=_PACKAGE_DIR,
         ).strip()
         if not branch or not commit:
             return "local-dev unknown"
