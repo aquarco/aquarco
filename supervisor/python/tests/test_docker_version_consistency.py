@@ -427,6 +427,94 @@ class TestPostgresVolumeMountLayout:
 
 
 # ===========================================================================
+# PGDATA is pinned explicitly (not inherited from image default)
+# ===========================================================================
+
+
+class TestPostgresPgdataExplicit:
+    """PGDATA must be set explicitly on the postgres service so the on-disk
+    data path is pinned by config rather than inherited from an implicit
+    image default.
+
+    Rationale: `postgres:18-alpine` defaults PGDATA to
+    `/var/lib/postgresql/18/docker`, but relying on that implicit default
+    means a future image bump could silently relocate the data path and
+    break backup/restore, the `aquarco update` pre-flight check, and any
+    ops muscle memory. Pinning PGDATA in compose makes the behaviour
+    deterministic and reviewable.
+    """
+
+    @staticmethod
+    def _postgres_pgdata(compose: dict) -> str | None:
+        """Return the explicit PGDATA env value for the postgres service, or
+        None if not set. Strips Compose variable substitution syntax so the
+        default value (`${VAR:-DEFAULT}` → `DEFAULT`) is returned.
+        """
+        env = compose["services"]["postgres"].get("environment", {})
+        # environment may be dict or list-of-strings
+        if isinstance(env, list):
+            for entry in env:
+                if isinstance(entry, str) and entry.startswith("PGDATA="):
+                    return entry.split("=", 1)[1]
+            return None
+        value = env.get("PGDATA")
+        if value is None:
+            return None
+        # Accept either a plain string or a ${VAR:-default} form; extract
+        # the default so the test pins the value actually used in the
+        # common case.
+        match = re.match(r'^\$\{[^:}]+:-([^}]+)\}$', str(value))
+        if match:
+            return match.group(1)
+        return str(value)
+
+    def test_compose_yml_sets_pgdata_explicitly(
+        self, compose_yml: dict
+    ) -> None:
+        """dev compose must pin PGDATA explicitly."""
+        pgdata = self._postgres_pgdata(compose_yml)
+        assert pgdata is not None, (
+            "compose.yml postgres service has no explicit PGDATA env var. "
+            "PGDATA must be pinned in compose so the on-disk data path is "
+            "deterministic and not subject to silent image-default changes."
+        )
+        assert pgdata == "/var/lib/postgresql/18/docker", (
+            f"compose.yml PGDATA is '{pgdata}' — expected "
+            "'/var/lib/postgresql/18/docker' to match the postgres:18-alpine "
+            "image default. If postgres is being bumped, update both this "
+            "test and AQUARCO_POSTGRES_VERSION together."
+        )
+
+    def test_compose_prod_sets_pgdata_explicitly(
+        self, compose_prod: dict
+    ) -> None:
+        """prod compose must pin PGDATA explicitly."""
+        pgdata = self._postgres_pgdata(compose_prod)
+        assert pgdata is not None, (
+            "compose.prod.yml postgres service has no explicit PGDATA env var."
+        )
+        assert pgdata == "/var/lib/postgresql/18/docker", (
+            f"compose.prod.yml PGDATA is '{pgdata}' — expected "
+            "'/var/lib/postgresql/18/docker'."
+        )
+
+    def test_dev_and_prod_pgdata_agree(
+        self, compose_yml: dict, compose_prod: dict
+    ) -> None:
+        """dev and prod must pin PGDATA to the same path.
+
+        Backups/restores straddle both environments; the PG_VERSION-read
+        path in `get_postgres_version_mismatch()` also assumes agreement.
+        """
+        dev_pgdata = self._postgres_pgdata(compose_yml)
+        prod_pgdata = self._postgres_pgdata(compose_prod)
+        assert dev_pgdata == prod_pgdata, (
+            f"compose.yml PGDATA='{dev_pgdata}' but "
+            f"compose.prod.yml PGDATA='{prod_pgdata}'. The two must agree."
+        )
+
+
+# ===========================================================================
 # Compose variable interpolations must be plain ASCII
 # ===========================================================================
 

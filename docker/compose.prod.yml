@@ -29,6 +29,18 @@ volumes:
 services:
 
   # ── PostgreSQL ────────────────────────────────────────────────────────────────
+  # Mount layout (pg18+):
+  #   - `postgres:18-alpine` declares VOLUME /var/lib/postgresql and sets
+  #     PGDATA=/var/lib/postgresql/18/docker (versioned subdirectory). The
+  #     named volume is therefore mounted at /var/lib/postgresql, and PGDATA
+  #     is set EXPLICITLY below so the actual on-disk data path is pinned by
+  #     config rather than inherited from the image's implicit default.
+  #   - PGDATA contains the postgres major in the path. If AQUARCO_POSTGRES_VERSION
+  #     is pinned to a different major (e.g. 19-alpine) the `AQUARCO_POSTGRES_PGDATA`
+  #     override MUST be updated to match, otherwise the server will not find its
+  #     PGDATA on the expected path.
+  #   - Must stay in sync with docker/compose.yml — the pre-flight version-mismatch
+  #     guard in `aquarco update` relies on both files using the same layout.
   postgres:
     image: postgres:${AQUARCO_POSTGRES_VERSION:-18-alpine}
     restart: unless-stopped
@@ -42,6 +54,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: ${POSTGRES_DB:-aquarco}
+      # PGDATA is pinned explicitly (see mount-layout comment above). The
+      # default tracks the postgres:18-alpine image default so upgrades are
+      # a one-line override away rather than an implicit behaviour change.
+      PGDATA: ${AQUARCO_POSTGRES_PGDATA:-/var/lib/postgresql/18/docker}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aquarco}"]
       interval: 5s
