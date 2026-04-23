@@ -1,5 +1,33 @@
 # Changelog
 
+## [2026-04-23] — Handle error_max_turns properly (#165)
+
+### Fixed
+- **Stage status on max-turns termination** (`supervisor/python/src/aquarco_supervisor/stage_manager.py`) — when Claude CLI returns `{"type":"result", "subtype":"error_max_turns", ...}`, stages now correctly transition to `MAX_TURNS` status instead of `FAILED`. The status determination logic now prioritizes `error_max_turns` subtype before checking other error conditions.
+- **Spending parsed from error_max_turns results** (`supervisor/python/src/aquarco_supervisor/stage_manager.py`) — cost and token counts are now extracted from agent output and stored in stage records, even when the final iteration returns `error_max_turns`. The `store_stage_output()` method uses cumulative spending keys (`_cumulative_cost_usd`, `_cumulative_input_tokens`, etc.) when available, falling back to per-iteration values.
+- **Output parser metadata for empty results** (`supervisor/python/src/aquarco_supervisor/cli/output_parser.py`) — `_extract_from_result_message()` now always populates prefixed metadata keys (`_subtype`, `_is_error`, `_cost_usd`, `_session_id`, etc.) from result event fields, even when the `result` field is an empty string. This fixes silent mis-parsing of `error_max_turns` outputs that have no structured output.
+- **AgentExecutionError not raised on max-turns** (`supervisor/python/src/aquarco_supervisor/pipeline/agent_invoker.py`) — agent invoker carves out `_subtype == "error_max_turns"` from the error guard, allowing max-turns completions to proceed to the retry loop instead of failing the entire stage. Rate-limit and authentication guards remain active for other error types.
+
+### Added
+- **`MAX_TURNS` stage status** (`supervisor/python/src/aquarco_supervisor/models.py`) — new `StageStatus` enum value representing stages that hit max-turns limits. Enables downstream code (retries, telemetry, reports) to handle max-turns specially.
+- **Auto-resume loop on max-turns** (`supervisor/python/src/aquarco_supervisor/pipeline/executor.py`) — when an agent hits max turns but remaining cost budget allows, the executor automatically re-invokes the agent with the output from the previous run. Resumption continues until either:
+  - Agent completes successfully (status != `max_turns`)
+  - Cost budget exhausted (per-agent `max_cost_usd` reached)
+  - Iteration count exhausted (per-agent `max_turns` × resumptions reached)
+  Includes "Last output:" context in resume prompts so agent can continue from the previous state.
+- **Agent registry methods for configurable limits** (`supervisor/python/src/aquarco_supervisor/pipeline/agent_registry.py`) — `get_agent_max_turns()` and `get_agent_max_cost()` methods retrieve per-agent configurability for turn and cost limits from agent definitions.
+
+### Changed
+- **`_resolve_stage_status()` logic** — reordered status determination to check `error_max_turns` subtype before generic error handling, ensuring max-turns stages are classified correctly
+- **Resume prompt construction** — when an agent resumes after max-turns, the executor appends "Last output: {...}" context block so the agent can preserve state across iterations
+
+### Test Coverage
+- **21 new tests** in `test_issue165_error_max_turns.py` covering metadata population, status resolution, and error guard carve-out
+- **14 new tests** in `test_max_turns_cost.py` covering auto-resume loop (normal completion, max-turns hit, cost guard, iteration guard, session_id missing, output preservation)
+- **Updated tests** in `test_output_parser.py`, `test_cli_claude.py`, `test_cli_claude_extended.py` for prefixed metadata handling
+- **Updated tests** in `test_stage_manager.py` for `MAX_TURNS` status and spending extraction
+- All 2630 tests passing with 87% coverage
+
 ## [2026-04-22] — PostgreSQL 18 mount-point fix and version-mismatch guard
 
 ### Breaking
