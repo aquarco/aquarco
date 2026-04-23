@@ -212,11 +212,18 @@ class TestMaxTurnsContinuation:
 
     @pytest.mark.asyncio
     async def test_stops_when_cost_exceeded(self, invoker, mock_registry):
-        """Stops continuation when cumulative cost exceeds maxCost."""
+        """Stops continuation when cumulative cost exceeds maxCost.
+
+        Regression guard for issue #165: the real Claude CLI sets
+        ``is_error=true`` alongside ``subtype=error_max_turns``. The
+        continuation loop must still stop cleanly on cost exhaustion
+        without tripping the rate-limit/auth error branch.
+        """
         mock_registry.get_agent_max_cost = MagicMock(return_value=1.0)
         output = ClaudeOutput(
             structured={
                 "_subtype": "error_max_turns",
+                "_is_error": True,  # real CLI always sets this for max_turns
                 "_session_id": "sess-xyz",
                 "_cost_usd": 1.5,
             },
@@ -235,10 +242,16 @@ class TestMaxTurnsContinuation:
 
     @pytest.mark.asyncio
     async def test_stops_when_no_session_id(self, invoker):
-        """Stops continuation when max_turns output has no session_id."""
+        """Stops continuation when max_turns output has no session_id.
+
+        Regression guard for issue #165: includes ``_is_error=True`` to
+        match real Claude CLI output and ensure the _is_error guard
+        carves out ``error_max_turns`` properly.
+        """
         output = ClaudeOutput(
             structured={
                 "_subtype": "error_max_turns",
+                "_is_error": True,  # real CLI always sets this for max_turns
                 "_cost_usd": 0.5,
             },
             raw="{}",

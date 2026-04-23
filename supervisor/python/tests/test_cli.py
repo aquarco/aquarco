@@ -55,9 +55,15 @@ def test_parse_output_valid_json() -> None:
 
 
 def test_parse_output_no_result_key() -> None:
+    """When the result event has no 'result' and no 'structured_output',
+    the parser marks the output as _no_structured_output and populates
+    prefixed metadata keys. Non-metadata fields that the parser does not
+    recognise are ignored — downstream consumers always read the prefixed
+    keys (_subtype, _is_error, _cost_usd, ...). See issue #165.
+    """
     raw = json.dumps({"other_field": "value"})
     result = _parse_output(raw, "task-1", 0)
-    assert result == {"other_field": "value"}
+    assert result["_no_structured_output"] is True
 
 
 def test_parse_output_plain_text_result() -> None:
@@ -120,26 +126,34 @@ def test_extract_from_result_structured_output_invalid_json_string() -> None:
 
 
 def test_extract_from_result_no_structured_no_result() -> None:
-    """When there's no result and no structured_output, return the message as-is."""
+    """When there's no result and no structured_output, the parser still
+    normalises execution metadata into prefixed keys (``_duration_ms``,
+    etc.) and marks the output as ``_no_structured_output``. See
+    issue #165 — the previous early-return path bypassed metadata
+    normalisation for ``error_max_turns`` results.
+    """
     msg = {"type": "result", "duration_ms": 100}
     result = _extract_from_result_message(msg)
-    assert result == msg
+    assert result["_no_structured_output"] is True
+    assert result["_duration_ms"] == 100
 
 
 def test_extract_from_result_empty_result_no_structured() -> None:
-    """When result is empty and no structured_output, return the message dict."""
+    """When result is empty and no structured_output, still normalise
+    metadata into prefixed keys. Empty-string result is the exact shape
+    the Claude CLI emits for ``error_max_turns``. See issue #165."""
     msg = {"result": "", "type": "result"}
     result = _extract_from_result_message(msg)
-    # Empty result with no structured_output returns the raw msg dict
-    assert result == msg
+    assert result["_no_structured_output"] is True
 
 
 def test_extract_from_result_empty_result_with_falsy_structured() -> None:
-    """When result is empty and structured_output is None, return raw msg."""
+    """When result is empty and structured_output is None, still mark
+    _no_structured_output=True and populate prefixed metadata keys.
+    See issue #165."""
     msg = {"result": "", "structured_output": None}
     result = _extract_from_result_message(msg)
-    # None structured_output is falsy, empty result is falsy → returns dict(msg)
-    assert result == msg
+    assert result["_no_structured_output"] is True
 
 
 def test_extract_from_result_no_output_but_result_key_present() -> None:

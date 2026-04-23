@@ -206,7 +206,16 @@ class AgentInvoker:
         output["_iterations"] = iteration
 
         # Detect rate-limit delivered as is_error=True inside a "success" result.
-        if output.get("_is_error"):
+        #
+        # Carve out ``error_max_turns``: the Claude CLI sets ``is_error=true``
+        # alongside ``subtype=error_max_turns`` on every max-turns termination.
+        # That shape is handled by the continuation loop above (or by the cost
+        # guard that breaks out of it) and must not be misinterpreted as a
+        # rate-limit / auth error. See issue #165 (fix 4).
+        if (
+            output.get("_is_error")
+            and output.get("_subtype") != "error_max_turns"
+        ):
             resets_at: str | None = None
             rate_event_line: str | None = None
             for _line in (claude_output.raw or "").splitlines():

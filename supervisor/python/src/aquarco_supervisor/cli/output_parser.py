@@ -208,10 +208,14 @@ def _extract_from_result_message(msg: dict[str, Any]) -> dict[str, Any]:
             else:
                 output["_no_structured_output"] = True
                 output["_result_text"] = result_text[:2000]
-        elif not msg.get("result") and not structured:
-            # No result and no structured_output
-            return dict(msg)
         else:
+            # No parseable structured data (empty/missing result, no
+            # structured_output). Fall through so step 3 populates the
+            # prefixed metadata keys (_subtype, _is_error, _cost_usd,
+            # _session_id, etc.) — these are the authoritative keys that
+            # every downstream consumer reads. This path is hit for
+            # ``error_max_turns`` results where the CLI emits
+            # ``result=""`` with no structured_output block.
             output["_no_structured_output"] = True
 
     # 3. Add execution metadata (prefixed with _ to avoid collisions)

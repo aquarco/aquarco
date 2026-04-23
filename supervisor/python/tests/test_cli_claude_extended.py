@@ -79,17 +79,23 @@ def test_extract_from_result_message_structured_invalid_string() -> None:
 
 
 def test_extract_from_result_message_no_structured_no_result() -> None:
-    """When no structured_output and no result, returns the dict as-is."""
+    """When no structured_output and no result, the parser marks the
+    output as ``_no_structured_output`` and normalises any recognised
+    metadata fields into prefixed keys. Unrecognised fields are ignored —
+    downstream consumers read the prefixed contract. See issue #165."""
     msg = {"type": "result", "custom": "data"}
     output = _extract_from_result_message(msg)
-    assert output == {"type": "result", "custom": "data"}
+    assert output["_no_structured_output"] is True
 
 
 def test_extract_from_result_message_empty_result_no_structured() -> None:
-    """Empty result string with no structured_output returns dict as-is."""
+    """Empty result string with no structured_output is the exact shape
+    the Claude CLI emits for ``error_max_turns``. The parser marks
+    ``_no_structured_output=True`` and populates prefixed metadata
+    keys in step 3. See issue #165."""
     msg = {"result": ""}
     output = _extract_from_result_message(msg)
-    assert output == {"result": ""}
+    assert output["_no_structured_output"] is True
 
 
 def test_extract_from_result_message_no_structured_plain_text_result() -> None:
