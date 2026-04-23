@@ -31,6 +31,7 @@ class StageStatus(str, enum.Enum):
     FAILED = "failed"
     SKIPPED = "skipped"
     RATE_LIMITED = "rate_limited"
+    MAX_TURNS = "max_turns"
 
 
 class CloneStatus(str, enum.Enum):

@@ -151,10 +151,14 @@ class TestExtractFromResultMessage:
         assert result.get("_no_structured_output") is True
 
     def test_no_result_no_structured(self):
+        """Event with no ``result`` and no ``structured_output`` must
+        still produce the prefixed metadata contract. This is the
+        shape of every ``error_max_turns`` result on the wire. See
+        issue #165."""
         msg = {"type": "result", "subtype": "error_max_turns"}
         result = _extract_from_result_message(msg)
-        # Should return the whole message as dict
-        assert result["type"] == "result"
+        assert result["_no_structured_output"] is True
+        assert result["_subtype"] == "error_max_turns"
 
 
 # -----------------------------------------------------------------------

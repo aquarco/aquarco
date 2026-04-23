@@ -114,10 +114,14 @@ def test_parse_output_invalid_json() -> None:
 
 
 def test_parse_output_valid_json_no_result_key() -> None:
-    """When JSON has no 'result' key, the parsed dict is returned as-is."""
+    """When JSON has no 'result' key, the parser marks it as
+    ``_no_structured_output=True`` (and normalises any recognised
+    metadata fields into prefixed keys). Unknown fields are ignored —
+    downstream consumers read the prefixed contract. See issue #165.
+    """
     raw = json.dumps({"status": "ok", "data": 123})
     result = _parse_output(raw, "task-001", 0)
-    assert result == {"status": "ok", "data": 123}
+    assert result["_no_structured_output"] is True
 
 
 def test_parse_output_result_with_embedded_json() -> None:
@@ -145,10 +149,13 @@ def test_parse_output_result_plain_text() -> None:
 
 
 def test_parse_output_result_empty_string() -> None:
-    """When result is an empty string, the outer parsed dict is returned."""
+    """When result is an empty string (the exact shape the Claude CLI
+    emits for ``error_max_turns``), the parser still marks the output
+    as ``_no_structured_output`` and populates prefixed metadata keys.
+    See issue #165."""
     raw = json.dumps({"result": "", "other": "data"})
     result = _parse_output(raw, "task-001", 0)
-    assert result == {"result": "", "other": "data"}
+    assert result["_no_structured_output"] is True
 
 
 # --- _parse_output with list format (Claude CLI --output-format json) ---
@@ -631,9 +638,15 @@ def test_extract_result_text_plain() -> None:
 
 
 def test_extract_no_result_no_structured() -> None:
+    """When a result event carries no ``result`` and no ``structured_output``,
+    the parser normalises metadata into prefixed keys (e.g. ``_subtype``).
+    This is the contract issue #165 locks in — every ``error_max_turns``
+    event ships an empty ``result`` string and no ``structured_output``.
+    """
     msg = {"type": "result", "subtype": "error_max_turns"}
     result = _extract_from_result_message(msg)
-    assert result == msg
+    assert result["_no_structured_output"] is True
+    assert result["_subtype"] == "error_max_turns"
 
 
 def test_extract_metadata_fields() -> None:
