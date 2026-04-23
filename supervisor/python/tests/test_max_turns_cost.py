@@ -126,7 +126,13 @@ class TestExecutorAutoResume:
 
     @pytest.mark.asyncio
     async def test_cost_guard_stops_resume(self, sample_pipelines: Any) -> None:
-        """Resume stops when cumulative cost exceeds maxCost."""
+        """Resume stops when cumulative cost exceeds maxCost.
+
+        Regression guard for issue #165: real Claude CLI output for
+        ``error_max_turns`` always carries ``is_error=True``. Including it
+        here ensures the _is_error guard in ``execute_agent`` carves out
+        max_turns and does not raise ``AgentExecutionError``.
+        """
         mock_db = AsyncMock(spec=Database)
         mock_tq = AsyncMock(spec=TaskQueue)
         registry = _make_mock_registry(max_cost=2.0)
@@ -135,6 +141,7 @@ class TestExecutorAutoResume:
         first_output = ClaudeOutput(
             structured={
                 "_subtype": "error_max_turns",
+                "_is_error": True,  # real CLI always sets this for max_turns
                 "_session_id": "sess-1",
                 "_cost_usd": 1.5,
             },
@@ -144,6 +151,7 @@ class TestExecutorAutoResume:
         second_output = ClaudeOutput(
             structured={
                 "_subtype": "error_max_turns",
+                "_is_error": True,
                 "_session_id": "sess-2",
                 "_cost_usd": 1.0,
             },
@@ -199,7 +207,11 @@ class TestExecutorAutoResume:
 
     @pytest.mark.asyncio
     async def test_no_session_id_stops_resume(self, sample_pipelines: Any) -> None:
-        """When max_turns is hit but no session_id, resume loop breaks."""
+        """When max_turns is hit but no session_id, resume loop breaks.
+
+        Regression guard for issue #165: includes ``_is_error=True`` to
+        match real Claude CLI output.
+        """
         mock_db = AsyncMock(spec=Database)
         mock_tq = AsyncMock(spec=TaskQueue)
         registry = _make_mock_registry()
@@ -207,6 +219,7 @@ class TestExecutorAutoResume:
         output_no_session = ClaudeOutput(
             structured={
                 "_subtype": "error_max_turns",
+                "_is_error": True,  # real CLI always sets this for max_turns
                 "_cost_usd": 0.5,
                 # No _session_id!
             },
